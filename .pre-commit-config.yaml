@@ -1,0 +1,49 @@
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.28.0
+    hooks:
+      - id: gitleaks
+        args: ['--verbose', '--redact']
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-added-large-files
+      - id: trailing-whitespace
+        exclude: "testdata"
+      - id: end-of-file-fixer
+        exclude_types: ["proto"]
+        exclude: "testdata"
+      - id: mixed-line-ending
+      - id: no-commit-to-branch
+
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-mod-tidy
+        files: go.mod
+      - id: go-fmt
+        args: [-w, -s]
+
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v2.4.0
+    hooks:
+      - id: golangci-lint
+        require_serial: true
+        entry: golangci-lint run --fix
+
+  - repo: local
+    hooks:
+      - id: run-buf
+        name: run-buf
+        language: script
+        entry: .pre-commit/run_buf.sh
+        types: [file, proto]
+        pass_filenames: false
+
+      - id: run-go-tests
+        name: run-go-tests
+        language: script
+        require_serial: true
+        entry: .pre-commit/run_go_tests.sh
+        types: [file, go]

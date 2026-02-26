@@ -1,0 +1,62 @@
+syntax = "proto3";
+package story.dkg.v0;
+
+option go_package = "github.com/piplabs/story-kernel/types/pb/v0";
+
+message EncryptedDeal {
+  bytes dh_key = 1 [json_name = "dh_key"];
+  bytes signature = 2 [json_name = "signature"];
+  bytes nonce = 3 [json_name = "nonce"];
+  bytes cipher = 4 [json_name = "cipher"];
+}
+
+message Deal {
+  uint32 index = 1 [json_name = "index"];
+  uint32 recipient_index = 2 [json_name = "recipient_index"];
+  EncryptedDeal deal = 3 [json_name = "deal"];
+  bytes signature = 4 [json_name = "signature"];
+}
+
+message Response {
+  uint32 index = 1 [json_name = "index"];
+  VSSResponse vss_response = 2 [json_name = "vss_response"];
+}
+
+message VSSResponse {
+  bytes session_id = 1 [json_name = "session_id"];
+  uint32 index = 2 [json_name = "index"];
+  bool status = 3 [json_name = "status"];
+  bytes signature = 4 [json_name = "signature"];
+}
+
+message Justification {
+  uint32 index = 1 [json_name = "index"];
+  VSSJustification vss_justification = 2 [json_name = "vss_justification"];
+}
+
+message VSSJustification {
+  bytes session_id = 1 [json_name = "session_id"];
+  uint32 index = 2 [json_name = "index"];
+  PlainDeal plain_deal = 3 [json_name = "plain_deal"];
+  bytes signature = 4 [json_name = "signature"];
+}
+
+message PlainDeal {
+  bytes session_id = 1 [json_name = "session_id"];
+  SecShare sec_share = 2 [json_name = "sec_share"];
+  uint32 threshold = 3 [json_name = "threshold"];
+  repeated Point commitments = 4 [json_name = "commitments"];
+}
+
+message SecShare {
+  uint32 i = 1 [json_name = "i"];
+  Scalar v = 2 [json_name = "v"];
+}
+
+message Scalar {
+  bytes data = 1 [json_name = "data"];
+}
+
+message Point {
+  bytes data = 1 [json_name = "data"];
+}

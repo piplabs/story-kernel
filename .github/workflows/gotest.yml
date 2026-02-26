@@ -1,0 +1,48 @@
+name: go tests
+
+on:
+  push:
+    branches:
+      - main
+  workflow_call:
+
+jobs:
+  unit_tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Cache OpenSSL static build
+        id: cache-openssl
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib64
+          key: openssl-3.0.13-static-${{ runner.os }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libssl-dev
+
+      - name: Build static OpenSSL (if not cached)
+        if: steps.cache-openssl.outputs.cache-hit != 'true'
+        run: |
+          cd /tmp
+          wget -q https://www.openssl.org/source/openssl-3.0.13.tar.gz
+          tar xzf openssl-3.0.13.tar.gz
+          cd openssl-3.0.13
+          ./config --prefix=/usr/local --openssldir=/usr/local/openssl no-shared
+          make -j$(nproc)
+          sudo make install_sw
+
+      - name: Verify OpenSSL installation
+        run: ls -la /usr/local/lib64/libcrypto.a
+
+      - name: Run tests (includes cb-mpc setup)
+        run: make test

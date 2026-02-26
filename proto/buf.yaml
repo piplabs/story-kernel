@@ -1,0 +1,13 @@
+version: v1
+name: buf.build/piplabs/story-kernel
+deps:
+#  - buf.build/googleapis/googleapis
+breaking:
+  use:
+    - FILE
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_DIRECTORY_MATCH
+    - PACKAGE_VERSION_SUFFIX

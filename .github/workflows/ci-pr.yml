@@ -1,0 +1,20 @@
+name: ci pr
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pre-commit:
+    uses: ./.github/workflows/pre-commit.yml
+  go-tests:
+    uses: ./.github/workflows/gotest.yml
+  go-lint:
+    uses: ./.github/workflows/golangci-lint.yml
+  buf:
+    uses: ./.github/workflows/buf.yml

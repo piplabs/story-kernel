@@ -1,0 +1,69 @@
+# Gramine manifest for story-kernel
+
+[loader]
+log_level = "{{ log_level }}"
+insecure__use_cmdline_argv = true
+
+[loader.entrypoint]
+uri = "file:{{ gramine.libos }}"
+
+[loader.env]
+LD_LIBRARY_PATH = "/lib:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu"
+HOME = "/home/ubuntu"
+PATH = "/usr/bin:/bin"
+
+[libos]
+entrypoint = "/{{ bin_name }}"
+
+[sys]
+insecure__allow_eventfd = true
+stack.size = "2M"
+
+[[fs.mounts]]
+path = "/lib"
+uri = "file:{{ gramine.runtimedir() }}"
+
+[[fs.mounts]]
+path = "/lib/x86_64-linux-gnu"
+uri = "file:/lib/x86_64-linux-gnu"
+
+[[fs.mounts]]
+path = "/usr/lib/x86_64-linux-gnu"
+uri = "file:/usr/lib/x86_64-linux-gnu"
+
+[[fs.mounts]]
+path = "/etc"
+uri = "file:/etc"
+
+[[fs.mounts]]
+path = "/{{ bin_name }}"
+uri = "file:./build/{{ bin_name }}"
+
+[[fs.mounts]]
+path = "/home/ubuntu"
+uri = "file:/home/ubuntu"
+
+[[fs.mounts]]
+path = "/tmp"
+type = "tmpfs"
+
+[sgx]
+debug = true
+enclave_size = "1G"
+max_threads = 32
+remote_attestation = "dcap"
+
+trusted_files = [
+    "file:{{ gramine.libos }}",
+    "file:{{ gramine.runtimedir() }}/",
+    "file:./build/{{ bin_name }}",
+]
+
+allowed_files = [
+    "file:/etc/hosts",
+    "file:/etc/resolv.conf",
+    "file:/etc/ssl/",
+    "file:/home/ubuntu/",
+    "file:/lib/x86_64-linux-gnu/",
+    "file:/usr/lib/x86_64-linux-gnu/",
+]

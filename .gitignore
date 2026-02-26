@@ -1,0 +1,31 @@
+# IDE
+.idea/
+
+# Build
+build/
+
+# cb-mpc C++ library (auto-downloaded)
+.cbmpc/
+
+# Keys and secrets
+*.pem
+*.key
+.env
+.env.*
+
+# OS
+.DS_Store
+
+# Go
+*.test
+vendor/
+coverage.*
+*.coverprofile
+
+# Logs
+*.log
+
+# Gramine SGX
+*.manifest
+*.manifest.sgx
+*.sig

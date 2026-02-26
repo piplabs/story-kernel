@@ -1,0 +1,34 @@
+name: go lint
+
+on:
+  workflow_call:
+
+jobs:
+  golangci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libssl-dev
+
+      - name: Setup cb-mpc library
+        run: make setup-cbmpc
+
+      - name: Run golangci-lint with CGO
+        env:
+          CGO_ENABLED: "1"
+          CGO_CFLAGS: "-I${{ github.workspace }}/.cbmpc/src"
+          CGO_LDFLAGS: "-L${{ github.workspace }}/.cbmpc/lib/Release -Wl,--allow-multiple-definition"
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.4.0
+          args: --build-tags=build-with-cpp --timeout=10m

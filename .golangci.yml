@@ -1,0 +1,70 @@
+version: "2"
+run:
+  go: "1.24"
+linters:
+  default: none
+  enable:
+    - errcheck
+    - errname
+    - errorlint
+    - forcetypeassert
+    - gosec
+  settings:
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+      exclude-functions:
+        - (github.com/gofrs/flock.Flock).Unlock
+    govet:
+      disable:
+        - shadow
+        - fieldalignment
+      enable-all: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+          - forcetypeassert
+          - gosec
+        path: (.*)(_test|tutil|scripts)(.*)
+      - path: (.+)\.go$
+        text: 'G115:'
+      - path: (.+)\.go$
+        text: should have comment
+      - path: (.+)\.go$
+        text: Comment should end in a period
+      - path: (.+)\.go$
+        text: File is not properly formatted
+      - path: (.+)\.go$
+        text: return with no blank line before
+      - path: (.+)\.go$
+        text: fmt.Sprintf can be replaced
+      - path: (.+)\.go$
+        text: fmt.Errorf can be replaced
+      - path: (.+)\.go$
+        text: error returned from external package is unwrapped
+      - path: (.+)\.go$
+        text: error returned from interface method should be wrapped
+      - path: (.+)\.go$
+        text: don't use `init` function
+    paths:
+      - .*\.pb\.go$
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
