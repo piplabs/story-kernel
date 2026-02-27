@@ -126,7 +126,7 @@ message PartialDecryptTDH2Request {
   uint32 round = 2 [json_name = "round"];
   bytes ciphertext = 3 [json_name = "ciphertext"];
   bytes label = 4 [json_name = "label"];
-  bytes dkg_pub_key = 5 [json_name = "dkg_pub_key"];
+  bytes global_pub_key = 5 [json_name = "global_pub_key"];
   string sealed_share_id = 6 [json_name = "sealed_share_id"];
   bytes requester_pub_key = 7 [json_name = "requester_pub_key"]; // secp256k1 uncompressed
 }
