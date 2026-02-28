@@ -19,12 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	TEEService_GenerateAndSealKey_FullMethodName = "/story.dkg.v0.TEEService/GenerateAndSealKey"
-	TEEService_GenerateDeals_FullMethodName      = "/story.dkg.v0.TEEService/GenerateDeals"
-	TEEService_ProcessDeals_FullMethodName       = "/story.dkg.v0.TEEService/ProcessDeals"
-	TEEService_ProcessResponses_FullMethodName   = "/story.dkg.v0.TEEService/ProcessResponses"
-	TEEService_FinalizeDKG_FullMethodName        = "/story.dkg.v0.TEEService/FinalizeDKG"
-	TEEService_PartialDecryptTDH2_FullMethodName = "/story.dkg.v0.TEEService/PartialDecryptTDH2"
+	TEEService_GenerateAndSealKey_FullMethodName   = "/story.dkg.v0.TEEService/GenerateAndSealKey"
+	TEEService_GenerateDeals_FullMethodName        = "/story.dkg.v0.TEEService/GenerateDeals"
+	TEEService_ProcessDeals_FullMethodName         = "/story.dkg.v0.TEEService/ProcessDeals"
+	TEEService_ProcessResponses_FullMethodName     = "/story.dkg.v0.TEEService/ProcessResponses"
+	TEEService_ProcessJustification_FullMethodName = "/story.dkg.v0.TEEService/ProcessJustification"
+	TEEService_FinalizeDKG_FullMethodName          = "/story.dkg.v0.TEEService/FinalizeDKG"
+	TEEService_PartialDecryptTDH2_FullMethodName   = "/story.dkg.v0.TEEService/PartialDecryptTDH2"
 )
 
 // TEEServiceClient is the client API for TEEService service.
@@ -35,6 +36,7 @@ type TEEServiceClient interface {
 	GenerateDeals(ctx context.Context, in *GenerateDealsRequest, opts ...grpc.CallOption) (*GenerateDealsResponse, error)
 	ProcessDeals(ctx context.Context, in *ProcessDealsRequest, opts ...grpc.CallOption) (*ProcessDealsResponse, error)
 	ProcessResponses(ctx context.Context, in *ProcessResponsesRequest, opts ...grpc.CallOption) (*ProcessResponsesResponse, error)
+	ProcessJustification(ctx context.Context, in *ProcessJustificationRequest, opts ...grpc.CallOption) (*ProcessJustificationResponse, error)
 	FinalizeDKG(ctx context.Context, in *FinalizeDKGRequest, opts ...grpc.CallOption) (*FinalizeDKGResponse, error)
 	PartialDecryptTDH2(ctx context.Context, in *PartialDecryptTDH2Request, opts ...grpc.CallOption) (*PartialDecryptTDH2Response, error)
 }
@@ -87,6 +89,16 @@ func (c *tEEServiceClient) ProcessResponses(ctx context.Context, in *ProcessResp
 	return out, nil
 }
 
+func (c *tEEServiceClient) ProcessJustification(ctx context.Context, in *ProcessJustificationRequest, opts ...grpc.CallOption) (*ProcessJustificationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProcessJustificationResponse)
+	err := c.cc.Invoke(ctx, TEEService_ProcessJustification_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *tEEServiceClient) FinalizeDKG(ctx context.Context, in *FinalizeDKGRequest, opts ...grpc.CallOption) (*FinalizeDKGResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(FinalizeDKGResponse)
@@ -115,6 +127,7 @@ type TEEServiceServer interface {
 	GenerateDeals(context.Context, *GenerateDealsRequest) (*GenerateDealsResponse, error)
 	ProcessDeals(context.Context, *ProcessDealsRequest) (*ProcessDealsResponse, error)
 	ProcessResponses(context.Context, *ProcessResponsesRequest) (*ProcessResponsesResponse, error)
+	ProcessJustification(context.Context, *ProcessJustificationRequest) (*ProcessJustificationResponse, error)
 	FinalizeDKG(context.Context, *FinalizeDKGRequest) (*FinalizeDKGResponse, error)
 	PartialDecryptTDH2(context.Context, *PartialDecryptTDH2Request) (*PartialDecryptTDH2Response, error)
 	mustEmbedUnimplementedTEEServiceServer()
@@ -138,6 +151,9 @@ func (UnimplementedTEEServiceServer) ProcessDeals(context.Context, *ProcessDeals
 }
 func (UnimplementedTEEServiceServer) ProcessResponses(context.Context, *ProcessResponsesRequest) (*ProcessResponsesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ProcessResponses not implemented")
+}
+func (UnimplementedTEEServiceServer) ProcessJustification(context.Context, *ProcessJustificationRequest) (*ProcessJustificationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ProcessJustification not implemented")
 }
 func (UnimplementedTEEServiceServer) FinalizeDKG(context.Context, *FinalizeDKGRequest) (*FinalizeDKGResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method FinalizeDKG not implemented")
@@ -238,6 +254,24 @@ func _TEEService_ProcessResponses_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TEEService_ProcessJustification_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProcessJustificationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TEEServiceServer).ProcessJustification(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TEEService_ProcessJustification_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TEEServiceServer).ProcessJustification(ctx, req.(*ProcessJustificationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TEEService_FinalizeDKG_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(FinalizeDKGRequest)
 	if err := dec(in); err != nil {
@@ -296,6 +330,10 @@ var TEEService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ProcessResponses",
 			Handler:    _TEEService_ProcessResponses_Handler,
+		},
+		{
+			MethodName: "ProcessJustification",
+			Handler:    _TEEService_ProcessJustification_Handler,
 		},
 		{
 			MethodName: "FinalizeDKG",
