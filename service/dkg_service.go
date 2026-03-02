@@ -607,9 +607,17 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 // PartialDecryptTDH2 performs TDH2 partial decryption using the sealed Kyber private share.
 // TODO: TEE should verify if the request transaction was indeed submitted to the canonical chain and the unique ID
 // and round match to prevent any leakage of data by off-chain collusion.
-func (s *DKGServer) PartialDecryptTDH2(_ context.Context, req *pb.PartialDecryptTDH2Request) (*pb.PartialDecryptTDH2Response, error) {
+func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecryptTDH2Request) (*pb.PartialDecryptTDH2Response, error) {
 	if len(req.GetCodeCommitment()) == 0 || req.GetRound() == 0 || len(req.GetCiphertext()) == 0 || len(req.GetGlobalPubKey()) == 0 || len(req.GetRequesterPubKey()) == 0 {
 		return nil, status.Errorf(codes.InvalidArgument, "missing required fields")
+	}
+
+	if err := s.verifyRoundMatchesLatestNetwork(ctx, req.GetRound()); err != nil {
+		log.WithFields(log.Fields{
+			"round": req.GetRound(),
+		}).Errorf("round does not match latest network: %v", err)
+
+		return nil, status.Errorf(codes.FailedPrecondition, "round does not match latest active network")
 	}
 
 	if err := enclave.ValidateCodeCommitment(req.GetCodeCommitment()); err != nil {
@@ -802,4 +810,19 @@ func encryptPartialToRequester(requesterPubKey []byte, partial []byte) ([]byte, 
 	ephPub := ecrypto.FromECDSAPub(&ephemeral.PublicKey)
 
 	return encrypted, ephPub, nil
+}
+
+// verifyRoundMatchesLatestNetwork fetches the latest active DKG network and verifies
+// that the given round matches the network's round.
+func (s *DKGServer) verifyRoundMatchesLatestNetwork(ctx context.Context, round uint32) error {
+	latest, err := s.QueryClient.GetLatestActiveDKGNetwork(ctx)
+	if err != nil {
+		return fmt.Errorf("get latest active DKG network: %w", err)
+	}
+
+	if latest.GetRound() != round {
+		return fmt.Errorf("round mismatch: request round %d != latest network round %d", round, latest.GetRound())
+	}
+
+	return nil
 }
