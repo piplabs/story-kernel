@@ -608,7 +608,7 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 // TODO: TEE should verify if the request transaction was indeed submitted to the canonical chain and the unique ID
 // and round match to prevent any leakage of data by off-chain collusion.
 func (s *DKGServer) PartialDecryptTDH2(_ context.Context, req *pb.PartialDecryptTDH2Request) (*pb.PartialDecryptTDH2Response, error) {
-	if len(req.GetCodeCommitment()) == 0 || req.GetRound() == 0 || len(req.GetCiphertext()) == 0 || len(req.GetDkgPubKey()) == 0 || len(req.GetRequesterPubKey()) == 0 {
+	if len(req.GetCodeCommitment()) == 0 || req.GetRound() == 0 || len(req.GetCiphertext()) == 0 || len(req.GetGlobalPubKey()) == 0 || len(req.GetRequesterPubKey()) == 0 {
 		return nil, status.Errorf(codes.InvalidArgument, "missing required fields")
 	}
 
@@ -653,7 +653,7 @@ func (s *DKGServer) PartialDecryptTDH2(_ context.Context, req *pb.PartialDecrypt
 		return nil, status.Errorf(codes.Internal, "failed to marshal private share")
 	}
 
-	pubKey, err := buildTDH2PublicKey(req.GetDkgPubKey())
+	pubKey, err := buildTDH2PublicKey(req.GetGlobalPubKey())
 	if err != nil {
 		log.Errorf("failed to create TDH2 public key: %v", err)
 
@@ -685,12 +685,45 @@ func (s *DKGServer) PartialDecryptTDH2(_ context.Context, req *pb.PartialDecrypt
 		return nil, status.Errorf(codes.Internal, "failed to encrypt partial")
 	}
 
+	signature, err := s.signPartialDecryptResponse(req.GetCodeCommitment(), req.GetRound(), encryptedPartial, ephPubKey, pubShareBz)
+	if err != nil {
+		log.Errorf("failed to sign partial decrypt response: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to sign partial decrypt response")
+	}
+
 	return &pb.PartialDecryptTDH2Response{
 		EncryptedPartialDecryption: encryptedPartial,
 		EphemeralPubKey:            ephPubKey,
 		PubShare:                   pubShareBz,
-		Signature:                  nil,
+		Signature:                  signature,
 	}, nil
+}
+
+func (s *DKGServer) signPartialDecryptResponse(codeCommitment []byte, round uint32, encryptedPartial []byte, ephPubKey []byte, pubShareBz []byte) ([]byte, error) {
+	encoded := make([]byte, 0, len(codeCommitment)+4+len(encryptedPartial)+len(ephPubKey)+len(pubShareBz))
+	encoded = append(encoded, codeCommitment...)
+	encoded = append(encoded, uint32ToBytes(round)...)
+	encoded = append(encoded, encryptedPartial...)
+	encoded = append(encoded, ephPubKey...)
+	encoded = append(encoded, pubShareBz...)
+	respHash := ecrypto.Keccak256(encoded)
+
+	codeCommitmentHex := hex.EncodeToString(codeCommitment)
+	priv, err := s.DKGStore.LoadSealedSecp256k1Key(codeCommitmentHex, round)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load sealed secp256k1 key: %w", err)
+	}
+
+	signature, err := ecrypto.Sign(respHash, priv)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign response: %w", err)
+	}
+	if signature[64] < 27 {
+		signature[64] += 27
+	}
+
+	return signature, nil
 }
 
 func bytes2PrivateShare(scalar kyber.Scalar) (*mpc.TDH2PrivateShare, error) {
