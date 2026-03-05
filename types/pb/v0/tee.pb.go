@@ -131,6 +131,86 @@ func (DKGRegStatus) EnumDescriptor() ([]byte, []int) {
 	return file_tee_proto_rawDescGZIP(), []int{1}
 }
 
+type GetCodeCommitmentRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetCodeCommitmentRequest) Reset() {
+	*x = GetCodeCommitmentRequest{}
+	mi := &file_tee_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetCodeCommitmentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetCodeCommitmentRequest) ProtoMessage() {}
+
+func (x *GetCodeCommitmentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tee_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetCodeCommitmentRequest.ProtoReflect.Descriptor instead.
+func (*GetCodeCommitmentRequest) Descriptor() ([]byte, []int) {
+	return file_tee_proto_rawDescGZIP(), []int{0}
+}
+
+type GetCodeCommitmentResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	CodeCommitment []byte                 `protobuf:"bytes,1,opt,name=code_commitment,json=codeCommitment,proto3" json:"code_commitment,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *GetCodeCommitmentResponse) Reset() {
+	*x = GetCodeCommitmentResponse{}
+	mi := &file_tee_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetCodeCommitmentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetCodeCommitmentResponse) ProtoMessage() {}
+
+func (x *GetCodeCommitmentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tee_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetCodeCommitmentResponse.ProtoReflect.Descriptor instead.
+func (*GetCodeCommitmentResponse) Descriptor() ([]byte, []int) {
+	return file_tee_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *GetCodeCommitmentResponse) GetCodeCommitment() []byte {
+	if x != nil {
+		return x.CodeCommitment
+	}
+	return nil
+}
+
 type GenerateAndSealKeyRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	CodeCommitment []byte                 `protobuf:"bytes,1,opt,name=code_commitment,proto3" json:"code_commitment,omitempty"`
@@ -142,7 +222,7 @@ type GenerateAndSealKeyRequest struct {
 
 func (x *GenerateAndSealKeyRequest) Reset() {
 	*x = GenerateAndSealKeyRequest{}
-	mi := &file_tee_proto_msgTypes[0]
+	mi := &file_tee_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -154,7 +234,7 @@ func (x *GenerateAndSealKeyRequest) String() string {
 func (*GenerateAndSealKeyRequest) ProtoMessage() {}
 
 func (x *GenerateAndSealKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[0]
+	mi := &file_tee_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -167,7 +247,7 @@ func (x *GenerateAndSealKeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateAndSealKeyRequest.ProtoReflect.Descriptor instead.
 func (*GenerateAndSealKeyRequest) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{0}
+	return file_tee_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GenerateAndSealKeyRequest) GetCodeCommitment() []byte {
@@ -199,14 +279,14 @@ type GenerateAndSealKeyResponse struct {
 	StartBlockHash   []byte                 `protobuf:"bytes,4,opt,name=start_block_hash,proto3" json:"start_block_hash,omitempty"`
 	DkgPubKey        []byte                 `protobuf:"bytes,5,opt,name=dkg_pub_key,proto3" json:"dkg_pub_key,omitempty"`
 	CommPubKey       []byte                 `protobuf:"bytes,6,opt,name=comm_pub_key,proto3" json:"comm_pub_key,omitempty"`
-	RawQuote         []byte                 `protobuf:"bytes,7,opt,name=raw_quote,proto3" json:"raw_quote,omitempty"`
+	EnclaveReport    []byte                 `protobuf:"bytes,7,opt,name=enclave_report,proto3" json:"enclave_report,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
 
 func (x *GenerateAndSealKeyResponse) Reset() {
 	*x = GenerateAndSealKeyResponse{}
-	mi := &file_tee_proto_msgTypes[1]
+	mi := &file_tee_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -218,7 +298,7 @@ func (x *GenerateAndSealKeyResponse) String() string {
 func (*GenerateAndSealKeyResponse) ProtoMessage() {}
 
 func (x *GenerateAndSealKeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[1]
+	mi := &file_tee_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -231,7 +311,7 @@ func (x *GenerateAndSealKeyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateAndSealKeyResponse.ProtoReflect.Descriptor instead.
 func (*GenerateAndSealKeyResponse) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{1}
+	return file_tee_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *GenerateAndSealKeyResponse) GetCodeCommitment() []byte {
@@ -276,9 +356,9 @@ func (x *GenerateAndSealKeyResponse) GetCommPubKey() []byte {
 	return nil
 }
 
-func (x *GenerateAndSealKeyResponse) GetRawQuote() []byte {
+func (x *GenerateAndSealKeyResponse) GetEnclaveReport() []byte {
 	if x != nil {
-		return x.RawQuote
+		return x.EnclaveReport
 	}
 	return nil
 }
@@ -290,15 +370,15 @@ type DKGRegistration struct {
 	Index         uint32                 `protobuf:"varint,3,opt,name=index,proto3" json:"index,omitempty"`
 	DkgPubKey     []byte                 `protobuf:"bytes,4,opt,name=dkg_pub_key,proto3" json:"dkg_pub_key,omitempty"`
 	CommPubKey    []byte                 `protobuf:"bytes,5,opt,name=comm_pub_key,proto3" json:"comm_pub_key,omitempty"`
-	RawQuote      []byte                 `protobuf:"bytes,6,opt,name=raw_quote,proto3" json:"raw_quote,omitempty"`
-	Status        DKGRegStatus           `protobuf:"varint,7,opt,name=status,proto3,enum=story.dkg.v0.DKGRegStatus" json:"status,omitempty"`
+	EnclaveReport []byte                 `protobuf:"bytes,6,opt,name=enclave_report,proto3" json:"enclave_report,omitempty"`
+	Status        DKGRegStatus           `protobuf:"varint,7,opt,name=status,proto3,enum=story.dkg.v1.types.DKGRegStatus" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DKGRegistration) Reset() {
 	*x = DKGRegistration{}
-	mi := &file_tee_proto_msgTypes[2]
+	mi := &file_tee_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -310,7 +390,7 @@ func (x *DKGRegistration) String() string {
 func (*DKGRegistration) ProtoMessage() {}
 
 func (x *DKGRegistration) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[2]
+	mi := &file_tee_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -323,7 +403,7 @@ func (x *DKGRegistration) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DKGRegistration.ProtoReflect.Descriptor instead.
 func (*DKGRegistration) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{2}
+	return file_tee_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *DKGRegistration) GetRound() uint32 {
@@ -361,9 +441,9 @@ func (x *DKGRegistration) GetCommPubKey() []byte {
 	return nil
 }
 
-func (x *DKGRegistration) GetRawQuote() []byte {
+func (x *DKGRegistration) GetEnclaveReport() []byte {
 	if x != nil {
-		return x.RawQuote
+		return x.EnclaveReport
 	}
 	return nil
 }
@@ -384,7 +464,7 @@ type DKGNetwork struct {
 	ActiveValSet     []string               `protobuf:"bytes,5,rep,name=active_val_set,proto3" json:"active_val_set,omitempty"`
 	Total            uint32                 `protobuf:"varint,6,opt,name=total,proto3" json:"total,omitempty"`
 	Threshold        uint32                 `protobuf:"varint,7,opt,name=threshold,proto3" json:"threshold,omitempty"`
-	Stage            DKGStage               `protobuf:"varint,8,opt,name=stage,proto3,enum=story.dkg.v0.DKGStage" json:"stage,omitempty"`
+	Stage            DKGStage               `protobuf:"varint,8,opt,name=stage,proto3,enum=story.dkg.v1.types.DKGStage" json:"stage,omitempty"`
 	IsResharing      bool                   `protobuf:"varint,9,opt,name=is_resharing,proto3" json:"is_resharing,omitempty"`
 	GlobalPublicKey  []byte                 `protobuf:"bytes,10,opt,name=global_public_key,proto3" json:"global_public_key,omitempty"`
 	PublicCoeffs     [][]byte               `protobuf:"bytes,11,rep,name=public_coeffs,proto3" json:"public_coeffs,omitempty"`
@@ -394,7 +474,7 @@ type DKGNetwork struct {
 
 func (x *DKGNetwork) Reset() {
 	*x = DKGNetwork{}
-	mi := &file_tee_proto_msgTypes[3]
+	mi := &file_tee_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -406,7 +486,7 @@ func (x *DKGNetwork) String() string {
 func (*DKGNetwork) ProtoMessage() {}
 
 func (x *DKGNetwork) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[3]
+	mi := &file_tee_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -419,7 +499,7 @@ func (x *DKGNetwork) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DKGNetwork.ProtoReflect.Descriptor instead.
 func (*DKGNetwork) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{3}
+	return file_tee_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DKGNetwork) GetCodeCommitment() []byte {
@@ -510,7 +590,7 @@ type GenerateDealsRequest struct {
 
 func (x *GenerateDealsRequest) Reset() {
 	*x = GenerateDealsRequest{}
-	mi := &file_tee_proto_msgTypes[4]
+	mi := &file_tee_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -522,7 +602,7 @@ func (x *GenerateDealsRequest) String() string {
 func (*GenerateDealsRequest) ProtoMessage() {}
 
 func (x *GenerateDealsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[4]
+	mi := &file_tee_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -535,7 +615,7 @@ func (x *GenerateDealsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateDealsRequest.ProtoReflect.Descriptor instead.
 func (*GenerateDealsRequest) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{4}
+	return file_tee_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *GenerateDealsRequest) GetCodeCommitment() []byte {
@@ -570,7 +650,7 @@ type GenerateDealsResponse struct {
 
 func (x *GenerateDealsResponse) Reset() {
 	*x = GenerateDealsResponse{}
-	mi := &file_tee_proto_msgTypes[5]
+	mi := &file_tee_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -582,7 +662,7 @@ func (x *GenerateDealsResponse) String() string {
 func (*GenerateDealsResponse) ProtoMessage() {}
 
 func (x *GenerateDealsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[5]
+	mi := &file_tee_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -595,7 +675,7 @@ func (x *GenerateDealsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateDealsResponse.ProtoReflect.Descriptor instead.
 func (*GenerateDealsResponse) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{5}
+	return file_tee_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GenerateDealsResponse) GetCodeCommitment() []byte {
@@ -631,7 +711,7 @@ type ProcessDealsRequest struct {
 
 func (x *ProcessDealsRequest) Reset() {
 	*x = ProcessDealsRequest{}
-	mi := &file_tee_proto_msgTypes[6]
+	mi := &file_tee_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -643,7 +723,7 @@ func (x *ProcessDealsRequest) String() string {
 func (*ProcessDealsRequest) ProtoMessage() {}
 
 func (x *ProcessDealsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[6]
+	mi := &file_tee_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -656,7 +736,7 @@ func (x *ProcessDealsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessDealsRequest.ProtoReflect.Descriptor instead.
 func (*ProcessDealsRequest) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{6}
+	return file_tee_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ProcessDealsRequest) GetCodeCommitment() []byte {
@@ -698,7 +778,7 @@ type ProcessDealsResponse struct {
 
 func (x *ProcessDealsResponse) Reset() {
 	*x = ProcessDealsResponse{}
-	mi := &file_tee_proto_msgTypes[7]
+	mi := &file_tee_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -710,7 +790,7 @@ func (x *ProcessDealsResponse) String() string {
 func (*ProcessDealsResponse) ProtoMessage() {}
 
 func (x *ProcessDealsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[7]
+	mi := &file_tee_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -723,7 +803,7 @@ func (x *ProcessDealsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessDealsResponse.ProtoReflect.Descriptor instead.
 func (*ProcessDealsResponse) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{7}
+	return file_tee_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ProcessDealsResponse) GetCodeCommitment() []byte {
@@ -759,7 +839,7 @@ type ProcessResponsesRequest struct {
 
 func (x *ProcessResponsesRequest) Reset() {
 	*x = ProcessResponsesRequest{}
-	mi := &file_tee_proto_msgTypes[8]
+	mi := &file_tee_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -771,7 +851,7 @@ func (x *ProcessResponsesRequest) String() string {
 func (*ProcessResponsesRequest) ProtoMessage() {}
 
 func (x *ProcessResponsesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[8]
+	mi := &file_tee_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -784,7 +864,7 @@ func (x *ProcessResponsesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessResponsesRequest.ProtoReflect.Descriptor instead.
 func (*ProcessResponsesRequest) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{8}
+	return file_tee_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ProcessResponsesRequest) GetCodeCommitment() []byte {
@@ -824,7 +904,7 @@ type ProcessResponsesResponse struct {
 
 func (x *ProcessResponsesResponse) Reset() {
 	*x = ProcessResponsesResponse{}
-	mi := &file_tee_proto_msgTypes[9]
+	mi := &file_tee_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -836,7 +916,7 @@ func (x *ProcessResponsesResponse) String() string {
 func (*ProcessResponsesResponse) ProtoMessage() {}
 
 func (x *ProcessResponsesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[9]
+	mi := &file_tee_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -849,7 +929,7 @@ func (x *ProcessResponsesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessResponsesResponse.ProtoReflect.Descriptor instead.
 func (*ProcessResponsesResponse) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{9}
+	return file_tee_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ProcessResponsesResponse) GetJustifications() []*Justification {
@@ -873,7 +953,7 @@ type ProcessJustificationRequest struct {
 
 func (x *ProcessJustificationRequest) Reset() {
 	*x = ProcessJustificationRequest{}
-	mi := &file_tee_proto_msgTypes[10]
+	mi := &file_tee_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -885,7 +965,7 @@ func (x *ProcessJustificationRequest) String() string {
 func (*ProcessJustificationRequest) ProtoMessage() {}
 
 func (x *ProcessJustificationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[10]
+	mi := &file_tee_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -898,7 +978,7 @@ func (x *ProcessJustificationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessJustificationRequest.ProtoReflect.Descriptor instead.
 func (*ProcessJustificationRequest) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{10}
+	return file_tee_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ProcessJustificationRequest) GetCodeCommitment() []byte {
@@ -938,7 +1018,7 @@ type ProcessJustificationResponse struct {
 
 func (x *ProcessJustificationResponse) Reset() {
 	*x = ProcessJustificationResponse{}
-	mi := &file_tee_proto_msgTypes[11]
+	mi := &file_tee_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -950,7 +1030,7 @@ func (x *ProcessJustificationResponse) String() string {
 func (*ProcessJustificationResponse) ProtoMessage() {}
 
 func (x *ProcessJustificationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[11]
+	mi := &file_tee_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -963,7 +1043,7 @@ func (x *ProcessJustificationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessJustificationResponse.ProtoReflect.Descriptor instead.
 func (*ProcessJustificationResponse) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{11}
+	return file_tee_proto_rawDescGZIP(), []int{13}
 }
 
 type FinalizeDKGRequest struct {
@@ -977,7 +1057,7 @@ type FinalizeDKGRequest struct {
 
 func (x *FinalizeDKGRequest) Reset() {
 	*x = FinalizeDKGRequest{}
-	mi := &file_tee_proto_msgTypes[12]
+	mi := &file_tee_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -989,7 +1069,7 @@ func (x *FinalizeDKGRequest) String() string {
 func (*FinalizeDKGRequest) ProtoMessage() {}
 
 func (x *FinalizeDKGRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[12]
+	mi := &file_tee_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1002,7 +1082,7 @@ func (x *FinalizeDKGRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FinalizeDKGRequest.ProtoReflect.Descriptor instead.
 func (*FinalizeDKGRequest) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{12}
+	return file_tee_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *FinalizeDKGRequest) GetCodeCommitment() []byte {
@@ -1041,7 +1121,7 @@ type FinalizeDKGResponse struct {
 
 func (x *FinalizeDKGResponse) Reset() {
 	*x = FinalizeDKGResponse{}
-	mi := &file_tee_proto_msgTypes[13]
+	mi := &file_tee_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1053,7 +1133,7 @@ func (x *FinalizeDKGResponse) String() string {
 func (*FinalizeDKGResponse) ProtoMessage() {}
 
 func (x *FinalizeDKGResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[13]
+	mi := &file_tee_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1066,7 +1146,7 @@ func (x *FinalizeDKGResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FinalizeDKGResponse.ProtoReflect.Descriptor instead.
 func (*FinalizeDKGResponse) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{13}
+	return file_tee_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *FinalizeDKGResponse) GetCodeCommitment() []byte {
@@ -1133,7 +1213,7 @@ type PartialDecryptTDH2Request struct {
 
 func (x *PartialDecryptTDH2Request) Reset() {
 	*x = PartialDecryptTDH2Request{}
-	mi := &file_tee_proto_msgTypes[14]
+	mi := &file_tee_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1145,7 +1225,7 @@ func (x *PartialDecryptTDH2Request) String() string {
 func (*PartialDecryptTDH2Request) ProtoMessage() {}
 
 func (x *PartialDecryptTDH2Request) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[14]
+	mi := &file_tee_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1158,7 +1238,7 @@ func (x *PartialDecryptTDH2Request) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartialDecryptTDH2Request.ProtoReflect.Descriptor instead.
 func (*PartialDecryptTDH2Request) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{14}
+	return file_tee_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *PartialDecryptTDH2Request) GetCodeCommitment() []byte {
@@ -1222,7 +1302,7 @@ type PartialDecryptTDH2Response struct {
 
 func (x *PartialDecryptTDH2Response) Reset() {
 	*x = PartialDecryptTDH2Response{}
-	mi := &file_tee_proto_msgTypes[15]
+	mi := &file_tee_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1234,7 +1314,7 @@ func (x *PartialDecryptTDH2Response) String() string {
 func (*PartialDecryptTDH2Response) ProtoMessage() {}
 
 func (x *PartialDecryptTDH2Response) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[15]
+	mi := &file_tee_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1247,7 +1327,7 @@ func (x *PartialDecryptTDH2Response) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartialDecryptTDH2Response.ProtoReflect.Descriptor instead.
 func (*PartialDecryptTDH2Response) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{15}
+	return file_tee_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *PartialDecryptTDH2Response) GetEncryptedPartialDecryption() []byte {
@@ -1282,28 +1362,31 @@ var File_tee_proto protoreflect.FileDescriptor
 
 const file_tee_proto_rawDesc = "" +
 	"\n" +
-	"\ttee.proto\x12\fstory.dkg.v0\x1a\n" +
-	"deal.proto\"u\n" +
+	"\ttee.proto\x12\x12story.dkg.v1.types\x1a\n" +
+	"deal.proto\"\x1a\n" +
+	"\x18GetCodeCommitmentRequest\"D\n" +
+	"\x19GetCodeCommitmentResponse\x12'\n" +
+	"\x0fcode_commitment\x18\x01 \x01(\fR\x0ecodeCommitment\"u\n" +
 	"\x19GenerateAndSealKeyRequest\x12(\n" +
 	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
 	"\x05round\x18\x02 \x01(\rR\x05round\x12\x18\n" +
-	"\aaddress\x18\x03 \x01(\tR\aaddress\"\x9c\x02\n" +
+	"\aaddress\x18\x03 \x01(\tR\aaddress\"\xa6\x02\n" +
 	"\x1aGenerateAndSealKeyResponse\x12(\n" +
 	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
 	"\x05round\x18\x02 \x01(\rR\x05round\x12.\n" +
 	"\x12start_block_height\x18\x03 \x01(\x03R\x12start_block_height\x12*\n" +
 	"\x10start_block_hash\x18\x04 \x01(\fR\x10start_block_hash\x12 \n" +
 	"\vdkg_pub_key\x18\x05 \x01(\fR\vdkg_pub_key\x12\"\n" +
-	"\fcomm_pub_key\x18\x06 \x01(\fR\fcomm_pub_key\x12\x1c\n" +
-	"\traw_quote\x18\a \x01(\fR\traw_quote\"\xfd\x01\n" +
+	"\fcomm_pub_key\x18\x06 \x01(\fR\fcomm_pub_key\x12&\n" +
+	"\x0eenclave_report\x18\a \x01(\fR\x0eenclave_report\"\x8d\x02\n" +
 	"\x0fDKGRegistration\x12\x14\n" +
 	"\x05round\x18\x01 \x01(\rR\x05round\x12&\n" +
 	"\x0evalidator_addr\x18\x02 \x01(\tR\x0evalidator_addr\x12\x14\n" +
 	"\x05index\x18\x03 \x01(\rR\x05index\x12 \n" +
 	"\vdkg_pub_key\x18\x04 \x01(\fR\vdkg_pub_key\x12\"\n" +
-	"\fcomm_pub_key\x18\x05 \x01(\fR\fcomm_pub_key\x12\x1c\n" +
-	"\traw_quote\x18\x06 \x01(\fR\traw_quote\x122\n" +
-	"\x06status\x18\a \x01(\x0e2\x1a.story.dkg.v0.DKGRegStatusR\x06status\"\xaa\x03\n" +
+	"\fcomm_pub_key\x18\x05 \x01(\fR\fcomm_pub_key\x12&\n" +
+	"\x0eenclave_report\x18\x06 \x01(\fR\x0eenclave_report\x128\n" +
+	"\x06status\x18\a \x01(\x0e2 .story.dkg.v1.types.DKGRegStatusR\x06status\"\xb0\x03\n" +
 	"\n" +
 	"DKGNetwork\x12(\n" +
 	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
@@ -1312,8 +1395,8 @@ const file_tee_proto_rawDesc = "" +
 	"\x10start_block_hash\x18\x04 \x01(\fR\x10start_block_hash\x12&\n" +
 	"\x0eactive_val_set\x18\x05 \x03(\tR\x0eactive_val_set\x12\x14\n" +
 	"\x05total\x18\x06 \x01(\rR\x05total\x12\x1c\n" +
-	"\tthreshold\x18\a \x01(\rR\tthreshold\x12,\n" +
-	"\x05stage\x18\b \x01(\x0e2\x16.story.dkg.v0.DKGStageR\x05stage\x12\"\n" +
+	"\tthreshold\x18\a \x01(\rR\tthreshold\x122\n" +
+	"\x05stage\x18\b \x01(\x0e2\x1c.story.dkg.v1.types.DKGStageR\x05stage\x12\"\n" +
 	"\fis_resharing\x18\t \x01(\bR\fis_resharing\x12,\n" +
 	"\x11global_public_key\x18\n" +
 	" \x01(\fR\x11global_public_key\x12$\n" +
@@ -1321,31 +1404,31 @@ const file_tee_proto_rawDesc = "" +
 	"\x14GenerateDealsRequest\x12(\n" +
 	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
 	"\x05round\x18\x02 \x01(\rR\x05round\x12\"\n" +
-	"\fis_resharing\x18\x03 \x01(\bR\fis_resharing\"\x81\x01\n" +
+	"\fis_resharing\x18\x03 \x01(\bR\fis_resharing\"\x87\x01\n" +
 	"\x15GenerateDealsResponse\x12(\n" +
 	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
-	"\x05round\x18\x02 \x01(\rR\x05round\x12(\n" +
-	"\x05deals\x18\x03 \x03(\v2\x12.story.dkg.v0.DealR\x05deals\"\xa3\x01\n" +
+	"\x05round\x18\x02 \x01(\rR\x05round\x12.\n" +
+	"\x05deals\x18\x03 \x03(\v2\x18.story.dkg.v1.types.DealR\x05deals\"\xa9\x01\n" +
 	"\x13ProcessDealsRequest\x12(\n" +
 	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
-	"\x05round\x18\x02 \x01(\rR\x05round\x12(\n" +
-	"\x05deals\x18\x03 \x03(\v2\x12.story.dkg.v0.DealR\x05deals\x12\"\n" +
-	"\fis_resharing\x18\x04 \x01(\bR\fis_resharing\"\x8c\x01\n" +
+	"\x05round\x18\x02 \x01(\rR\x05round\x12.\n" +
+	"\x05deals\x18\x03 \x03(\v2\x18.story.dkg.v1.types.DealR\x05deals\x12\"\n" +
+	"\fis_resharing\x18\x04 \x01(\bR\fis_resharing\"\x92\x01\n" +
 	"\x14ProcessDealsResponse\x12(\n" +
 	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
-	"\x05round\x18\x02 \x01(\rR\x05round\x124\n" +
-	"\tresponses\x18\x03 \x03(\v2\x16.story.dkg.v0.ResponseR\tresponses\"\xb3\x01\n" +
+	"\x05round\x18\x02 \x01(\rR\x05round\x12:\n" +
+	"\tresponses\x18\x03 \x03(\v2\x1c.story.dkg.v1.types.ResponseR\tresponses\"\xb9\x01\n" +
 	"\x17ProcessResponsesRequest\x12(\n" +
 	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
-	"\x05round\x18\x02 \x01(\rR\x05round\x124\n" +
-	"\tresponses\x18\x03 \x03(\v2\x16.story.dkg.v0.ResponseR\tresponses\x12\"\n" +
-	"\fis_resharing\x18\x04 \x01(\bR\fis_resharing\"_\n" +
-	"\x18ProcessResponsesResponse\x12C\n" +
-	"\x0ejustifications\x18\x01 \x03(\v2\x1b.story.dkg.v0.JustificationR\x0ejustifications\"\xc6\x01\n" +
+	"\x05round\x18\x02 \x01(\rR\x05round\x12:\n" +
+	"\tresponses\x18\x03 \x03(\v2\x1c.story.dkg.v1.types.ResponseR\tresponses\x12\"\n" +
+	"\fis_resharing\x18\x04 \x01(\bR\fis_resharing\"e\n" +
+	"\x18ProcessResponsesResponse\x12I\n" +
+	"\x0ejustifications\x18\x01 \x03(\v2!.story.dkg.v1.types.JustificationR\x0ejustifications\"\xcc\x01\n" +
 	"\x1bProcessJustificationRequest\x12(\n" +
 	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
-	"\x05round\x18\x02 \x01(\rR\x05round\x12C\n" +
-	"\x0ejustifications\x18\x03 \x03(\v2\x1b.story.dkg.v0.JustificationR\x0ejustifications\x12\"\n" +
+	"\x05round\x18\x02 \x01(\rR\x05round\x12I\n" +
+	"\x0ejustifications\x18\x03 \x03(\v2!.story.dkg.v1.types.JustificationR\x0ejustifications\x12\"\n" +
 	"\fis_resharing\x18\x04 \x01(\bR\fis_resharing\"\x1e\n" +
 	"\x1cProcessJustificationResponse\"x\n" +
 	"\x12FinalizeDKGRequest\x12(\n" +
@@ -1386,16 +1469,16 @@ const file_tee_proto_rawDesc = "" +
 	"\x1aDKG_REG_STATUS_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17DKG_REG_STATUS_VERIFIED\x10\x01\x12\x1c\n" +
 	"\x18DKG_REG_STATUS_FINALIZED\x10\x02\x12\x1e\n" +
-	"\x1aDKG_REG_STATUS_INVALIDATED\x10\x032\xb5\x05\n" +
-	"\n" +
-	"TEEService\x12g\n" +
-	"\x12GenerateAndSealKey\x12'.story.dkg.v0.GenerateAndSealKeyRequest\x1a(.story.dkg.v0.GenerateAndSealKeyResponse\x12X\n" +
-	"\rGenerateDeals\x12\".story.dkg.v0.GenerateDealsRequest\x1a#.story.dkg.v0.GenerateDealsResponse\x12U\n" +
-	"\fProcessDeals\x12!.story.dkg.v0.ProcessDealsRequest\x1a\".story.dkg.v0.ProcessDealsResponse\x12a\n" +
-	"\x10ProcessResponses\x12%.story.dkg.v0.ProcessResponsesRequest\x1a&.story.dkg.v0.ProcessResponsesResponse\x12m\n" +
-	"\x14ProcessJustification\x12).story.dkg.v0.ProcessJustificationRequest\x1a*.story.dkg.v0.ProcessJustificationResponse\x12R\n" +
-	"\vFinalizeDKG\x12 .story.dkg.v0.FinalizeDKGRequest\x1a!.story.dkg.v0.FinalizeDKGResponse\x12g\n" +
-	"\x12PartialDecryptTDH2\x12'.story.dkg.v0.PartialDecryptTDH2Request\x1a(.story.dkg.v0.PartialDecryptTDH2ResponseB-Z+github.com/piplabs/story-kernel/types/pb/v0b\x06proto3"
+	"\x1aDKG_REG_STATUS_INVALIDATED\x10\x032\xfe\x06\n" +
+	"\rKernelService\x12p\n" +
+	"\x11GetCodeCommitment\x12,.story.dkg.v1.types.GetCodeCommitmentRequest\x1a-.story.dkg.v1.types.GetCodeCommitmentResponse\x12s\n" +
+	"\x12GenerateAndSealKey\x12-.story.dkg.v1.types.GenerateAndSealKeyRequest\x1a..story.dkg.v1.types.GenerateAndSealKeyResponse\x12d\n" +
+	"\rGenerateDeals\x12(.story.dkg.v1.types.GenerateDealsRequest\x1a).story.dkg.v1.types.GenerateDealsResponse\x12a\n" +
+	"\fProcessDeals\x12'.story.dkg.v1.types.ProcessDealsRequest\x1a(.story.dkg.v1.types.ProcessDealsResponse\x12m\n" +
+	"\x10ProcessResponses\x12+.story.dkg.v1.types.ProcessResponsesRequest\x1a,.story.dkg.v1.types.ProcessResponsesResponse\x12y\n" +
+	"\x14ProcessJustification\x12/.story.dkg.v1.types.ProcessJustificationRequest\x1a0.story.dkg.v1.types.ProcessJustificationResponse\x12^\n" +
+	"\vFinalizeDKG\x12&.story.dkg.v1.types.FinalizeDKGRequest\x1a'.story.dkg.v1.types.FinalizeDKGResponse\x12s\n" +
+	"\x12PartialDecryptTDH2\x12-.story.dkg.v1.types.PartialDecryptTDH2Request\x1a..story.dkg.v1.types.PartialDecryptTDH2ResponseB-Z+github.com/piplabs/story-kernel/types/pb/v0b\x06proto3"
 
 var (
 	file_tee_proto_rawDescOnce sync.Once
@@ -1410,55 +1493,59 @@ func file_tee_proto_rawDescGZIP() []byte {
 }
 
 var file_tee_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_tee_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_tee_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_tee_proto_goTypes = []any{
-	(DKGStage)(0),                        // 0: story.dkg.v0.DKGStage
-	(DKGRegStatus)(0),                    // 1: story.dkg.v0.DKGRegStatus
-	(*GenerateAndSealKeyRequest)(nil),    // 2: story.dkg.v0.GenerateAndSealKeyRequest
-	(*GenerateAndSealKeyResponse)(nil),   // 3: story.dkg.v0.GenerateAndSealKeyResponse
-	(*DKGRegistration)(nil),              // 4: story.dkg.v0.DKGRegistration
-	(*DKGNetwork)(nil),                   // 5: story.dkg.v0.DKGNetwork
-	(*GenerateDealsRequest)(nil),         // 6: story.dkg.v0.GenerateDealsRequest
-	(*GenerateDealsResponse)(nil),        // 7: story.dkg.v0.GenerateDealsResponse
-	(*ProcessDealsRequest)(nil),          // 8: story.dkg.v0.ProcessDealsRequest
-	(*ProcessDealsResponse)(nil),         // 9: story.dkg.v0.ProcessDealsResponse
-	(*ProcessResponsesRequest)(nil),      // 10: story.dkg.v0.ProcessResponsesRequest
-	(*ProcessResponsesResponse)(nil),     // 11: story.dkg.v0.ProcessResponsesResponse
-	(*ProcessJustificationRequest)(nil),  // 12: story.dkg.v0.ProcessJustificationRequest
-	(*ProcessJustificationResponse)(nil), // 13: story.dkg.v0.ProcessJustificationResponse
-	(*FinalizeDKGRequest)(nil),           // 14: story.dkg.v0.FinalizeDKGRequest
-	(*FinalizeDKGResponse)(nil),          // 15: story.dkg.v0.FinalizeDKGResponse
-	(*PartialDecryptTDH2Request)(nil),    // 16: story.dkg.v0.PartialDecryptTDH2Request
-	(*PartialDecryptTDH2Response)(nil),   // 17: story.dkg.v0.PartialDecryptTDH2Response
-	(*Deal)(nil),                         // 18: story.dkg.v0.Deal
-	(*Response)(nil),                     // 19: story.dkg.v0.Response
-	(*Justification)(nil),                // 20: story.dkg.v0.Justification
+	(DKGStage)(0),                        // 0: story.dkg.v1.types.DKGStage
+	(DKGRegStatus)(0),                    // 1: story.dkg.v1.types.DKGRegStatus
+	(*GetCodeCommitmentRequest)(nil),     // 2: story.dkg.v1.types.GetCodeCommitmentRequest
+	(*GetCodeCommitmentResponse)(nil),    // 3: story.dkg.v1.types.GetCodeCommitmentResponse
+	(*GenerateAndSealKeyRequest)(nil),    // 4: story.dkg.v1.types.GenerateAndSealKeyRequest
+	(*GenerateAndSealKeyResponse)(nil),   // 5: story.dkg.v1.types.GenerateAndSealKeyResponse
+	(*DKGRegistration)(nil),              // 6: story.dkg.v1.types.DKGRegistration
+	(*DKGNetwork)(nil),                   // 7: story.dkg.v1.types.DKGNetwork
+	(*GenerateDealsRequest)(nil),         // 8: story.dkg.v1.types.GenerateDealsRequest
+	(*GenerateDealsResponse)(nil),        // 9: story.dkg.v1.types.GenerateDealsResponse
+	(*ProcessDealsRequest)(nil),          // 10: story.dkg.v1.types.ProcessDealsRequest
+	(*ProcessDealsResponse)(nil),         // 11: story.dkg.v1.types.ProcessDealsResponse
+	(*ProcessResponsesRequest)(nil),      // 12: story.dkg.v1.types.ProcessResponsesRequest
+	(*ProcessResponsesResponse)(nil),     // 13: story.dkg.v1.types.ProcessResponsesResponse
+	(*ProcessJustificationRequest)(nil),  // 14: story.dkg.v1.types.ProcessJustificationRequest
+	(*ProcessJustificationResponse)(nil), // 15: story.dkg.v1.types.ProcessJustificationResponse
+	(*FinalizeDKGRequest)(nil),           // 16: story.dkg.v1.types.FinalizeDKGRequest
+	(*FinalizeDKGResponse)(nil),          // 17: story.dkg.v1.types.FinalizeDKGResponse
+	(*PartialDecryptTDH2Request)(nil),    // 18: story.dkg.v1.types.PartialDecryptTDH2Request
+	(*PartialDecryptTDH2Response)(nil),   // 19: story.dkg.v1.types.PartialDecryptTDH2Response
+	(*Deal)(nil),                         // 20: story.dkg.v1.types.Deal
+	(*Response)(nil),                     // 21: story.dkg.v1.types.Response
+	(*Justification)(nil),                // 22: story.dkg.v1.types.Justification
 }
 var file_tee_proto_depIdxs = []int32{
-	1,  // 0: story.dkg.v0.DKGRegistration.status:type_name -> story.dkg.v0.DKGRegStatus
-	0,  // 1: story.dkg.v0.DKGNetwork.stage:type_name -> story.dkg.v0.DKGStage
-	18, // 2: story.dkg.v0.GenerateDealsResponse.deals:type_name -> story.dkg.v0.Deal
-	18, // 3: story.dkg.v0.ProcessDealsRequest.deals:type_name -> story.dkg.v0.Deal
-	19, // 4: story.dkg.v0.ProcessDealsResponse.responses:type_name -> story.dkg.v0.Response
-	19, // 5: story.dkg.v0.ProcessResponsesRequest.responses:type_name -> story.dkg.v0.Response
-	20, // 6: story.dkg.v0.ProcessResponsesResponse.justifications:type_name -> story.dkg.v0.Justification
-	20, // 7: story.dkg.v0.ProcessJustificationRequest.justifications:type_name -> story.dkg.v0.Justification
-	2,  // 8: story.dkg.v0.TEEService.GenerateAndSealKey:input_type -> story.dkg.v0.GenerateAndSealKeyRequest
-	6,  // 9: story.dkg.v0.TEEService.GenerateDeals:input_type -> story.dkg.v0.GenerateDealsRequest
-	8,  // 10: story.dkg.v0.TEEService.ProcessDeals:input_type -> story.dkg.v0.ProcessDealsRequest
-	10, // 11: story.dkg.v0.TEEService.ProcessResponses:input_type -> story.dkg.v0.ProcessResponsesRequest
-	12, // 12: story.dkg.v0.TEEService.ProcessJustification:input_type -> story.dkg.v0.ProcessJustificationRequest
-	14, // 13: story.dkg.v0.TEEService.FinalizeDKG:input_type -> story.dkg.v0.FinalizeDKGRequest
-	16, // 14: story.dkg.v0.TEEService.PartialDecryptTDH2:input_type -> story.dkg.v0.PartialDecryptTDH2Request
-	3,  // 15: story.dkg.v0.TEEService.GenerateAndSealKey:output_type -> story.dkg.v0.GenerateAndSealKeyResponse
-	7,  // 16: story.dkg.v0.TEEService.GenerateDeals:output_type -> story.dkg.v0.GenerateDealsResponse
-	9,  // 17: story.dkg.v0.TEEService.ProcessDeals:output_type -> story.dkg.v0.ProcessDealsResponse
-	11, // 18: story.dkg.v0.TEEService.ProcessResponses:output_type -> story.dkg.v0.ProcessResponsesResponse
-	13, // 19: story.dkg.v0.TEEService.ProcessJustification:output_type -> story.dkg.v0.ProcessJustificationResponse
-	15, // 20: story.dkg.v0.TEEService.FinalizeDKG:output_type -> story.dkg.v0.FinalizeDKGResponse
-	17, // 21: story.dkg.v0.TEEService.PartialDecryptTDH2:output_type -> story.dkg.v0.PartialDecryptTDH2Response
-	15, // [15:22] is the sub-list for method output_type
-	8,  // [8:15] is the sub-list for method input_type
+	1,  // 0: story.dkg.v1.types.DKGRegistration.status:type_name -> story.dkg.v1.types.DKGRegStatus
+	0,  // 1: story.dkg.v1.types.DKGNetwork.stage:type_name -> story.dkg.v1.types.DKGStage
+	20, // 2: story.dkg.v1.types.GenerateDealsResponse.deals:type_name -> story.dkg.v1.types.Deal
+	20, // 3: story.dkg.v1.types.ProcessDealsRequest.deals:type_name -> story.dkg.v1.types.Deal
+	21, // 4: story.dkg.v1.types.ProcessDealsResponse.responses:type_name -> story.dkg.v1.types.Response
+	21, // 5: story.dkg.v1.types.ProcessResponsesRequest.responses:type_name -> story.dkg.v1.types.Response
+	22, // 6: story.dkg.v1.types.ProcessResponsesResponse.justifications:type_name -> story.dkg.v1.types.Justification
+	22, // 7: story.dkg.v1.types.ProcessJustificationRequest.justifications:type_name -> story.dkg.v1.types.Justification
+	2,  // 8: story.dkg.v1.types.KernelService.GetCodeCommitment:input_type -> story.dkg.v1.types.GetCodeCommitmentRequest
+	4,  // 9: story.dkg.v1.types.KernelService.GenerateAndSealKey:input_type -> story.dkg.v1.types.GenerateAndSealKeyRequest
+	8,  // 10: story.dkg.v1.types.KernelService.GenerateDeals:input_type -> story.dkg.v1.types.GenerateDealsRequest
+	10, // 11: story.dkg.v1.types.KernelService.ProcessDeals:input_type -> story.dkg.v1.types.ProcessDealsRequest
+	12, // 12: story.dkg.v1.types.KernelService.ProcessResponses:input_type -> story.dkg.v1.types.ProcessResponsesRequest
+	14, // 13: story.dkg.v1.types.KernelService.ProcessJustification:input_type -> story.dkg.v1.types.ProcessJustificationRequest
+	16, // 14: story.dkg.v1.types.KernelService.FinalizeDKG:input_type -> story.dkg.v1.types.FinalizeDKGRequest
+	18, // 15: story.dkg.v1.types.KernelService.PartialDecryptTDH2:input_type -> story.dkg.v1.types.PartialDecryptTDH2Request
+	3,  // 16: story.dkg.v1.types.KernelService.GetCodeCommitment:output_type -> story.dkg.v1.types.GetCodeCommitmentResponse
+	5,  // 17: story.dkg.v1.types.KernelService.GenerateAndSealKey:output_type -> story.dkg.v1.types.GenerateAndSealKeyResponse
+	9,  // 18: story.dkg.v1.types.KernelService.GenerateDeals:output_type -> story.dkg.v1.types.GenerateDealsResponse
+	11, // 19: story.dkg.v1.types.KernelService.ProcessDeals:output_type -> story.dkg.v1.types.ProcessDealsResponse
+	13, // 20: story.dkg.v1.types.KernelService.ProcessResponses:output_type -> story.dkg.v1.types.ProcessResponsesResponse
+	15, // 21: story.dkg.v1.types.KernelService.ProcessJustification:output_type -> story.dkg.v1.types.ProcessJustificationResponse
+	17, // 22: story.dkg.v1.types.KernelService.FinalizeDKG:output_type -> story.dkg.v1.types.FinalizeDKGResponse
+	19, // 23: story.dkg.v1.types.KernelService.PartialDecryptTDH2:output_type -> story.dkg.v1.types.PartialDecryptTDH2Response
+	16, // [16:24] is the sub-list for method output_type
+	8,  // [8:16] is the sub-list for method input_type
 	8,  // [8:8] is the sub-list for extension type_name
 	8,  // [8:8] is the sub-list for extension extendee
 	0,  // [0:8] is the sub-list for field type_name
@@ -1476,7 +1563,7 @@ func file_tee_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tee_proto_rawDesc), len(file_tee_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   16,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

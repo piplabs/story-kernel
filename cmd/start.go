@@ -13,7 +13,7 @@ import (
 
 var startCmd = &cobra.Command{
 	Use:   "start",
-	Short: "Start the TEE gRPC server",
+	Short: "Start the story-kernel gRPC server",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := loadConfigFromHome(cmd)
 		if err != nil {

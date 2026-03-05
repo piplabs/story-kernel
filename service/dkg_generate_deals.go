@@ -27,7 +27,7 @@ func (s *DKGServer) verifyDKGStartBlock(ctx context.Context, network *pb.DKGNetw
 }
 
 func (s *DKGServer) CachePID(codeCommitmentHex string, round uint32, regs []*pb.DKGRegistration) error {
-	// Find the TEE's own registration by matching pubkey and use its Index as polynomial PID (1-based).
+	// Find the story-kernel's own registration by matching pubkey and use its Index as polynomial PID (1-based).
 	longterm, err := s.DKGStore.LoadSealedEd25519Key(codeCommitmentHex, round)
 	if err != nil {
 		return errors.Wrap(err, "failed to load sealed Ed25519 private key")

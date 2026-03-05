@@ -32,7 +32,7 @@ func Serve(cfg *config.Config) (*grpc.Server, chan error) {
 		log.Fatalf("Failed to initialize query client: %v", err)
 	}
 
-	// Register TEE service server
+	// Register story-kernel service server
 	registerAllServices(svr, cfg, queryClient)
 
 	// TODO: temporarily add reflection for test. Need to remove this in production
@@ -130,7 +130,7 @@ func newQueryClientFromConfig(ctx context.Context, cfg *config.Config, db cmtdb.
 }
 
 // fallbackToConfigTrustedBlock clears expired light client state and re-initializes from config.
-// This handles the case where the TEE was offline longer than the trusted period (~2 weeks),
+// This handles the case where the story-kernel was offline longer than the trusted period (~2 weeks),
 // causing the stored light client state to expire.
 // If the config's trusted block is also expired, returns an actionable error asking the operator
 // to update config.toml with a recent trusted block.
@@ -156,7 +156,7 @@ func fallbackToConfigTrustedBlock(ctx context.Context, cfg *config.Config, db cm
 func registerAllServices(svr *grpc.Server, cfg *config.Config, queryClient story.QueryClient) {
 	suite := edwards25519.NewBlakeSHA256Ed25519()
 
-	pb.RegisterTEEServiceServer(svr, &service.DKGServer{
+	pb.RegisterKernelServiceServer(svr, &service.DKGServer{
 		Cfg:                cfg,
 		QueryClient:        queryClient,
 		Suite:              suite,

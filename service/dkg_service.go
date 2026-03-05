@@ -34,7 +34,7 @@ import (
 )
 
 type DKGServer struct {
-	pb.UnsafeTEEServiceServer
+	pb.UnsafeKernelServiceServer
 
 	Cfg                *config.Config
 	QueryClient        story.QueryClient
@@ -158,7 +158,7 @@ func (s *DKGServer) GenerateAndSealKey(_ context.Context, req *pb.GenerateAndSea
 		CodeCommitment:   req.GetCodeCommitment(),
 		DkgPubKey:        edPubBz,
 		CommPubKey:       ecrypto.FromECDSAPub(secpPub)[1:],
-		RawQuote:         rawQuote,
+		EnclaveReport:    rawQuote,
 		StartBlockHeight: rc.Network.StartBlockHeight,
 		StartBlockHash:   rc.Network.StartBlockHash,
 	}, nil

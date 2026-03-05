@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-const DefaultConfigTemplate = `# Story DKG TEE Configuration
+const DefaultConfigTemplate = `# Story DKG Kernel Configuration
 
 # Log level (debug, info, warn, error)
 log-level = "{{ .LogLevel }}"

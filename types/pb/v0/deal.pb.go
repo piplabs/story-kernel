@@ -610,49 +610,49 @@ var File_deal_proto protoreflect.FileDescriptor
 const file_deal_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"deal.proto\x12\fstory.dkg.v0\"s\n" +
+	"deal.proto\x12\x12story.dkg.v1.types\"s\n" +
 	"\rEncryptedDeal\x12\x16\n" +
 	"\x06dh_key\x18\x01 \x01(\fR\x06dh_key\x12\x1c\n" +
 	"\tsignature\x18\x02 \x01(\fR\tsignature\x12\x14\n" +
 	"\x05nonce\x18\x03 \x01(\fR\x05nonce\x12\x16\n" +
-	"\x06cipher\x18\x04 \x01(\fR\x06cipher\"\x95\x01\n" +
+	"\x06cipher\x18\x04 \x01(\fR\x06cipher\"\x9b\x01\n" +
 	"\x04Deal\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\rR\x05index\x12(\n" +
-	"\x0frecipient_index\x18\x02 \x01(\rR\x0frecipient_index\x12/\n" +
-	"\x04deal\x18\x03 \x01(\v2\x1b.story.dkg.v0.EncryptedDealR\x04deal\x12\x1c\n" +
-	"\tsignature\x18\x04 \x01(\fR\tsignature\"_\n" +
+	"\x0frecipient_index\x18\x02 \x01(\rR\x0frecipient_index\x125\n" +
+	"\x04deal\x18\x03 \x01(\v2!.story.dkg.v1.types.EncryptedDealR\x04deal\x12\x1c\n" +
+	"\tsignature\x18\x04 \x01(\fR\tsignature\"e\n" +
 	"\bResponse\x12\x14\n" +
-	"\x05index\x18\x01 \x01(\rR\x05index\x12=\n" +
-	"\fvss_response\x18\x02 \x01(\v2\x19.story.dkg.v0.VSSResponseR\fvss_response\"y\n" +
+	"\x05index\x18\x01 \x01(\rR\x05index\x12C\n" +
+	"\fvss_response\x18\x02 \x01(\v2\x1f.story.dkg.v1.types.VSSResponseR\fvss_response\"y\n" +
 	"\vVSSResponse\x12\x1e\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\fR\n" +
 	"session_id\x12\x14\n" +
 	"\x05index\x18\x02 \x01(\rR\x05index\x12\x16\n" +
 	"\x06status\x18\x03 \x01(\bR\x06status\x12\x1c\n" +
-	"\tsignature\x18\x04 \x01(\fR\tsignature\"s\n" +
+	"\tsignature\x18\x04 \x01(\fR\tsignature\"y\n" +
 	"\rJustification\x12\x14\n" +
-	"\x05index\x18\x01 \x01(\rR\x05index\x12L\n" +
-	"\x11vss_justification\x18\x02 \x01(\v2\x1e.story.dkg.v0.VSSJustificationR\x11vss_justification\"\x9f\x01\n" +
+	"\x05index\x18\x01 \x01(\rR\x05index\x12R\n" +
+	"\x11vss_justification\x18\x02 \x01(\v2$.story.dkg.v1.types.VSSJustificationR\x11vss_justification\"\xa5\x01\n" +
 	"\x10VSSJustification\x12\x1e\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\fR\n" +
 	"session_id\x12\x14\n" +
-	"\x05index\x18\x02 \x01(\rR\x05index\x127\n" +
+	"\x05index\x18\x02 \x01(\rR\x05index\x12=\n" +
 	"\n" +
-	"plain_deal\x18\x03 \x01(\v2\x17.story.dkg.v0.PlainDealR\n" +
+	"plain_deal\x18\x03 \x01(\v2\x1d.story.dkg.v1.types.PlainDealR\n" +
 	"plain_deal\x12\x1c\n" +
-	"\tsignature\x18\x04 \x01(\fR\tsignature\"\xb6\x01\n" +
+	"\tsignature\x18\x04 \x01(\fR\tsignature\"\xc2\x01\n" +
 	"\tPlainDeal\x12\x1e\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\fR\n" +
-	"session_id\x124\n" +
-	"\tsec_share\x18\x02 \x01(\v2\x16.story.dkg.v0.SecShareR\tsec_share\x12\x1c\n" +
-	"\tthreshold\x18\x03 \x01(\rR\tthreshold\x125\n" +
-	"\vcommitments\x18\x04 \x03(\v2\x13.story.dkg.v0.PointR\vcommitments\"<\n" +
+	"session_id\x12:\n" +
+	"\tsec_share\x18\x02 \x01(\v2\x1c.story.dkg.v1.types.SecShareR\tsec_share\x12\x1c\n" +
+	"\tthreshold\x18\x03 \x01(\rR\tthreshold\x12;\n" +
+	"\vcommitments\x18\x04 \x03(\v2\x19.story.dkg.v1.types.PointR\vcommitments\"B\n" +
 	"\bSecShare\x12\f\n" +
-	"\x01i\x18\x01 \x01(\rR\x01i\x12\"\n" +
-	"\x01v\x18\x02 \x01(\v2\x14.story.dkg.v0.ScalarR\x01v\"\x1c\n" +
+	"\x01i\x18\x01 \x01(\rR\x01i\x12(\n" +
+	"\x01v\x18\x02 \x01(\v2\x1a.story.dkg.v1.types.ScalarR\x01v\"\x1c\n" +
 	"\x06Scalar\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\"\x1b\n" +
 	"\x05Point\x12\x12\n" +
@@ -672,25 +672,25 @@ func file_deal_proto_rawDescGZIP() []byte {
 
 var file_deal_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_deal_proto_goTypes = []any{
-	(*EncryptedDeal)(nil),    // 0: story.dkg.v0.EncryptedDeal
-	(*Deal)(nil),             // 1: story.dkg.v0.Deal
-	(*Response)(nil),         // 2: story.dkg.v0.Response
-	(*VSSResponse)(nil),      // 3: story.dkg.v0.VSSResponse
-	(*Justification)(nil),    // 4: story.dkg.v0.Justification
-	(*VSSJustification)(nil), // 5: story.dkg.v0.VSSJustification
-	(*PlainDeal)(nil),        // 6: story.dkg.v0.PlainDeal
-	(*SecShare)(nil),         // 7: story.dkg.v0.SecShare
-	(*Scalar)(nil),           // 8: story.dkg.v0.Scalar
-	(*Point)(nil),            // 9: story.dkg.v0.Point
+	(*EncryptedDeal)(nil),    // 0: story.dkg.v1.types.EncryptedDeal
+	(*Deal)(nil),             // 1: story.dkg.v1.types.Deal
+	(*Response)(nil),         // 2: story.dkg.v1.types.Response
+	(*VSSResponse)(nil),      // 3: story.dkg.v1.types.VSSResponse
+	(*Justification)(nil),    // 4: story.dkg.v1.types.Justification
+	(*VSSJustification)(nil), // 5: story.dkg.v1.types.VSSJustification
+	(*PlainDeal)(nil),        // 6: story.dkg.v1.types.PlainDeal
+	(*SecShare)(nil),         // 7: story.dkg.v1.types.SecShare
+	(*Scalar)(nil),           // 8: story.dkg.v1.types.Scalar
+	(*Point)(nil),            // 9: story.dkg.v1.types.Point
 }
 var file_deal_proto_depIdxs = []int32{
-	0, // 0: story.dkg.v0.Deal.deal:type_name -> story.dkg.v0.EncryptedDeal
-	3, // 1: story.dkg.v0.Response.vss_response:type_name -> story.dkg.v0.VSSResponse
-	5, // 2: story.dkg.v0.Justification.vss_justification:type_name -> story.dkg.v0.VSSJustification
-	6, // 3: story.dkg.v0.VSSJustification.plain_deal:type_name -> story.dkg.v0.PlainDeal
-	7, // 4: story.dkg.v0.PlainDeal.sec_share:type_name -> story.dkg.v0.SecShare
-	9, // 5: story.dkg.v0.PlainDeal.commitments:type_name -> story.dkg.v0.Point
-	8, // 6: story.dkg.v0.SecShare.v:type_name -> story.dkg.v0.Scalar
+	0, // 0: story.dkg.v1.types.Deal.deal:type_name -> story.dkg.v1.types.EncryptedDeal
+	3, // 1: story.dkg.v1.types.Response.vss_response:type_name -> story.dkg.v1.types.VSSResponse
+	5, // 2: story.dkg.v1.types.Justification.vss_justification:type_name -> story.dkg.v1.types.VSSJustification
+	6, // 3: story.dkg.v1.types.VSSJustification.plain_deal:type_name -> story.dkg.v1.types.PlainDeal
+	7, // 4: story.dkg.v1.types.PlainDeal.sec_share:type_name -> story.dkg.v1.types.SecShare
+	9, // 5: story.dkg.v1.types.PlainDeal.commitments:type_name -> story.dkg.v1.types.Point
+	8, // 6: story.dkg.v1.types.SecShare.v:type_name -> story.dkg.v1.types.Scalar
 	7, // [7:7] is the sub-list for method output_type
 	7, // [7:7] is the sub-list for method input_type
 	7, // [7:7] is the sub-list for extension type_name
