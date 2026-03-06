@@ -98,15 +98,25 @@ for d in "${LIB_DIRS[@]}"; do
   fi
 done
 
-# Link against dynamic cb-mpc library
-LDFLAGS_ACCUM+=("-lcbmpc")
-
-# Handle duplicate secp256k1 symbols from go-ethereum and cb-mpc
+# Link against cb-mpc library
 if [[ "$(uname -s)" == "Darwin" ]]; then
-  # Dynamic library encapsulates symbols - no workaround needed!
-  # But keep these for safety during transition
-  LDFLAGS_ACCUM+=("-Wl,-flat_namespace" "-Wl,-undefined,suppress")
+  # On macOS, link statically to avoid dyld symbol resolution issues
+  # caused by -fvisibility=hidden in the shared library build.
+  STATIC_LIB=""
+  for d in "${LIB_DIRS[@]}"; do
+    if [[ -f "${d}/libcbmpc.a" ]]; then
+      STATIC_LIB="${d}/libcbmpc.a"
+      break
+    fi
+  done
+  if [[ -n "${STATIC_LIB}" ]]; then
+    LDFLAGS_ACCUM+=("${STATIC_LIB}" "-lc++")
+  else
+    LDFLAGS_ACCUM+=("-lcbmpc")
+    LDFLAGS_ACCUM+=("-Wl,-flat_namespace" "-Wl,-undefined,suppress")
+  fi
 else
+  LDFLAGS_ACCUM+=("-lcbmpc")
   LDFLAGS_ACCUM+=("-Wl,--allow-multiple-definition")
   LDFLAGS_ACCUM+=("-static-libstdc++" "-static-libgcc")
 fi

@@ -10,6 +10,7 @@ service TEEService {
   rpc GenerateDeals(GenerateDealsRequest) returns (GenerateDealsResponse);
   rpc ProcessDeals(ProcessDealsRequest) returns (ProcessDealsResponse);
   rpc ProcessResponses(ProcessResponsesRequest) returns (ProcessResponsesResponse);
+  rpc ProcessJustification(ProcessJustificationRequest) returns (ProcessJustificationResponse);
   rpc FinalizeDKG(FinalizeDKGRequest) returns (FinalizeDKGResponse);
   rpc PartialDecryptTDH2(PartialDecryptTDH2Request) returns (PartialDecryptTDH2Response);
 }
@@ -43,6 +44,7 @@ enum DKGRegStatus {
   DKG_REG_STATUS_UNSPECIFIED = 0;
   DKG_REG_STATUS_VERIFIED = 1;
   DKG_REG_STATUS_FINALIZED = 2;
+  DKG_REG_STATUS_INVALIDATED = 3;
 }
 
 message DKGRegistration {
@@ -104,6 +106,18 @@ message ProcessResponsesRequest {
 message ProcessResponsesResponse {
   repeated Justification justifications = 1 [json_name = "justifications"];
 }
+
+// ProcessJustificationRequest is sent to TEE to process valid justifications
+// and restore the DKG state by accepting the originally-complained deals.
+message ProcessJustificationRequest {
+  bytes code_commitment = 1 [json_name = "code_commitment"];
+  uint32 round = 2 [json_name = "round"];
+  repeated Justification justifications = 3 [json_name = "justifications"];
+  bool is_resharing = 4 [json_name = "is_resharing"];
+}
+
+// ProcessJustificationResponse is returned from TEE after processing justifications.
+message ProcessJustificationResponse {}
 
 message FinalizeDKGRequest {
   bytes code_commitment = 1 [json_name = "code_commitment"];

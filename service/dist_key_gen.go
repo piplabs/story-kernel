@@ -449,7 +449,8 @@ func (s *DKGServer) rebuildResharingNextDKG(
 // Helpers
 ////////////////////////////////////////////////////////////////////////////////
 
-// replayMessages replays persisted DKG deals and responses into a DKG instance.
+// replayMessages replays persisted DKG deals, responses, and justifications
+// into a DKG instance to restore its state after a restart.
 func replayMessages(
 	dkgInst *dkg.DistKeyGenerator,
 	st *store.DKGState,
@@ -459,6 +460,9 @@ func replayMessages(
 	}
 	for _, r := range st.Responses {
 		_, _ = dkgInst.ProcessResponse(&r)
+	}
+	for _, j := range st.Justifications {
+		_ = dkgInst.ProcessJustification(&j)
 	}
 }
 
