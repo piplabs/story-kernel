@@ -19,19 +19,21 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	TEEService_GenerateAndSealKey_FullMethodName   = "/story.dkg.v0.TEEService/GenerateAndSealKey"
-	TEEService_GenerateDeals_FullMethodName        = "/story.dkg.v0.TEEService/GenerateDeals"
-	TEEService_ProcessDeals_FullMethodName         = "/story.dkg.v0.TEEService/ProcessDeals"
-	TEEService_ProcessResponses_FullMethodName     = "/story.dkg.v0.TEEService/ProcessResponses"
-	TEEService_ProcessJustification_FullMethodName = "/story.dkg.v0.TEEService/ProcessJustification"
-	TEEService_FinalizeDKG_FullMethodName          = "/story.dkg.v0.TEEService/FinalizeDKG"
-	TEEService_PartialDecryptTDH2_FullMethodName   = "/story.dkg.v0.TEEService/PartialDecryptTDH2"
+	KernelService_GetCodeCommitment_FullMethodName    = "/story.dkg.v1.types.KernelService/GetCodeCommitment"
+	KernelService_GenerateAndSealKey_FullMethodName   = "/story.dkg.v1.types.KernelService/GenerateAndSealKey"
+	KernelService_GenerateDeals_FullMethodName        = "/story.dkg.v1.types.KernelService/GenerateDeals"
+	KernelService_ProcessDeals_FullMethodName         = "/story.dkg.v1.types.KernelService/ProcessDeals"
+	KernelService_ProcessResponses_FullMethodName     = "/story.dkg.v1.types.KernelService/ProcessResponses"
+	KernelService_ProcessJustification_FullMethodName = "/story.dkg.v1.types.KernelService/ProcessJustification"
+	KernelService_FinalizeDKG_FullMethodName          = "/story.dkg.v1.types.KernelService/FinalizeDKG"
+	KernelService_PartialDecryptTDH2_FullMethodName   = "/story.dkg.v1.types.KernelService/PartialDecryptTDH2"
 )
 
-// TEEServiceClient is the client API for TEEService service.
+// KernelServiceClient is the client API for KernelService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type TEEServiceClient interface {
+type KernelServiceClient interface {
+	GetCodeCommitment(ctx context.Context, in *GetCodeCommitmentRequest, opts ...grpc.CallOption) (*GetCodeCommitmentResponse, error)
 	GenerateAndSealKey(ctx context.Context, in *GenerateAndSealKeyRequest, opts ...grpc.CallOption) (*GenerateAndSealKeyResponse, error)
 	GenerateDeals(ctx context.Context, in *GenerateDealsRequest, opts ...grpc.CallOption) (*GenerateDealsResponse, error)
 	ProcessDeals(ctx context.Context, in *ProcessDealsRequest, opts ...grpc.CallOption) (*ProcessDealsResponse, error)
@@ -41,88 +43,99 @@ type TEEServiceClient interface {
 	PartialDecryptTDH2(ctx context.Context, in *PartialDecryptTDH2Request, opts ...grpc.CallOption) (*PartialDecryptTDH2Response, error)
 }
 
-type tEEServiceClient struct {
+type kernelServiceClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewTEEServiceClient(cc grpc.ClientConnInterface) TEEServiceClient {
-	return &tEEServiceClient{cc}
+func NewKernelServiceClient(cc grpc.ClientConnInterface) KernelServiceClient {
+	return &kernelServiceClient{cc}
 }
 
-func (c *tEEServiceClient) GenerateAndSealKey(ctx context.Context, in *GenerateAndSealKeyRequest, opts ...grpc.CallOption) (*GenerateAndSealKeyResponse, error) {
+func (c *kernelServiceClient) GetCodeCommitment(ctx context.Context, in *GetCodeCommitmentRequest, opts ...grpc.CallOption) (*GetCodeCommitmentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetCodeCommitmentResponse)
+	err := c.cc.Invoke(ctx, KernelService_GetCodeCommitment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kernelServiceClient) GenerateAndSealKey(ctx context.Context, in *GenerateAndSealKeyRequest, opts ...grpc.CallOption) (*GenerateAndSealKeyResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GenerateAndSealKeyResponse)
-	err := c.cc.Invoke(ctx, TEEService_GenerateAndSealKey_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, KernelService_GenerateAndSealKey_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *tEEServiceClient) GenerateDeals(ctx context.Context, in *GenerateDealsRequest, opts ...grpc.CallOption) (*GenerateDealsResponse, error) {
+func (c *kernelServiceClient) GenerateDeals(ctx context.Context, in *GenerateDealsRequest, opts ...grpc.CallOption) (*GenerateDealsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GenerateDealsResponse)
-	err := c.cc.Invoke(ctx, TEEService_GenerateDeals_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, KernelService_GenerateDeals_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *tEEServiceClient) ProcessDeals(ctx context.Context, in *ProcessDealsRequest, opts ...grpc.CallOption) (*ProcessDealsResponse, error) {
+func (c *kernelServiceClient) ProcessDeals(ctx context.Context, in *ProcessDealsRequest, opts ...grpc.CallOption) (*ProcessDealsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ProcessDealsResponse)
-	err := c.cc.Invoke(ctx, TEEService_ProcessDeals_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, KernelService_ProcessDeals_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *tEEServiceClient) ProcessResponses(ctx context.Context, in *ProcessResponsesRequest, opts ...grpc.CallOption) (*ProcessResponsesResponse, error) {
+func (c *kernelServiceClient) ProcessResponses(ctx context.Context, in *ProcessResponsesRequest, opts ...grpc.CallOption) (*ProcessResponsesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ProcessResponsesResponse)
-	err := c.cc.Invoke(ctx, TEEService_ProcessResponses_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, KernelService_ProcessResponses_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *tEEServiceClient) ProcessJustification(ctx context.Context, in *ProcessJustificationRequest, opts ...grpc.CallOption) (*ProcessJustificationResponse, error) {
+func (c *kernelServiceClient) ProcessJustification(ctx context.Context, in *ProcessJustificationRequest, opts ...grpc.CallOption) (*ProcessJustificationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ProcessJustificationResponse)
-	err := c.cc.Invoke(ctx, TEEService_ProcessJustification_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, KernelService_ProcessJustification_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *tEEServiceClient) FinalizeDKG(ctx context.Context, in *FinalizeDKGRequest, opts ...grpc.CallOption) (*FinalizeDKGResponse, error) {
+func (c *kernelServiceClient) FinalizeDKG(ctx context.Context, in *FinalizeDKGRequest, opts ...grpc.CallOption) (*FinalizeDKGResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(FinalizeDKGResponse)
-	err := c.cc.Invoke(ctx, TEEService_FinalizeDKG_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, KernelService_FinalizeDKG_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *tEEServiceClient) PartialDecryptTDH2(ctx context.Context, in *PartialDecryptTDH2Request, opts ...grpc.CallOption) (*PartialDecryptTDH2Response, error) {
+func (c *kernelServiceClient) PartialDecryptTDH2(ctx context.Context, in *PartialDecryptTDH2Request, opts ...grpc.CallOption) (*PartialDecryptTDH2Response, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PartialDecryptTDH2Response)
-	err := c.cc.Invoke(ctx, TEEService_PartialDecryptTDH2_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, KernelService_PartialDecryptTDH2_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// TEEServiceServer is the server API for TEEService service.
-// All implementations must embed UnimplementedTEEServiceServer
+// KernelServiceServer is the server API for KernelService service.
+// All implementations must embed UnimplementedKernelServiceServer
 // for forward compatibility.
-type TEEServiceServer interface {
+type KernelServiceServer interface {
+	GetCodeCommitment(context.Context, *GetCodeCommitmentRequest) (*GetCodeCommitmentResponse, error)
 	GenerateAndSealKey(context.Context, *GenerateAndSealKeyRequest) (*GenerateAndSealKeyResponse, error)
 	GenerateDeals(context.Context, *GenerateDealsRequest) (*GenerateDealsResponse, error)
 	ProcessDeals(context.Context, *ProcessDealsRequest) (*ProcessDealsResponse, error)
@@ -130,218 +143,243 @@ type TEEServiceServer interface {
 	ProcessJustification(context.Context, *ProcessJustificationRequest) (*ProcessJustificationResponse, error)
 	FinalizeDKG(context.Context, *FinalizeDKGRequest) (*FinalizeDKGResponse, error)
 	PartialDecryptTDH2(context.Context, *PartialDecryptTDH2Request) (*PartialDecryptTDH2Response, error)
-	mustEmbedUnimplementedTEEServiceServer()
+	mustEmbedUnimplementedKernelServiceServer()
 }
 
-// UnimplementedTEEServiceServer must be embedded to have
+// UnimplementedKernelServiceServer must be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
 // pointer dereference when methods are called.
-type UnimplementedTEEServiceServer struct{}
+type UnimplementedKernelServiceServer struct{}
 
-func (UnimplementedTEEServiceServer) GenerateAndSealKey(context.Context, *GenerateAndSealKeyRequest) (*GenerateAndSealKeyResponse, error) {
+func (UnimplementedKernelServiceServer) GetCodeCommitment(context.Context, *GetCodeCommitmentRequest) (*GetCodeCommitmentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetCodeCommitment not implemented")
+}
+func (UnimplementedKernelServiceServer) GenerateAndSealKey(context.Context, *GenerateAndSealKeyRequest) (*GenerateAndSealKeyResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GenerateAndSealKey not implemented")
 }
-func (UnimplementedTEEServiceServer) GenerateDeals(context.Context, *GenerateDealsRequest) (*GenerateDealsResponse, error) {
+func (UnimplementedKernelServiceServer) GenerateDeals(context.Context, *GenerateDealsRequest) (*GenerateDealsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GenerateDeals not implemented")
 }
-func (UnimplementedTEEServiceServer) ProcessDeals(context.Context, *ProcessDealsRequest) (*ProcessDealsResponse, error) {
+func (UnimplementedKernelServiceServer) ProcessDeals(context.Context, *ProcessDealsRequest) (*ProcessDealsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ProcessDeals not implemented")
 }
-func (UnimplementedTEEServiceServer) ProcessResponses(context.Context, *ProcessResponsesRequest) (*ProcessResponsesResponse, error) {
+func (UnimplementedKernelServiceServer) ProcessResponses(context.Context, *ProcessResponsesRequest) (*ProcessResponsesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ProcessResponses not implemented")
 }
-func (UnimplementedTEEServiceServer) ProcessJustification(context.Context, *ProcessJustificationRequest) (*ProcessJustificationResponse, error) {
+func (UnimplementedKernelServiceServer) ProcessJustification(context.Context, *ProcessJustificationRequest) (*ProcessJustificationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ProcessJustification not implemented")
 }
-func (UnimplementedTEEServiceServer) FinalizeDKG(context.Context, *FinalizeDKGRequest) (*FinalizeDKGResponse, error) {
+func (UnimplementedKernelServiceServer) FinalizeDKG(context.Context, *FinalizeDKGRequest) (*FinalizeDKGResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method FinalizeDKG not implemented")
 }
-func (UnimplementedTEEServiceServer) PartialDecryptTDH2(context.Context, *PartialDecryptTDH2Request) (*PartialDecryptTDH2Response, error) {
+func (UnimplementedKernelServiceServer) PartialDecryptTDH2(context.Context, *PartialDecryptTDH2Request) (*PartialDecryptTDH2Response, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PartialDecryptTDH2 not implemented")
 }
-func (UnimplementedTEEServiceServer) mustEmbedUnimplementedTEEServiceServer() {}
-func (UnimplementedTEEServiceServer) testEmbeddedByValue()                    {}
+func (UnimplementedKernelServiceServer) mustEmbedUnimplementedKernelServiceServer() {}
+func (UnimplementedKernelServiceServer) testEmbeddedByValue()                       {}
 
-// UnsafeTEEServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to TEEServiceServer will
+// UnsafeKernelServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to KernelServiceServer will
 // result in compilation errors.
-type UnsafeTEEServiceServer interface {
-	mustEmbedUnimplementedTEEServiceServer()
+type UnsafeKernelServiceServer interface {
+	mustEmbedUnimplementedKernelServiceServer()
 }
 
-func RegisterTEEServiceServer(s grpc.ServiceRegistrar, srv TEEServiceServer) {
-	// If the following call pancis, it indicates UnimplementedTEEServiceServer was
+func RegisterKernelServiceServer(s grpc.ServiceRegistrar, srv KernelServiceServer) {
+	// If the following call pancis, it indicates UnimplementedKernelServiceServer was
 	// embedded by pointer and is nil.  This will cause panics if an
 	// unimplemented method is ever invoked, so we test this at initialization
 	// time to prevent it from happening at runtime later due to I/O.
 	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
 		t.testEmbeddedByValue()
 	}
-	s.RegisterService(&TEEService_ServiceDesc, srv)
+	s.RegisterService(&KernelService_ServiceDesc, srv)
 }
 
-func _TEEService_GenerateAndSealKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _KernelService_GetCodeCommitment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCodeCommitmentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KernelServiceServer).GetCodeCommitment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KernelService_GetCodeCommitment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KernelServiceServer).GetCodeCommitment(ctx, req.(*GetCodeCommitmentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KernelService_GenerateAndSealKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GenerateAndSealKeyRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TEEServiceServer).GenerateAndSealKey(ctx, in)
+		return srv.(KernelServiceServer).GenerateAndSealKey(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: TEEService_GenerateAndSealKey_FullMethodName,
+		FullMethod: KernelService_GenerateAndSealKey_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TEEServiceServer).GenerateAndSealKey(ctx, req.(*GenerateAndSealKeyRequest))
+		return srv.(KernelServiceServer).GenerateAndSealKey(ctx, req.(*GenerateAndSealKeyRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _TEEService_GenerateDeals_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _KernelService_GenerateDeals_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GenerateDealsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TEEServiceServer).GenerateDeals(ctx, in)
+		return srv.(KernelServiceServer).GenerateDeals(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: TEEService_GenerateDeals_FullMethodName,
+		FullMethod: KernelService_GenerateDeals_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TEEServiceServer).GenerateDeals(ctx, req.(*GenerateDealsRequest))
+		return srv.(KernelServiceServer).GenerateDeals(ctx, req.(*GenerateDealsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _TEEService_ProcessDeals_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _KernelService_ProcessDeals_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ProcessDealsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TEEServiceServer).ProcessDeals(ctx, in)
+		return srv.(KernelServiceServer).ProcessDeals(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: TEEService_ProcessDeals_FullMethodName,
+		FullMethod: KernelService_ProcessDeals_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TEEServiceServer).ProcessDeals(ctx, req.(*ProcessDealsRequest))
+		return srv.(KernelServiceServer).ProcessDeals(ctx, req.(*ProcessDealsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _TEEService_ProcessResponses_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _KernelService_ProcessResponses_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ProcessResponsesRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TEEServiceServer).ProcessResponses(ctx, in)
+		return srv.(KernelServiceServer).ProcessResponses(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: TEEService_ProcessResponses_FullMethodName,
+		FullMethod: KernelService_ProcessResponses_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TEEServiceServer).ProcessResponses(ctx, req.(*ProcessResponsesRequest))
+		return srv.(KernelServiceServer).ProcessResponses(ctx, req.(*ProcessResponsesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _TEEService_ProcessJustification_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _KernelService_ProcessJustification_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ProcessJustificationRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TEEServiceServer).ProcessJustification(ctx, in)
+		return srv.(KernelServiceServer).ProcessJustification(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: TEEService_ProcessJustification_FullMethodName,
+		FullMethod: KernelService_ProcessJustification_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TEEServiceServer).ProcessJustification(ctx, req.(*ProcessJustificationRequest))
+		return srv.(KernelServiceServer).ProcessJustification(ctx, req.(*ProcessJustificationRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _TEEService_FinalizeDKG_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _KernelService_FinalizeDKG_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(FinalizeDKGRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TEEServiceServer).FinalizeDKG(ctx, in)
+		return srv.(KernelServiceServer).FinalizeDKG(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: TEEService_FinalizeDKG_FullMethodName,
+		FullMethod: KernelService_FinalizeDKG_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TEEServiceServer).FinalizeDKG(ctx, req.(*FinalizeDKGRequest))
+		return srv.(KernelServiceServer).FinalizeDKG(ctx, req.(*FinalizeDKGRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _TEEService_PartialDecryptTDH2_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _KernelService_PartialDecryptTDH2_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PartialDecryptTDH2Request)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TEEServiceServer).PartialDecryptTDH2(ctx, in)
+		return srv.(KernelServiceServer).PartialDecryptTDH2(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: TEEService_PartialDecryptTDH2_FullMethodName,
+		FullMethod: KernelService_PartialDecryptTDH2_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TEEServiceServer).PartialDecryptTDH2(ctx, req.(*PartialDecryptTDH2Request))
+		return srv.(KernelServiceServer).PartialDecryptTDH2(ctx, req.(*PartialDecryptTDH2Request))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// TEEService_ServiceDesc is the grpc.ServiceDesc for TEEService service.
+// KernelService_ServiceDesc is the grpc.ServiceDesc for KernelService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var TEEService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "story.dkg.v0.TEEService",
-	HandlerType: (*TEEServiceServer)(nil),
+var KernelService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "story.dkg.v1.types.KernelService",
+	HandlerType: (*KernelServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
+			MethodName: "GetCodeCommitment",
+			Handler:    _KernelService_GetCodeCommitment_Handler,
+		},
+		{
 			MethodName: "GenerateAndSealKey",
-			Handler:    _TEEService_GenerateAndSealKey_Handler,
+			Handler:    _KernelService_GenerateAndSealKey_Handler,
 		},
 		{
 			MethodName: "GenerateDeals",
-			Handler:    _TEEService_GenerateDeals_Handler,
+			Handler:    _KernelService_GenerateDeals_Handler,
 		},
 		{
 			MethodName: "ProcessDeals",
-			Handler:    _TEEService_ProcessDeals_Handler,
+			Handler:    _KernelService_ProcessDeals_Handler,
 		},
 		{
 			MethodName: "ProcessResponses",
-			Handler:    _TEEService_ProcessResponses_Handler,
+			Handler:    _KernelService_ProcessResponses_Handler,
 		},
 		{
 			MethodName: "ProcessJustification",
-			Handler:    _TEEService_ProcessJustification_Handler,
+			Handler:    _KernelService_ProcessJustification_Handler,
 		},
 		{
 			MethodName: "FinalizeDKG",
-			Handler:    _TEEService_FinalizeDKG_Handler,
+			Handler:    _KernelService_FinalizeDKG_Handler,
 		},
 		{
 			MethodName: "PartialDecryptTDH2",
-			Handler:    _TEEService_PartialDecryptTDH2_Handler,
+			Handler:    _KernelService_PartialDecryptTDH2_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

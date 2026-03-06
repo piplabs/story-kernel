@@ -1,11 +1,12 @@
 syntax = "proto3";
-package story.dkg.v0;
+package story.dkg.v1.types;
 
 option go_package = "github.com/piplabs/story-kernel/types/pb/v0";
 
 import "deal.proto";
 
-service TEEService {
+service KernelService {
+  rpc GetCodeCommitment(GetCodeCommitmentRequest) returns (GetCodeCommitmentResponse);
   rpc GenerateAndSealKey(GenerateAndSealKeyRequest) returns (GenerateAndSealKeyResponse);
   rpc GenerateDeals(GenerateDealsRequest) returns (GenerateDealsResponse);
   rpc ProcessDeals(ProcessDealsRequest) returns (ProcessDealsResponse);
@@ -13,6 +14,12 @@ service TEEService {
   rpc ProcessJustification(ProcessJustificationRequest) returns (ProcessJustificationResponse);
   rpc FinalizeDKG(FinalizeDKGRequest) returns (FinalizeDKGResponse);
   rpc PartialDecryptTDH2(PartialDecryptTDH2Request) returns (PartialDecryptTDH2Response);
+}
+
+message GetCodeCommitmentRequest {}
+
+message GetCodeCommitmentResponse {
+  bytes code_commitment = 1;
 }
 
 message GenerateAndSealKeyRequest {
@@ -28,7 +35,7 @@ message GenerateAndSealKeyResponse {
   bytes start_block_hash = 4 [json_name = "start_block_hash"];
   bytes dkg_pub_key = 5 [json_name = "dkg_pub_key"];
   bytes comm_pub_key = 6 [json_name = "comm_pub_key"];
-  bytes raw_quote = 7 [json_name = "raw_quote"];
+  bytes enclave_report = 7 [json_name = "enclave_report"];
 }
 
 enum DKGStage {
@@ -53,7 +60,7 @@ message DKGRegistration {
   uint32 index = 3 [json_name = "index"];
   bytes dkg_pub_key = 4 [json_name = "dkg_pub_key"];
   bytes comm_pub_key = 5 [json_name = "comm_pub_key"];
-  bytes raw_quote = 6 [json_name = "raw_quote"];
+  bytes enclave_report = 6 [json_name = "enclave_report"];
   DKGRegStatus status = 7 [json_name = "status"];
 }
 

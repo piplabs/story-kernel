@@ -98,7 +98,9 @@ for d in "${LIB_DIRS[@]}"; do
   fi
 done
 
-# Link against cb-mpc library
+# Link against dynamic cb-mpc library
+
+# Handle duplicate secp256k1 symbols from go-ethereum and cb-mpc
 if [[ "$(uname -s)" == "Darwin" ]]; then
   # On macOS, link statically to avoid dyld symbol resolution issues
   # caused by -fvisibility=hidden in the shared library build.

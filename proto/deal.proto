@@ -1,5 +1,5 @@
 syntax = "proto3";
-package story.dkg.v0;
+package story.dkg.v1.types;
 
 option go_package = "github.com/piplabs/story-kernel/types/pb/v0";
 
