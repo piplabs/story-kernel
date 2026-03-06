@@ -1,10 +1,135 @@
 package service
 
 import (
-	"github.com/pkg/errors"
+	"context"
+	"encoding/hex"
 
+	ecrypto "github.com/ethereum/go-ethereum/crypto"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+
+	"github.com/piplabs/story-kernel/enclave"
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+func (s *DKGServer) GenerateAndSealKey(_ context.Context, req *pb.GenerateAndSealKeyRequest) (*pb.GenerateAndSealKeyResponse, error) {
+	codeCommitmentHex := hex.EncodeToString(req.GetCodeCommitment())
+
+	// Validate the request
+	if err := validateGenerateAndSealKeyRequest(req); err != nil {
+		log.WithFields(log.Fields{
+			"round":           req.GetRound(),
+			"code_commitment": codeCommitmentHex,
+			"address":         req.GetAddress(),
+		}).Errorf("invalid request: %v", err)
+
+		return nil, status.Errorf(codes.InvalidArgument, "invalid request")
+	}
+
+	// Compare the code commitment
+	if err := enclave.ValidateCodeCommitment(req.GetCodeCommitment()); err != nil {
+		log.Errorf("invalid code commitment: %v", err)
+
+		return nil, status.Errorf(codes.InvalidArgument, "failed to validate code commitment")
+	}
+
+	_, edPub, err := s.DKGStore.LoadOrGenerateEd25519Key(codeCommitmentHex, req.GetRound())
+	if err != nil {
+		log.Errorf("failed to load or generate Ed25519 key: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to load or generate Ed25519 key")
+	}
+
+	edPubBz, err := edPub.MarshalBinary()
+	if err != nil {
+		log.Errorf("failed to marshal the Ed25519 public key: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to marshal the Ed25519 public key")
+	}
+
+	_, secpPub, err := s.DKGStore.LoadOrGenerateSecp256k1Key(codeCommitmentHex, req.GetRound())
+	if err != nil {
+		log.Errorf("failed to load or generate Secp256k1 key: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to load or generate Secp256k1 key")
+	}
+
+	log.Info("Key pairs are successfully generated and sealed or loaded from the existing key files")
+
+	// Get round context to retrieve DKG network and start block information
+	rc, err := s.GetOrLoadRoundContext(codeCommitmentHex, req.Round)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"round":           req.Round,
+			"code_commitment": codeCommitmentHex,
+		}).Errorf("failed to get or load roundContext: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to get or load roundContext")
+	}
+
+	// Verify the DKG start block is on the canonical chain.
+	// This ensures the DKG round was legitimately initiated on-chain before generating keys.
+	if err := s.verifyDKGStartBlock(context.Background(), rc.Network); err != nil {
+		log.WithFields(log.Fields{
+			"round":              req.Round,
+			"code_commitment":    codeCommitmentHex,
+			"start_block_height": rc.Network.StartBlockHeight,
+			"start_block_hash":   hex.EncodeToString(rc.Network.StartBlockHash),
+			"error":              err.Error(),
+		}).Errorf("DKG start block verification failed")
+
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"start block verification failed at height %d: %v",
+			rc.Network.StartBlockHeight, err)
+	}
+
+	// Generate a quote with start block information included in report data.
+	// report data := hash(validatorAddress, round, edPub, secpPub, startBlockHeight, startBlockHash)
+	// This anchors the attestation to a specific blockchain state that will be verified on-chain.
+	reportData, err := calculateReportData(
+		req.Address,
+		req.Round,
+		edPubBz,
+		ecrypto.FromECDSAPub(secpPub)[1:],
+		rc.Network.StartBlockHeight,
+		rc.Network.StartBlockHash,
+	)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"address":            req.Address,
+			"round":              req.Round,
+			"ed25519_pub_key":    hex.EncodeToString(edPubBz),
+			"secp256k1_pub_key":  hex.EncodeToString(ecrypto.FromECDSAPub(secpPub)),
+			"start_block_height": rc.Network.StartBlockHeight,
+			"start_block_hash":   hex.EncodeToString(rc.Network.StartBlockHash),
+		}).Errorf("failed to calculate report data: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to calculate report data")
+	}
+
+	// Generate SGX quote using Gramine's /dev/attestation interface
+	rawQuote, err := enclave.GetRemoteQuote(reportData)
+	if err != nil {
+		log.Errorf("failed to generate quote: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to generate quote")
+	}
+
+	log.Info("Raw quote is successfully generated")
+
+	return &pb.GenerateAndSealKeyResponse{
+		Round:            req.GetRound(),
+		CodeCommitment:   req.GetCodeCommitment(),
+		DkgPubKey:        edPubBz,
+		CommPubKey:       ecrypto.FromECDSAPub(secpPub)[1:],
+		EnclaveReport:    rawQuote,
+		StartBlockHeight: rc.Network.StartBlockHeight,
+		StartBlockHash:   rc.Network.StartBlockHash,
+	}, nil
+}
 
 func validateGenerateAndSealKeyRequest(req *pb.GenerateAndSealKeyRequest) error {
 	if len(req.GetAddress()) == 0 {
