@@ -148,8 +148,7 @@ message PartialDecryptTDH2Request {
   bytes ciphertext = 3 [json_name = "ciphertext"];
   bytes label = 4 [json_name = "label"];
   bytes global_pub_key = 5 [json_name = "global_pub_key"];
-  string sealed_share_id = 6 [json_name = "sealed_share_id"];
-  bytes requester_pub_key = 7 [json_name = "requester_pub_key"]; // secp256k1 uncompressed
+  bytes requester_pub_key = 6 [json_name = "requester_pub_key"]; // secp256k1 uncompressed
 }
 
 message PartialDecryptTDH2Response {
