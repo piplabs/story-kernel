@@ -1,15 +1,182 @@
 package service
 
 import (
+	"context"
+	"encoding/hex"
 	"slices"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	ecrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 
+	"github.com/piplabs/story-kernel/enclave"
+	"github.com/piplabs/story-kernel/store"
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
+
+	dkg "go.dedis.ch/kyber/v4/share/dkg/pedersen"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (*pb.FinalizeDKGResponse, error) {
+	codeCommitmentHex := hex.EncodeToString(req.GetCodeCommitment())
+
+	// Validate request
+	if err := validateFinalizeDKGRequest(req); err != nil {
+		log.WithFields(log.Fields{
+			"round":           req.GetRound(),
+			"code_commitment": codeCommitmentHex,
+		}).Errorf("invalid request: %v", err)
+
+		return nil, status.Errorf(codes.InvalidArgument, "invalid request")
+	}
+
+	// Validate code commitment
+	if err := enclave.ValidateCodeCommitment(req.GetCodeCommitment()); err != nil {
+		log.Errorf("failed to validate code commitment: %v", err)
+
+		return nil, status.Errorf(codes.InvalidArgument, "failed to validate code commitment")
+	}
+
+	rc, err := s.GetOrLoadRoundContext(codeCommitmentHex, req.GetRound())
+	if err != nil {
+		log.WithFields(log.Fields{
+			"round":           req.GetRound(),
+			"code_commitment": codeCommitmentHex,
+		}).Errorf("failed to get or load roundContext: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to get or load roundContext")
+	}
+
+	var distKeyGen *dkg.DistKeyGenerator
+
+	if !req.GetIsResharing() {
+		distKeyGen, err = s.GetInitDKG(codeCommitmentHex, req.GetRound(), rc.Network.GetThreshold(), rc.SortedPubKeys)
+		if err != nil {
+			log.Errorf("failed to load or rebuild initial distributed key generator: %v", err)
+
+			return nil, status.Errorf(codes.Internal, "failed to load or rebuild initial distributed key generator")
+		}
+	} else {
+		distKeyGen, err = s.GetResharingNextDKG(codeCommitmentHex, req.GetRound(), rc.Network.GetThreshold(), rc.SortedPubKeys)
+		if err != nil {
+			log.Errorf("failed to load or rebuild the distributed key generator for resharing: %v", err)
+
+			return nil, status.Errorf(codes.Internal, "failed to load or rebuild the distributed key generator for resharing")
+		}
+	}
+
+	// Generate Distributed Key Share
+	distKeyShare, err := distKeyGen.DistKeyShare()
+	if err != nil {
+		log.Errorf("failed to compute distributed key share: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to compute distributed key share")
+	}
+	if distKeyShare == nil {
+		log.Errorf("distributed key share is nil")
+
+		return nil, status.Errorf(codes.Internal, "distributed key share is nil")
+	}
+	priShare := distKeyShare.PriShare()
+	if priShare == nil || priShare.V == nil {
+		log.Errorf("distributed key private share is nil")
+
+		return nil, status.Errorf(codes.Internal, "distributed key private share is nil")
+	}
+
+	log.Info("Distributed key share has been generated", "code_commitment", codeCommitmentHex, "round", req.GetRound())
+
+	pubKeyShare, err := s.Suite.Point().Mul(priShare.V, nil).MarshalBinary()
+	if err != nil {
+		log.Errorf("failed to marshal public key: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to marshal public key")
+	}
+
+	// Seal and store the DistKeyShare
+	if err := store.SealAndStoreDistKeyShare(distKeyShare, s.Cfg.GetDKGStateDir(), codeCommitmentHex, req.GetRound()); err != nil {
+		log.Errorf("failed to seal distributed key share: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to seal distributed key")
+	}
+
+	// Caching the dist key share
+	s.DistKeyShareCache.Set(req.GetRound(), distKeyShare)
+
+	// Get the global public key
+	globalPubKey, err := distKeyShare.Public().MarshalBinary()
+	if err != nil {
+		log.Errorf("failed to marshal global public key: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to marshal global public key")
+	}
+
+	publicCoeffsBz, err := MarshalPoints(distKeyShare.Commits)
+	if err != nil {
+		log.Errorf("failed to marshal public coeffs: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to marshal public coeffs")
+	}
+
+	// Calculate participants root from verified registrations
+	registrations, err := s.QueryClient.GetAllVerifiedDKGRegistrations(context.Background(), codeCommitmentHex, req.GetRound())
+	if err != nil {
+		log.Errorf("failed to get verified DKG registrations: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to get verified DKG registrations")
+	}
+
+	participantsRoot, err := calculateParticipantsRoot(registrations)
+	if err != nil {
+		log.Errorf("failed to calculate participants root: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to calculate participants root")
+	}
+
+	// Hash response message
+	respHash, err := hashFinalizeDKGResponse(req.GetCodeCommitment(), req.GetRound(), participantsRoot, globalPubKey, publicCoeffsBz, pubKeyShare)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"round":           req.GetRound(),
+			"code_commitment": codeCommitmentHex,
+			"global_pub_key":  hex.EncodeToString(globalPubKey),
+		}).Errorf("failed to hash response message: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to hash response")
+	}
+
+	// Load sealed secp256k1 key and sign the hash
+	priv, err := s.DKGStore.LoadSealedSecp256k1Key(codeCommitmentHex, req.GetRound())
+	if err != nil {
+		log.Errorf("failed to load sealed Secp256k1 private key: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to load sealed secp256k1 key")
+	}
+
+	signature, err := ecrypto.Sign(respHash, priv)
+	if err != nil {
+		log.Errorf("failed to sign on the response message: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to sign on the response message")
+	}
+	if signature[64] < 27 {
+		signature[64] += 27
+	}
+
+	// Construct response
+	return &pb.FinalizeDKGResponse{
+		CodeCommitment:   req.GetCodeCommitment(),
+		Round:            req.GetRound(),
+		ParticipantsRoot: participantsRoot[:],
+		GlobalPubKey:     globalPubKey,
+		PublicCoeffs:     publicCoeffsBz,
+		PubKeyShare:      pubKeyShare,
+		Signature:        signature,
+	}, nil
+}
 
 func validateFinalizeDKGRequest(req *pb.FinalizeDKGRequest) error {
 	if req.GetRound() == 0 {
