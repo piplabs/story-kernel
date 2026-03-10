@@ -155,6 +155,8 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 
 		return nil, status.Errorf(codes.Internal, "failed to load sealed secp256k1 key")
 	}
+	// Zero out the private key after use to minimize exposure in memory.
+	defer zeroPrivateKey(priv)
 
 	signature, err := ecrypto.Sign(respHash, priv)
 	if err != nil {

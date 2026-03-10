@@ -136,7 +136,7 @@ func (s *DKGServer) CachePID(codeCommitmentHex string, round uint32, regs []*pb.
 	}
 
 	if ownPID == 0 {
-		return errors.Wrap(err, "own public key not found in registrations")
+		return errors.New("own public key not found in registrations")
 	}
 
 	s.PIDCache.Set(round, ownPID)

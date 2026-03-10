@@ -145,6 +145,74 @@ func TestEmptyJustificationsOmitted(t *testing.T) {
 	require.Empty(t, restored.Justifications)
 }
 
+// TestFromRoundRoundTrip verifies that the FromRound field survives
+// serialization and deserialization through toDisk/fromDisk.
+func TestFromRoundRoundTrip(t *testing.T) {
+	t.Parallel()
+	store := newTestDKGStore(t)
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+
+	pub := suite.Point().Mul(suite.Scalar().Pick(suite.RandomStream()), nil)
+	original := &DKGState{
+		PubKeys:   []kyber.Point{pub},
+		Threshold: 2,
+		FromRound: 5,
+	}
+
+	disk, err := store.toDisk(original)
+	require.NoError(t, err)
+	require.Equal(t, uint32(5), disk.FromRound)
+
+	restored, err := store.fromDisk(disk)
+	require.NoError(t, err)
+	require.Equal(t, uint32(5), restored.FromRound)
+}
+
+// TestFromRoundPersistence verifies that FromRound is persisted to disk
+// and can be loaded back correctly.
+func TestFromRoundPersistence(t *testing.T) {
+	t.Parallel()
+	store := newTestDKGStore(t)
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+	codeCommitment := "fromround1234567890"
+	round := uint32(3)
+
+	ensureStateDir(t, store, codeCommitment, round)
+
+	pub := suite.Point().Mul(suite.Scalar().Pick(suite.RandomStream()), nil)
+	require.NoError(t, store.SaveDKGState(&DKGState{
+		PubKeys:   []kyber.Point{pub},
+		Threshold: 2,
+		FromRound: 2,
+	}, codeCommitment, round))
+
+	st, err := store.LoadDKGState(codeCommitment, round)
+	require.NoError(t, err)
+	require.Equal(t, uint32(2), st.FromRound)
+}
+
+// TestFromRoundZeroOmitted verifies that FromRound == 0 is handled correctly
+// (omitempty means it won't appear in JSON, but should deserialize to 0).
+func TestFromRoundZeroOmitted(t *testing.T) {
+	t.Parallel()
+	store := newTestDKGStore(t)
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+
+	pub := suite.Point().Mul(suite.Scalar().Pick(suite.RandomStream()), nil)
+	original := &DKGState{
+		PubKeys:   []kyber.Point{pub},
+		Threshold: 2,
+		FromRound: 0,
+	}
+
+	disk, err := store.toDisk(original)
+	require.NoError(t, err)
+
+	restored, err := store.fromDisk(disk)
+	require.NoError(t, err)
+	require.Equal(t, uint32(0), restored.FromRound)
+}
+
 // TestBackwardCompatibility verifies that loading a state file without
 // justifications field still works (backward compatibility with existing state files).
 func TestBackwardCompatibility(t *testing.T) {

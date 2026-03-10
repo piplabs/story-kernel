@@ -38,6 +38,7 @@ type dkgStateDisk struct {
 	Deals          []dkg.Deal          `json:"deals"`
 	Responses      []dkg.Response      `json:"responses"`
 	Justifications []justificationDisk `json:"justifications,omitempty"`
+	FromRound      uint32              `json:"from_round,omitempty"`
 }
 
 // justificationDisk is the JSON-serializable representation of dkg.Justification.
@@ -234,6 +235,7 @@ func (s *DKGStore) toDisk(st *DKGState) (*dkgStateDisk, error) {
 		Deals:          st.Deals,
 		Responses:      st.Responses,
 		Justifications: justDisk,
+		FromRound:      st.FromRound,
 		PubKeysBase64:  make([]string, len(st.PubKeys)),
 	}
 
@@ -259,6 +261,7 @@ func (s *DKGStore) fromDisk(d *dkgStateDisk) (*DKGState, error) {
 		Deals:          d.Deals,
 		Responses:      d.Responses,
 		Justifications: justs,
+		FromRound:      d.FromRound,
 		PubKeys:        make([]kyber.Point, len(d.PubKeysBase64)),
 	}
 

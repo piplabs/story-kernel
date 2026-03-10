@@ -33,6 +33,9 @@ type Config struct {
 
 type GRPCConfig struct {
 	ListenAddr string `mapstructure:"listen_addr"`
+	// DebugMode enables development features such as gRPC reflection.
+	// Must remain false in production to avoid exposing service metadata.
+	DebugMode bool `mapstructure:"debug_mode"`
 }
 
 type LightClientConfig struct {
