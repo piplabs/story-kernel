@@ -103,9 +103,9 @@ func (s *DKGServer) ProcessResponses(_ context.Context, req *pb.ProcessResponses
 			if j != nil {
 				justification, err := types.ConvertToJustificationProto(j)
 				if err != nil {
+					// Log only the index to avoid leaking sensitive data (e.g., SecShare in PlainDeal).
 					log.WithFields(log.Fields{
-						"index":         j.Index,
-						"justification": j.Justification,
+						"justification_index": j.Index,
 					}).Errorf("failed to convert to justification proto: %v", err)
 
 					return nil, status.Errorf(codes.Internal, "failed to convert to justification proto")

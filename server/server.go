@@ -35,8 +35,12 @@ func Serve(cfg *config.Config) (*grpc.Server, chan error) {
 	// Register story-kernel service server
 	registerAllServices(svr, cfg, queryClient)
 
-	// TODO: temporarily add reflection for test. Need to remove this in production
-	reflection.Register(svr)
+	// Only enable gRPC reflection in debug mode for development/testing.
+	// Reflection exposes service metadata and must not be enabled in production.
+	if cfg.GRPC.DebugMode {
+		log.Warn("gRPC reflection is enabled (debug mode). Do NOT use in production.")
+		reflection.Register(svr)
+	}
 
 	go runServer(cfg, svr, errCh)
 

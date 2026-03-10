@@ -30,6 +30,13 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const (
+	// sec1UncompressedPrefix is the SEC1 standard prefix byte for uncompressed elliptic curve points.
+	sec1UncompressedPrefix = 0x04
+	// tdh2Edwards25519CurveID is the cb-mpc TDH2 custom curve identifier for Edwards25519.
+	tdh2Edwards25519CurveID = 0x3f
+)
+
 // PartialDecryptTDH2 performs TDH2 partial decryption using the sealed Kyber private share.
 // TODO: TEE should verify if the request transaction was indeed submitted to the canonical chain and the unique ID
 // and round match to prevent any leakage of data by off-chain collusion.
@@ -91,6 +98,8 @@ func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecry
 
 		return nil, status.Errorf(codes.Internal, "failed to marshal private share")
 	}
+	// Zero out the private share bytes after use to minimize exposure in memory.
+	defer zeroBytes(privShare.Bytes)
 
 	pubKey, err := buildTDH2PublicKey(req.GetGlobalPubKey())
 	if err != nil {
@@ -196,6 +205,8 @@ func (s *DKGServer) signPartialDecryptResponse(codeCommitment []byte, round uint
 	if err != nil {
 		return nil, fmt.Errorf("failed to load sealed secp256k1 key: %w", err)
 	}
+	// Zero out the private key after use to minimize exposure in memory.
+	defer zeroPrivateKey(priv)
 
 	signature, err := ecrypto.Sign(respHash, priv)
 	if err != nil {
@@ -218,7 +229,7 @@ func bytes2PrivateShare(scalar kyber.Scalar) (*mpc.TDH2PrivateShare, error) {
 }
 
 func buildTDH2PublicKey(dkgPubKey []byte) (*mpc.TDH2PublicKey, error) {
-	tdhPointBytes := append([]byte{0x04, 0x3f}, dkgPubKey...)
+	tdhPointBytes := append([]byte{sec1UncompressedPrefix, tdh2Edwards25519CurveID}, dkgPubKey...)
 	pubKey, err := mpc.TDH2PublicKeyFromPoint(tdhPointBytes)
 	if err != nil {
 		return nil, fmt.Errorf("build TDH2 public key: %w", err)
@@ -250,6 +261,7 @@ func encryptPartialToRequester(requesterPubKey []byte, partial []byte) ([]byte, 
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate ephemeral key: %w", err)
 	}
+	defer zeroPrivateKey(ephemeral)
 
 	ephemeralECIES := ecies.ImportECDSA(ephemeral)
 	requesterECIES := ecies.ImportECDSAPublic(requesterECDSA)
@@ -257,12 +269,14 @@ func encryptPartialToRequester(requesterPubKey []byte, partial []byte) ([]byte, 
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to derive shared secret: %w", err)
 	}
+	defer zeroBytes(sharedBytes)
 
 	h := hkdf.New(sha256.New, sharedBytes, nil, []byte("dkg-tdh2-partial"))
 	aesKey := make([]byte, 32)
 	if _, err := io.ReadFull(h, aesKey); err != nil {
 		return nil, nil, fmt.Errorf("failed to derive key: %w", err)
 	}
+	defer zeroBytes(aesKey)
 
 	block, err := aes.NewCipher(aesKey)
 	if err != nil {

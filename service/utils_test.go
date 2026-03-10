@@ -385,6 +385,78 @@ func TestEncodingConsistency(t *testing.T) {
 	})
 }
 
+func TestReverseBytes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []byte
+		expected []byte
+	}{
+		{
+			name:     "empty slice",
+			input:    []byte{},
+			expected: []byte{},
+		},
+		{
+			name:     "single byte",
+			input:    []byte{0xAB},
+			expected: []byte{0xAB},
+		},
+		{
+			name:     "even length",
+			input:    []byte{0x01, 0x02, 0x03, 0x04},
+			expected: []byte{0x04, 0x03, 0x02, 0x01},
+		},
+		{
+			name:     "odd length",
+			input:    []byte{0x01, 0x02, 0x03},
+			expected: []byte{0x03, 0x02, 0x01},
+		},
+		{
+			name:     "all zeros",
+			input:    []byte{0x00, 0x00, 0x00, 0x00},
+			expected: []byte{0x00, 0x00, 0x00, 0x00},
+		},
+		{
+			name:     "all 0xFF",
+			input:    []byte{0xFF, 0xFF, 0xFF, 0xFF},
+			expected: []byte{0xFF, 0xFF, 0xFF, 0xFF},
+		},
+		{
+			name:     "two bytes",
+			input:    []byte{0xDE, 0xAD},
+			expected: []byte{0xAD, 0xDE},
+		},
+		{
+			name:     "palindrome",
+			input:    []byte{0xAB, 0xCD, 0xAB},
+			expected: []byte{0xAB, 0xCD, 0xAB},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := reverseBytes(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestReverseBytesDoesNotMutateInput(t *testing.T) {
+	original := []byte{0x01, 0x02, 0x03}
+	inputCopy := make([]byte, len(original))
+	copy(inputCopy, original)
+
+	_ = reverseBytes(original)
+
+	assert.Equal(t, inputCopy, original, "reverseBytes must not mutate the input slice")
+}
+
+func TestReverseBytesNil(t *testing.T) {
+	result := reverseBytes(nil)
+	assert.NotNil(t, result, "reverseBytes(nil) should return a non-nil empty slice")
+	assert.Len(t, result, 0)
+}
+
 // Benchmark tests
 func BenchmarkCalculateReportData(b *testing.B) {
 	validatorAddr := "0x1234567890123456789012345678901234567890"
