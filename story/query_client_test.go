@@ -199,13 +199,12 @@ func (m *MockDB) Compact(start, end []byte) error {
 
 func createTestDKGNetwork() *pb.DKGNetwork {
 	return &pb.DKGNetwork{
-		CodeCommitment: []byte("test_code_commitment_bytes"),
-		Round:          1,
-		ActiveValSet:   []string{"validator1", "validator2", "validator3"},
-		Total:          3,
-		Threshold:      2,
-		PublicCoeffs:   [][]byte{[]byte("coeff1"), []byte("coeff2")},
-		IsResharing:    false,
+		Round:        1,
+		ActiveValSet: []string{"validator1", "validator2", "validator3"},
+		Total:        3,
+		Threshold:    2,
+		PublicCoeffs: [][]byte{[]byte("coeff1"), []byte("coeff2")},
+		IsResharing:  false,
 	}
 }
 
@@ -415,8 +414,8 @@ func TestMarshaling(t *testing.T) {
 		var decoded pb.DKGNetwork
 		err = cdc.Unmarshal(data, &decoded)
 		require.NoError(t, err)
-		assert.True(t, bytes.Equal(network.GetCodeCommitment(), decoded.GetCodeCommitment()))
 		assert.Equal(t, network.GetRound(), decoded.GetRound())
+		assert.Equal(t, network.GetActiveValSet(), decoded.GetActiveValSet())
 	})
 	t.Run("DKGRegistration", func(t *testing.T) {
 		reg := createTestDKGRegistration()
