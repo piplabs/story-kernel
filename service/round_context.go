@@ -19,7 +19,7 @@ func (s *DKGServer) GetOrLoadRoundContext(
 		return nil, err
 	}
 
-	registrations, err := s.QueryClient.GetAllVerifiedDKGRegistrations(
+	registrations, err := s.QueryClient.GetAllParticipantDKGRegistrations(
 		context.Background(),
 		codeCommitmentsHex,
 		round,
