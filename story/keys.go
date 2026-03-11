@@ -20,18 +20,18 @@ const (
 	LatestActiveRoundPrefix byte = 4 // Added based on keeper implementation
 )
 
-// Where key is "{code_commitment_hex}_{round}".
-func GetDKGNetworkKey(codeCommitmentHex string, round uint32) []byte {
+// Where key is "{round}" matching story keeper's strconv.FormatUint(round, 10).
+func GetDKGNetworkKey(_ string, round uint32) []byte {
 	// Collections uses: prefix | string_key_length (varint) | string_key
-	key := fmt.Sprintf("%s_%d", codeCommitmentHex, round)
+	key := fmt.Sprintf("%d", round)
 
 	return buildCollectionKey(DKGNetworkPrefix, []byte(key))
 }
 
-// Where key is "{code_commitment_hex}_{round}_{validator_addr}".
-func GetDKGRegistrationKey(codeCommitmentHex string, round uint32, validatorAddr string) []byte {
+// Where key is "{round}_{validator_addr}" matching story keeper's fmt.Sprintf("%d_%s", round, addr.Hex()).
+func GetDKGRegistrationKey(_ string, round uint32, validatorAddr string) []byte {
 	// Collections uses: prefix | string_key_length (varint) | string_key
-	key := fmt.Sprintf("%s_%d_%s", codeCommitmentHex, round, validatorAddr)
+	key := fmt.Sprintf("%d_%s", round, validatorAddr)
 
 	return buildCollectionKey(DKGRegistrationPrefix, []byte(key))
 }
