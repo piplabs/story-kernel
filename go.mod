@@ -10,7 +10,6 @@ require (
 	github.com/cosmos/ics23/go v0.11.0
 	github.com/edgelesssys/ego v1.8.0
 	github.com/ethereum/go-ethereum v1.16.8
-	github.com/gofrs/flock v0.13.0
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.10.1
