@@ -41,7 +41,7 @@ const (
 // This can be implemented by either HTTP client or verified light client.
 type QueryClient interface {
 	GetDKGNetwork(ctx context.Context, codeCommitmentHex string, round uint32) (*pb.DKGNetwork, error)
-	GetAllVerifiedDKGRegistrations(ctx context.Context, codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error)
+	GetAllParticipantDKGRegistrations(ctx context.Context, codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error)
 	GetLatestActiveDKGNetwork(ctx context.Context) (*pb.DKGNetwork, error)
 	VerifyStartBlock(ctx context.Context, startBlockHeight int64, startBlockHash []byte) error
 	Close() error
@@ -231,8 +231,11 @@ func (q *VerifiedQueryClient) GetDKGNetwork(ctx context.Context, codeCommitmentH
 	return &network, nil
 }
 
-// The validator addresses must be obtained from GetDKGNetwork first.
-func (q *VerifiedQueryClient) GetAllVerifiedDKGRegistrations(ctx context.Context, codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error) {
+// GetAllParticipantDKGRegistrations returns all DKG registrations that are part of
+// the active participant set (VERIFIED or FINALIZED status). Both statuses must be
+// included because validators finalize at different times — earlier finalizers
+// transition their status from VERIFIED to FINALIZED before later finalizers query.
+func (q *VerifiedQueryClient) GetAllParticipantDKGRegistrations(ctx context.Context, codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error) {
 	// First get the network to know which validators are registered
 	network, err := q.GetDKGNetwork(ctx, codeCommitmentHex, round)
 	if err != nil {
@@ -251,13 +254,14 @@ func (q *VerifiedQueryClient) GetAllVerifiedDKGRegistrations(ctx context.Context
 			return nil, fmt.Errorf("failed to get registration for validator %s: %w", validatorAddr, err)
 		}
 
-		if reg.GetStatus() == pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED {
+		if reg.GetStatus() == pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED ||
+			reg.GetStatus() == pb.DKGRegStatus_DKG_REG_STATUS_FINALIZED {
 			registrations = append(registrations, reg)
 		}
 	}
 
 	if len(registrations) == 0 {
-		return nil, errors.New("no verified registrations found")
+		return nil, errors.New("no participant registrations found")
 	}
 
 	return registrations, nil

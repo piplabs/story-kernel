@@ -614,15 +614,15 @@ func TestGetDKGNetwork_Flow(t *testing.T) {
 	})
 }
 
-func TestGetAllVerifiedDKGRegistrations_Flow(t *testing.T) {
+func TestGetAllParticipantDKGRegistrations_Flow(t *testing.T) {
 	verifiedStatus := pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED
 	assert.Equal(t, pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED, verifiedStatus)
 }
 
-func TestGetAllVerifiedDKGRegistrations_FailFast(t *testing.T) {
+func TestGetAllParticipantDKGRegistrations_FailFast(t *testing.T) {
 	t.Run("returns error immediately on query failure", func(t *testing.T) {
 		// Simulates the fail-fast behavior: any single getDKGRegistration error
-		// should propagate up as an error from GetAllVerifiedDKGRegistrations
+		// should propagate up as an error from GetAllParticipantDKGRegistrations
 		err := fmt.Errorf("failed to get registration for validator val1: connection refused")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to get registration for validator")
