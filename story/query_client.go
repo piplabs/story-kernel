@@ -246,12 +246,21 @@ func (q *VerifiedQueryClient) GetAllParticipantDKGRegistrations(ctx context.Cont
 		return nil, errors.New("no active validators in network")
 	}
 
-	// Query each validator's registration individually
+	// Query each validator's registration individually.
+	// Not all validators in ActiveValSet may have registered for DKG
+	// (e.g., bootnodes or validators that missed registration).
 	var registrations []*pb.DKGRegistration
 	for _, validatorAddr := range network.GetActiveValSet() {
 		reg, err := q.getDKGRegistration(ctx, codeCommitmentHex, round, validatorAddr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get registration for validator %s: %w", validatorAddr, err)
+		}
+
+		// Skip validators that didn't register (non-existence proven)
+		if reg == nil {
+			log.Debugf("Validator %s has no DKG registration for round %d, skipping", validatorAddr, round)
+
+			continue
 		}
 
 		if reg.GetStatus() == pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED ||
@@ -268,6 +277,7 @@ func (q *VerifiedQueryClient) GetAllParticipantDKGRegistrations(ctx context.Cont
 }
 
 // getDKGRegistration retrieves a single DKG registration.
+// Returns (nil, nil) if the validator has no registration (verified via non-existence proof).
 func (q *VerifiedQueryClient) getDKGRegistration(ctx context.Context, codeCommitmentHex string, round uint32, validatorAddr string) (*pb.DKGRegistration, error) {
 	key := GetDKGRegistrationKey(codeCommitmentHex, round, validatorAddr)
 
@@ -276,8 +286,9 @@ func (q *VerifiedQueryClient) getDKGRegistration(ctx context.Context, codeCommit
 		return nil, fmt.Errorf("failed to get DKG registration: %w", err)
 	}
 
+	// No data means the key doesn't exist (proven by non-existence proof)
 	if len(bz) == 0 {
-		return nil, errors.New("DKG registration not found")
+		return nil, nil
 	}
 
 	// Decode DKGRegistration from protobuf
@@ -491,14 +502,18 @@ func identifyProofIndices(proofTypes []string) (moduleProofIdx, simpleProofIdx i
 }
 
 // verifyMultiStoreProof verifies a multi-store proof chain (Module + Simple).
+// Supports both existence proofs (key exists with value) and non-existence proofs
+// (key does not exist in the module store).
 func verifyMultiStoreProof(
 	moduleProof, simpleProof *ics23.CommitmentProof,
 	moduleType, simpleType string,
 	moduleKey, simpleKey, queryKey, value, appHash []byte,
 ) error {
-	// Validate proof structure
-	if moduleProof.GetExist() == nil {
-		return errors.New("module proof missing ExistProof")
+	// Determine proof type: existence or non-existence
+	isNonExistence := moduleProof.GetNonexist() != nil
+
+	if !isNonExistence && moduleProof.GetExist() == nil {
+		return errors.New("module proof missing both ExistProof and NonExistProof")
 	}
 	if simpleProof.GetExist() == nil {
 		return errors.New("simple proof missing ExistProof")
@@ -508,27 +523,53 @@ func verifyMultiStoreProof(
 	//
 	// In Cosmos SDK multi-store architecture:
 	// 1. Simple proof proves: storeKey -> moduleRoot (in the multi-store root = AppHash)
-	// 2. Module proof (IAVL/SMT) proves: key -> value (in the module's tree with root = moduleRoot)
+	// 2. Module proof (IAVL/SMT) proves: key -> value (existence) or key absence (non-existence)
 	//
 	// The connection point is:
 	// - simpleProof.GetExist().Value contains the expected moduleRoot
-	// - moduleProof must prove key->value under that exact moduleRoot
+	// - moduleProof must verify under that exact moduleRoot
 	//
-	// Verification order:
-	// 1. Get expected moduleRoot from Simple proof's value
-	// 2. Verify module proof with that moduleRoot
-	// 3. Verify Simple proof with AppHash
+	// For non-existence proofs (querying a key that doesn't exist):
+	// - Module proof is a NonExistProof proving key absence in the module IAVL tree
+	// - Simple proof is still an ExistProof proving the module root in the multi-store
 
 	expectedModuleRoot := simpleProof.GetExist().Value
 
-	// Verify module proof (IAVL/SMT)
-	if err := verifyModuleProof(moduleProof, moduleType, moduleKey, queryKey, value, expectedModuleRoot); err != nil {
+	if isNonExistence {
+		// Verify non-existence of key in module store
+		if err := verifyModuleNonExistenceProof(moduleProof, moduleType, moduleKey, queryKey, expectedModuleRoot); err != nil {
+			return err
+		}
+	} else {
+		// Verify existence of key->value in module store
+		if err := verifyModuleProof(moduleProof, moduleType, moduleKey, queryKey, value, expectedModuleRoot); err != nil {
+			return err
+		}
+	}
+
+	// Verify simple proof (always existence — module store is present in multi-store)
+	if err := verifySimpleProof(simpleProof, simpleType, simpleKey, expectedModuleRoot, appHash); err != nil {
 		return err
 	}
 
-	// Verify simple proof
-	if err := verifySimpleProof(simpleProof, simpleType, simpleKey, expectedModuleRoot, appHash); err != nil {
-		return err
+	return nil
+}
+
+// verifyModuleNonExistenceProof proves that a key does NOT exist in the module store.
+func verifyModuleNonExistenceProof(
+	moduleProof *ics23.CommitmentProof,
+	moduleType string,
+	moduleKey, queryKey, expectedModuleRoot []byte,
+) error {
+	proofKey := moduleKey
+	if len(proofKey) == 0 {
+		proofKey = queryKey
+	}
+
+	spec := getProofSpec(moduleType)
+
+	if !ics23.VerifyNonMembership(spec, expectedModuleRoot, moduleProof, proofKey) {
+		return errors.New("module non-existence proof verification failed: key absence not proven under expected module root")
 	}
 
 	return nil

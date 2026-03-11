@@ -375,12 +375,20 @@ func TestVerifySimpleProof(t *testing.T) {
 }
 
 func TestVerifyMultiStoreProof(t *testing.T) {
-	t.Run("missing module exist proof", func(t *testing.T) {
-		moduleProof := &ics23.CommitmentProof{Proof: &ics23.CommitmentProof_Nonexist{Nonexist: &ics23.NonExistenceProof{}}}
+	t.Run("missing both exist and nonexist proof", func(t *testing.T) {
+		moduleProof := &ics23.CommitmentProof{} // neither exist nor nonexist
 		simpleProof := createValidICS23Proof([]byte("k"), []byte("v"))
 		err := verifyMultiStoreProof(moduleProof, simpleProof, "ics23:iavl", "ics23:simple", []byte("k"), []byte("s"), []byte("q"), []byte("v"), []byte("h"))
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "module proof missing ExistProof")
+		assert.Contains(t, err.Error(), "module proof missing both ExistProof and NonExistProof")
+	})
+	t.Run("nonexist module proof attempts verification", func(t *testing.T) {
+		moduleProof := &ics23.CommitmentProof{Proof: &ics23.CommitmentProof_Nonexist{Nonexist: &ics23.NonExistenceProof{}}}
+		simpleProof := createValidICS23Proof([]byte("k"), []byte("v"))
+		err := verifyMultiStoreProof(moduleProof, simpleProof, "ics23:iavl", "ics23:simple", []byte("k"), []byte("s"), []byte("q"), nil, []byte("h"))
+		assert.Error(t, err)
+		// Should attempt non-existence verification (and fail because proof is empty)
+		assert.Contains(t, err.Error(), "non-existence proof verification failed")
 	})
 	t.Run("missing simple exist proof", func(t *testing.T) {
 		moduleProof := createValidICS23Proof([]byte("k"), []byte("v"))
