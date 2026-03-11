@@ -106,6 +106,14 @@ func (s *DKGStore) saveState(st *DKGState, path string) error {
 
 func (s *DKGStore) updateState(codeCommitmentHex string, round uint32, update func(st *DKGState)) error {
 	path := s.statePath(codeCommitmentHex, round)
+
+	// Ensure the directory exists before acquiring the flock.
+	// On the first write for a given (round, codeCommitment), the directory
+	// will not exist yet and flock.Lock would fail with ENOENT.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return errors.Wrapf(err, "failed to create state directory for code_commitment=%s round=%d", codeCommitmentHex, round)
+	}
+
 	lock := flock.New(s.lockPath(codeCommitmentHex, round))
 
 	if err := lock.Lock(); err != nil {
@@ -125,6 +133,15 @@ func (s *DKGStore) updateState(codeCommitmentHex string, round uint32, update fu
 
 func (s *DKGStore) LoadDKGState(codeCommitmentHex string, round uint32) (*DKGState, error) {
 	path := s.statePath(codeCommitmentHex, round)
+
+	// Fast-path: if the state file does not exist, return empty state without
+	// attempting to acquire the flock. The lock file lives in the same directory
+	// as the state file; if the directory has not been created yet (e.g. first
+	// DKG round before any state is saved), flock.RLock will fail with ENOENT.
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return &DKGState{}, nil
+	}
+
 	lock := flock.New(s.lockPath(codeCommitmentHex, round))
 
 	if err := lock.RLock(); err != nil {
@@ -157,6 +174,12 @@ func (s *DKGStore) HasDKGState(codeCommitmentHex string, round uint32) (bool, er
 
 func (s *DKGStore) SaveDKGState(st *DKGState, codeCommitmentHex string, round uint32) error {
 	path := s.statePath(codeCommitmentHex, round)
+
+	// Ensure the directory exists before acquiring the flock.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return errors.Wrapf(err, "failed to create state directory for code_commitment=%s round=%d", codeCommitmentHex, round)
+	}
+
 	lock := flock.New(s.lockPath(codeCommitmentHex, round))
 
 	if err := lock.Lock(); err != nil {
