@@ -125,7 +125,13 @@ func (s *DKGStore) updateState(codeCommitmentHex string, round uint32, update fu
 
 func (s *DKGStore) LoadDKGState(codeCommitmentHex string, round uint32) (*DKGState, error) {
 	path := s.statePath(codeCommitmentHex, round)
-	lock := flock.New(s.lockPath(codeCommitmentHex, round))
+	lockPath := s.lockPath(codeCommitmentHex, round)
+
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return nil, errors.Wrapf(err, "failed to create state dir for code_commitment=%s round=%d", codeCommitmentHex, round)
+	}
+
+	lock := flock.New(lockPath)
 
 	if err := lock.RLock(); err != nil {
 		return nil, errors.Wrapf(err, "failed to acquire read lock for code_commitment=%s round=%d", codeCommitmentHex, round)
