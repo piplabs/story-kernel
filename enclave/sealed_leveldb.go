@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	cmtdb "github.com/cometbft/cometbft-db"
 	"github.com/edgelesssys/ego/ecrypto"
-	"github.com/gofrs/flock"
 	log "github.com/sirupsen/logrus"
 	"github.com/syndtr/goleveldb/leveldb"
 	lerrors "github.com/syndtr/goleveldb/leveldb/errors"
@@ -41,16 +39,6 @@ func NewSealedLevelDB(name, dir string) (cmtdb.DB, error) {
 func newSealedLevelDBWithOpts(name, dir string, o *opt.Options) (*SealedLevelDB, error) {
 	dbPath := filepath.Join(dir, name+".db")
 
-	// File locking to prevent concurrent access
-	fileLock := flock.New(dbPath + ".lock")
-	locked, err := fileLock.TryLock()
-	if err != nil {
-		return nil, fmt.Errorf("failed to acquire file lock: %w", err)
-	}
-	if !locked {
-		return nil, errors.New("database is locked by another process")
-	}
-
 	// Set default options if not provided
 	if o == nil {
 		o = &opt.Options{
@@ -58,21 +46,18 @@ func newSealedLevelDBWithOpts(name, dir string, o *opt.Options) (*SealedLevelDB,
 		}
 	}
 
-	db, err := leveldb.OpenFile(dbPath, o)
+	// Use OpenFileNoFlock which gracefully handles Gramine SGX environments
+	// where flock is not supported on passthrough files (ENOSYS).
+	stor, err := OpenFileNoFlock(dbPath)
 	if err != nil {
-		if strings.Contains(err.Error(), "resource temporarily unavailable") {
-			log.Warnf("Database %s is already opened. Closing and reopening.", name)
-			if tempDB, tempErr := leveldb.RecoverFile(dbPath, o); tempErr == nil {
-				tempDB.Close()
-			}
-			db, err = leveldb.OpenFile(dbPath, o)
-		}
+		return nil, fmt.Errorf("failed to open storage: %w", err)
 	}
 
+	db, err := leveldb.Open(stor, o)
 	if err != nil {
 		if lerrors.IsCorrupted(err) {
 			log.Warnf("Database %s is corrupted. Attempting recovery...", name)
-			db, err = leveldb.RecoverFile(dbPath, o)
+			db, err = leveldb.Recover(stor, o)
 		}
 	}
 
