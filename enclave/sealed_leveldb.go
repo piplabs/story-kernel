@@ -5,12 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
-	"syscall"
 
 	cmtdb "github.com/cometbft/cometbft-db"
 	"github.com/edgelesssys/ego/ecrypto"
-	"github.com/gofrs/flock"
 	log "github.com/sirupsen/logrus"
 	"github.com/syndtr/goleveldb/leveldb"
 	lerrors "github.com/syndtr/goleveldb/leveldb/errors"
@@ -42,21 +39,6 @@ func NewSealedLevelDB(name, dir string) (cmtdb.DB, error) {
 func newSealedLevelDBWithOpts(name, dir string, o *opt.Options) (*SealedLevelDB, error) {
 	dbPath := filepath.Join(dir, name+".db")
 
-	// File locking to prevent concurrent access.
-	// In Gramine SGX, flock is not supported on passthrough files (ENOSYS).
-	// Log a warning and proceed without the lock in that case.
-	fileLock := flock.New(dbPath + ".lock")
-	locked, err := fileLock.TryLock()
-	if err != nil {
-		if isFlockUnsupported(err) {
-			log.Warn("File locking not supported (SGX/Gramine environment), proceeding without lock")
-		} else {
-			return nil, fmt.Errorf("failed to acquire file lock: %w", err)
-		}
-	} else if !locked {
-		return nil, errors.New("database is locked by another process")
-	}
-
 	// Set default options if not provided
 	if o == nil {
 		o = &opt.Options{
@@ -64,21 +46,18 @@ func newSealedLevelDBWithOpts(name, dir string, o *opt.Options) (*SealedLevelDB,
 		}
 	}
 
-	db, err := leveldb.OpenFile(dbPath, o)
+	// Use OpenFileNoFlock which gracefully handles Gramine SGX environments
+	// where flock is not supported on passthrough files (ENOSYS).
+	stor, err := OpenFileNoFlock(dbPath)
 	if err != nil {
-		if strings.Contains(err.Error(), "resource temporarily unavailable") {
-			log.Warnf("Database %s is already opened. Closing and reopening.", name)
-			if tempDB, tempErr := leveldb.RecoverFile(dbPath, o); tempErr == nil {
-				tempDB.Close()
-			}
-			db, err = leveldb.OpenFile(dbPath, o)
-		}
+		return nil, fmt.Errorf("failed to open storage: %w", err)
 	}
 
+	db, err := leveldb.Open(stor, o)
 	if err != nil {
 		if lerrors.IsCorrupted(err) {
 			log.Warnf("Database %s is corrupted. Attempting recovery...", name)
-			db, err = leveldb.RecoverFile(dbPath, o)
+			db, err = leveldb.Recover(stor, o)
 		}
 	}
 
@@ -417,18 +396,4 @@ func (itr *sealedLevelDBIterator) assertIsValid() {
 	if !itr.Valid() {
 		panic("iterator is invalid")
 	}
-}
-
-// isFlockUnsupported returns true if the error indicates that flock
-// is not supported by the underlying filesystem (ENOSYS / ENOTSUP).
-// This occurs in Gramine SGX where flock is not implemented for
-// passthrough (allowed) files.
-func isFlockUnsupported(err error) bool {
-	var errno syscall.Errno
-	if errors.As(err, &errno) {
-		return errno == syscall.ENOSYS || errno == syscall.ENOTSUP
-	}
-
-	return strings.Contains(err.Error(), "function not implemented") ||
-		strings.Contains(err.Error(), "not supported")
 }
