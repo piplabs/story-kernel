@@ -2,10 +2,13 @@ package store
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
+	"syscall"
 
 	"github.com/gofrs/flock"
 	"github.com/pkg/errors"
@@ -15,6 +18,21 @@ import (
 	dkg "go.dedis.ch/kyber/v4/share/dkg/pedersen"
 	vss "go.dedis.ch/kyber/v4/share/vss/pedersen"
 )
+
+// memLocks is a fallback in-memory lock map used when flock(2) is unavailable
+// (e.g. Gramine SGX environments where the syscall is not implemented).
+var memLocks sync.Map // map[string]*sync.RWMutex
+
+func getMemLock(path string) *sync.RWMutex {
+	mu, _ := memLocks.LoadOrStore(path, &sync.RWMutex{})
+	return mu.(*sync.RWMutex)
+}
+
+// isErrNotImplemented reports whether err indicates a syscall is not implemented.
+func isErrNotImplemented(err error) bool {
+	var errno syscall.Errno
+	return stderrors.As(err, &errno) && errno == syscall.ENOSYS
+}
 
 type DKGState struct {
 	PubKeys        []kyber.Point
@@ -106,12 +124,23 @@ func (s *DKGStore) saveState(st *DKGState, path string) error {
 
 func (s *DKGStore) updateState(codeCommitmentHex string, round uint32, update func(st *DKGState)) error {
 	path := s.statePath(codeCommitmentHex, round)
-	lock := flock.New(s.lockPath(codeCommitmentHex, round))
+	lockPath := s.lockPath(codeCommitmentHex, round)
 
-	if err := lock.Lock(); err != nil {
-		return errors.Wrapf(err, "failed to acquire write lock for code_commitment=%s round=%d", codeCommitmentHex, round)
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return errors.Wrapf(err, "failed to create state dir for code_commitment=%s round=%d", codeCommitmentHex, round)
 	}
-	defer func() { _ = lock.Unlock() }()
+
+	lock := flock.New(lockPath)
+	if err := lock.Lock(); err != nil {
+		if !isErrNotImplemented(err) {
+			return errors.Wrapf(err, "failed to acquire write lock for code_commitment=%s round=%d", codeCommitmentHex, round)
+		}
+		mu := getMemLock(lockPath)
+		mu.Lock()
+		defer mu.Unlock()
+	} else {
+		defer func() { _ = lock.Unlock() }()
+	}
 
 	st, err := s.loadState(path)
 	if err != nil {
@@ -132,11 +161,16 @@ func (s *DKGStore) LoadDKGState(codeCommitmentHex string, round uint32) (*DKGSta
 	}
 
 	lock := flock.New(lockPath)
-
 	if err := lock.RLock(); err != nil {
-		return nil, errors.Wrapf(err, "failed to acquire read lock for code_commitment=%s round=%d", codeCommitmentHex, round)
+		if !isErrNotImplemented(err) {
+			return nil, errors.Wrapf(err, "failed to acquire read lock for code_commitment=%s round=%d", codeCommitmentHex, round)
+		}
+		mu := getMemLock(lockPath)
+		mu.RLock()
+		defer mu.RUnlock()
+	} else {
+		defer func() { _ = lock.Unlock() }()
 	}
-	defer func() { _ = lock.Unlock() }()
 
 	return s.loadState(path)
 }
@@ -163,12 +197,23 @@ func (s *DKGStore) HasDKGState(codeCommitmentHex string, round uint32) (bool, er
 
 func (s *DKGStore) SaveDKGState(st *DKGState, codeCommitmentHex string, round uint32) error {
 	path := s.statePath(codeCommitmentHex, round)
-	lock := flock.New(s.lockPath(codeCommitmentHex, round))
+	lockPath := s.lockPath(codeCommitmentHex, round)
 
-	if err := lock.Lock(); err != nil {
-		return errors.Wrapf(err, "failed to acquire write lock for code_commitment=%s round=%d", codeCommitmentHex, round)
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return errors.Wrapf(err, "failed to create state dir for code_commitment=%s round=%d", codeCommitmentHex, round)
 	}
-	defer func() { _ = lock.Unlock() }()
+
+	lock := flock.New(lockPath)
+	if err := lock.Lock(); err != nil {
+		if !isErrNotImplemented(err) {
+			return errors.Wrapf(err, "failed to acquire write lock for code_commitment=%s round=%d", codeCommitmentHex, round)
+		}
+		mu := getMemLock(lockPath)
+		mu.Lock()
+		defer mu.Unlock()
+	} else {
+		defer func() { _ = lock.Unlock() }()
+	}
 
 	return s.saveState(st, path)
 }
