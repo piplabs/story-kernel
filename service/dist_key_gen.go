@@ -470,7 +470,7 @@ func (s *DKGServer) fetchLatestPubKeysAndCoeffs(
 	codeCommitmentHex string,
 	latest *pb.DKGNetwork,
 ) ([]kyber.Point, []kyber.Point, error) {
-	prevRegs, err := s.QueryClient.GetAllVerifiedDKGRegistrations(
+	prevRegs, err := s.QueryClient.GetAllParticipantDKGRegistrations(
 		context.Background(),
 		codeCommitmentHex,
 		latest.GetRound(),
