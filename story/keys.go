@@ -28,7 +28,7 @@ func GetDKGNetworkKey(_ string, round uint32) []byte {
 }
 
 // GetDKGRegistrationKey returns the store key for a DKG registration.
-// Matches story keeper's key: fmt.Sprintf("%d_%s", round, addr.Hex()).
+// Matches story keeper's key: fmt.Sprintf("%d_%s", round, strings.ToLower(addr.Hex())).
 func GetDKGRegistrationKey(_ string, round uint32, validatorAddr string) []byte {
 	key := fmt.Sprintf("%d_%s", round, validatorAddr)
 

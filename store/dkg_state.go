@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 
-	"github.com/gofrs/flock"
 	"github.com/pkg/errors"
 
 	"go.dedis.ch/kyber/v4"
@@ -15,6 +15,10 @@ import (
 	dkg "go.dedis.ch/kyber/v4/share/dkg/pedersen"
 	vss "go.dedis.ch/kyber/v4/share/vss/pedersen"
 )
+
+// stateMu protects concurrent DKG state file access within this process.
+// Replaces file-based flock which is not supported in SGX/Gramine (ENOSYS).
+var stateMu sync.Mutex
 
 type DKGState struct {
 	PubKeys        []kyber.Point
@@ -64,10 +68,6 @@ func (s *DKGStore) statePath(codeCommitmentHex string, round uint32) string {
 	return filepath.Join(s.stateDir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex, DKGStateFile)
 }
 
-func (s *DKGStore) lockPath(codeCommitmentHex string, round uint32) string {
-	return filepath.Join(s.stateDir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex, DKGStateLockFile)
-}
-
 func (s *DKGStore) loadState(path string) (*DKGState, error) {
 	bz, err := os.ReadFile(path)
 	if err != nil {
@@ -106,12 +106,9 @@ func (s *DKGStore) saveState(st *DKGState, path string) error {
 
 func (s *DKGStore) updateState(codeCommitmentHex string, round uint32, update func(st *DKGState)) error {
 	path := s.statePath(codeCommitmentHex, round)
-	lock := flock.New(s.lockPath(codeCommitmentHex, round))
 
-	if err := lock.Lock(); err != nil {
-		return errors.Wrapf(err, "failed to acquire write lock for code_commitment=%s round=%d", codeCommitmentHex, round)
-	}
-	defer func() { _ = lock.Unlock() }()
+	stateMu.Lock()
+	defer stateMu.Unlock()
 
 	st, err := s.loadState(path)
 	if err != nil {
@@ -125,12 +122,9 @@ func (s *DKGStore) updateState(codeCommitmentHex string, round uint32, update fu
 
 func (s *DKGStore) LoadDKGState(codeCommitmentHex string, round uint32) (*DKGState, error) {
 	path := s.statePath(codeCommitmentHex, round)
-	lock := flock.New(s.lockPath(codeCommitmentHex, round))
 
-	if err := lock.RLock(); err != nil {
-		return nil, errors.Wrapf(err, "failed to acquire read lock for code_commitment=%s round=%d", codeCommitmentHex, round)
-	}
-	defer func() { _ = lock.Unlock() }()
+	stateMu.Lock()
+	defer stateMu.Unlock()
 
 	return s.loadState(path)
 }
@@ -157,12 +151,9 @@ func (s *DKGStore) HasDKGState(codeCommitmentHex string, round uint32) (bool, er
 
 func (s *DKGStore) SaveDKGState(st *DKGState, codeCommitmentHex string, round uint32) error {
 	path := s.statePath(codeCommitmentHex, round)
-	lock := flock.New(s.lockPath(codeCommitmentHex, round))
 
-	if err := lock.Lock(); err != nil {
-		return errors.Wrapf(err, "failed to acquire write lock for code_commitment=%s round=%d", codeCommitmentHex, round)
-	}
-	defer func() { _ = lock.Unlock() }()
+	stateMu.Lock()
+	defer stateMu.Unlock()
 
 	return s.saveState(st, path)
 }
