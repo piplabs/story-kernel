@@ -313,7 +313,14 @@ func verifyFinalizationSignature(commPubKey []byte, round uint32, codeCommitment
 	msgHash := ecrypto.Keccak256(encoded)
 	ethMsgHash := toEthSignedMessageHash(msgHash)
 
-	pubKey, err := ecrypto.SigToPub(ethMsgHash, signature)
+	// Normalize Ethereum v-value (27/28 -> 0/1) for SigToPub.
+	sig := make([]byte, len(signature))
+	copy(sig, signature)
+	if sig[64] >= 27 {
+		sig[64] -= 27
+	}
+
+	pubKey, err := ecrypto.SigToPub(ethMsgHash, sig)
 	if err != nil {
 		return false
 	}
