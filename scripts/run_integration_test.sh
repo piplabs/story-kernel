@@ -14,7 +14,7 @@ CGO_LDFLAGS_ALLOW=".*" ./scripts/go_with_cpp.sh "${CBMPC_PATH}" \
   -o ./build/integration-test
 
 echo "[integration-test] Generating Gramine manifest..."
-gramine-manifest -D bin_name=integration-test \
+gramine-manifest -D bin_name=integration-test -D log_level=error \
   story-kernel.manifest.template integration-test.manifest
 sed -i 's/enclave_size = "1G"/enclave_size = "4G"/' integration-test.manifest
 
