@@ -19,8 +19,7 @@ const (
 	KeyEd25519File   = "ed25519_priv.sealed"
 	KeySecp256k1File = "secp256k1_priv.sealed"
 
-	DKGStateFile     = "state.json"
-	DKGStateLockFile = "state.lock"
+	DKGStateFile = "state.json"
 )
 
 type DKGStore struct {
