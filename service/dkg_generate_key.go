@@ -59,31 +59,32 @@ func (s *DKGServer) GenerateAndSealKey(_ context.Context, req *pb.GenerateAndSea
 
 	log.Info("Key pairs are successfully generated and sealed or loaded from the existing key files")
 
-	// Get round context to retrieve DKG network and start block information
-	rc, err := s.GetOrLoadRoundContext(codeCommitmentHex, req.Round)
+	// Only fetch the DKG network (not registrations) since no registrations
+	// exist yet at key generation time.
+	network, err := s.QueryClient.GetDKGNetwork(context.Background(), codeCommitmentHex, req.Round)
 	if err != nil {
 		log.WithFields(log.Fields{
 			"round":           req.Round,
 			"code_commitment": codeCommitmentHex,
-		}).Errorf("failed to get or load roundContext: %v", err)
+		}).Errorf("failed to get DKG network: %v", err)
 
-		return nil, status.Errorf(codes.Internal, "failed to get or load roundContext")
+		return nil, status.Errorf(codes.Internal, "failed to get DKG network")
 	}
 
 	// Verify the DKG start block is on the canonical chain.
 	// This ensures the DKG round was legitimately initiated on-chain before generating keys.
-	if err := s.verifyDKGStartBlock(context.Background(), rc.Network); err != nil {
+	if err := s.verifyDKGStartBlock(context.Background(), network); err != nil {
 		log.WithFields(log.Fields{
 			"round":              req.Round,
 			"code_commitment":    codeCommitmentHex,
-			"start_block_height": rc.Network.StartBlockHeight,
-			"start_block_hash":   hex.EncodeToString(rc.Network.StartBlockHash),
+			"start_block_height": network.StartBlockHeight,
+			"start_block_hash":   hex.EncodeToString(network.StartBlockHash),
 			"error":              err.Error(),
 		}).Errorf("DKG start block verification failed")
 
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"start block verification failed at height %d: %v",
-			rc.Network.StartBlockHeight, err)
+			network.StartBlockHeight, err)
 	}
 
 	// Generate a quote with start block information included in report data.
@@ -94,8 +95,8 @@ func (s *DKGServer) GenerateAndSealKey(_ context.Context, req *pb.GenerateAndSea
 		req.Round,
 		edPubBz,
 		ecrypto.FromECDSAPub(secpPub)[1:],
-		rc.Network.StartBlockHeight,
-		rc.Network.StartBlockHash,
+		network.StartBlockHeight,
+		network.StartBlockHash,
 	)
 	if err != nil {
 		log.WithFields(log.Fields{
@@ -103,8 +104,8 @@ func (s *DKGServer) GenerateAndSealKey(_ context.Context, req *pb.GenerateAndSea
 			"round":              req.Round,
 			"ed25519_pub_key":    hex.EncodeToString(edPubBz),
 			"secp256k1_pub_key":  hex.EncodeToString(ecrypto.FromECDSAPub(secpPub)),
-			"start_block_height": rc.Network.StartBlockHeight,
-			"start_block_hash":   hex.EncodeToString(rc.Network.StartBlockHash),
+			"start_block_height": network.StartBlockHeight,
+			"start_block_hash":   hex.EncodeToString(network.StartBlockHash),
 		}).Errorf("failed to calculate report data: %v", err)
 
 		return nil, status.Errorf(codes.Internal, "failed to calculate report data")
@@ -126,8 +127,8 @@ func (s *DKGServer) GenerateAndSealKey(_ context.Context, req *pb.GenerateAndSea
 		DkgPubKey:        edPubBz,
 		CommPubKey:       ecrypto.FromECDSAPub(secpPub)[1:],
 		EnclaveReport:    rawQuote,
-		StartBlockHeight: rc.Network.StartBlockHeight,
-		StartBlockHash:   rc.Network.StartBlockHash,
+		StartBlockHeight: network.StartBlockHeight,
+		StartBlockHash:   network.StartBlockHash,
 	}, nil
 }
 
