@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -552,10 +551,11 @@ func TestNewCometLogger(t *testing.T) {
 }
 
 func TestGetLatestActiveDKGNetwork_ParseError(t *testing.T) {
-	invalidKey := "invalid_format"
-	var codeCommitmentHex string
+	// On-chain latest active round value is just a round number string.
+	// Non-numeric values should fail parsing.
+	invalidKey := "not_a_number"
 	var round uint32
-	_, err := fmt.Sscanf(invalidKey, "%s_%d", &codeCommitmentHex, &round)
+	_, err := fmt.Sscanf(invalidKey, "%d", &round)
 	assert.Error(t, err)
 }
 
@@ -710,37 +710,32 @@ func TestMinWitnessValidation(t *testing.T) {
 }
 
 func TestGetLatestActiveDKGNetwork_Parsing(t *testing.T) {
-	t.Run("parses network key", func(t *testing.T) {
-		networkKey := "test_code_commitment_123"
-		lastUnderscore := strings.LastIndex(networkKey, "_")
-		require.Positive(t, lastUnderscore)
-		codeCommitmentHex := networkKey[:lastUnderscore]
+	t.Run("parses round number", func(t *testing.T) {
+		// On-chain latest active round value is just a round number string.
+		networkKeyBz := []byte("123")
 		var round uint32
-		_, err := fmt.Sscanf(networkKey[lastUnderscore+1:], "%d", &round)
+		_, err := fmt.Sscanf(string(networkKeyBz), "%d", &round)
 		assert.NoError(t, err)
-		assert.Equal(t, "test_code_commitment", codeCommitmentHex)
 		assert.Equal(t, uint32(123), round)
 	})
-	t.Run("parses key without underscore in code commitment", func(t *testing.T) {
-		networkKey := "abcdef_42"
-		lastUnderscore := strings.LastIndex(networkKey, "_")
-		require.Positive(t, lastUnderscore)
-		codeCommitmentHex := networkKey[:lastUnderscore]
+	t.Run("parses single digit round", func(t *testing.T) {
+		networkKeyBz := []byte("1")
 		var round uint32
-		_, err := fmt.Sscanf(networkKey[lastUnderscore+1:], "%d", &round)
+		_, err := fmt.Sscanf(string(networkKeyBz), "%d", &round)
 		assert.NoError(t, err)
-		assert.Equal(t, "abcdef", codeCommitmentHex)
-		assert.Equal(t, uint32(42), round)
+		assert.Equal(t, uint32(1), round)
 	})
-	t.Run("handles missing underscore", func(t *testing.T) {
-		networkKey := "invalidformat"
-		lastUnderscore := strings.LastIndex(networkKey, "_")
-		assert.Equal(t, -1, lastUnderscore)
+	t.Run("handles non-numeric value", func(t *testing.T) {
+		networkKeyBz := []byte("invalid")
+		var round uint32
+		_, err := fmt.Sscanf(string(networkKeyBz), "%d", &round)
+		assert.Error(t, err)
 	})
-	t.Run("handles trailing underscore", func(t *testing.T) {
-		networkKey := "code_commitment_"
-		lastUnderscore := strings.LastIndex(networkKey, "_")
-		assert.Equal(t, len(networkKey)-1, lastUnderscore)
+	t.Run("handles empty value", func(t *testing.T) {
+		networkKeyBz := []byte("")
+		var round uint32
+		_, err := fmt.Sscanf(string(networkKeyBz), "%d", &round)
+		assert.Error(t, err)
 	})
 }
 
