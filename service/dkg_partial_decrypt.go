@@ -242,7 +242,13 @@ func marshalPubShare(scalar kyber.Scalar) ([]byte, error) {
 	suite := edwards25519.NewBlakeSHA256Ed25519()
 	pubSharePoint := suite.Point().Mul(scalar, nil)
 
-	return pubSharePoint.MarshalBinary()
+	pointBz, err := pubSharePoint.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+
+	// Prepend the cb-mpc curve prefix so TDH2Combine can deserialize Qi correctly.
+	return append([]byte{sec1UncompressedPrefix, tdh2Edwards25519CurveID}, pointBz...), nil
 }
 
 // encryptPartialToRequester performs secp256k1 ECDH with an ephemeral key and encrypts the partial via AES-GCM.
