@@ -159,14 +159,34 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 	}
 
 	// Load sealed secp256k1 key and sign the hash
+	keyPath := s.DKGStore.Secp256k1KeyPath(codeCommitmentHex, req.GetRound())
 	priv, err := s.DKGStore.LoadSealedSecp256k1Key(codeCommitmentHex, req.GetRound())
 	if err != nil {
-		log.Errorf("failed to load sealed Secp256k1 private key: %v", err)
+		log.WithFields(log.Fields{
+			"key_path":        keyPath,
+			"round":           req.GetRound(),
+			"code_commitment": codeCommitmentHex,
+		}).Errorf("failed to load sealed Secp256k1 private key: %v", err)
 
 		return nil, status.Errorf(codes.Internal, "failed to load sealed secp256k1 key")
 	}
 	// Zero out the private key after use to minimize exposure in memory.
 	defer zeroPrivateKey(priv)
+
+	// Debug: log the address derived from the loaded key for diagnosing commPubKey mismatch
+	loadedPub := ecrypto.FromECDSAPub(&priv.PublicKey)[1:]
+	loadedAddr := ecrypto.Keccak256(loadedPub)[12:]
+	log.WithFields(log.Fields{
+		"round":               req.GetRound(),
+		"code_commitment":     codeCommitmentHex,
+		"key_path":            keyPath,
+		"loaded_comm_pub_key": hex.EncodeToString(loadedPub),
+		"loaded_derived_addr": hex.EncodeToString(loadedAddr),
+		"participants_root":   hex.EncodeToString(participantsRoot[:]),
+		"global_pub_key":      hex.EncodeToString(globalPubKey),
+		"pub_key_share":       hex.EncodeToString(pubKeyShare),
+		"resp_hash":           hex.EncodeToString(respHash),
+	}).Info("DEBUG: FinalizeDKG loaded sealed key and computed response hash")
 
 	signature, err := ecrypto.Sign(respHash, priv)
 	if err != nil {
@@ -176,6 +196,30 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 	}
 	if signature[64] < 27 {
 		signature[64] += 27
+	}
+
+	// Debug: self-verify the signature to catch mismatches before sending
+	selfVerifySig := make([]byte, 65)
+	copy(selfVerifySig, signature)
+	if selfVerifySig[64] >= 27 {
+		selfVerifySig[64] -= 27
+	}
+	recoveredPub, recoverErr := ecrypto.SigToPub(respHash, selfVerifySig)
+	if recoverErr != nil {
+		log.WithFields(log.Fields{
+			"round": req.GetRound(),
+			"error": recoverErr.Error(),
+		}).Error("DEBUG: failed to self-verify finalization signature")
+	} else {
+		recoveredPubBytes := ecrypto.FromECDSAPub(recoveredPub)[1:]
+		recoveredAddrBytes := ecrypto.Keccak256(recoveredPubBytes)[12:]
+		sigMatch := hex.EncodeToString(loadedAddr) == hex.EncodeToString(recoveredAddrBytes)
+		log.WithFields(log.Fields{
+			"round":             req.GetRound(),
+			"loaded_addr":       hex.EncodeToString(loadedAddr),
+			"recovered_addr":    hex.EncodeToString(recoveredAddrBytes),
+			"signature_matches": sigMatch,
+		}).Info("DEBUG: FinalizeDKG self-verification result")
 	}
 
 	// Construct response

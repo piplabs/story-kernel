@@ -25,6 +25,11 @@ func (s *DKGStore) secp256k1Path(codeCommitmentHex string, round uint32) string 
 	return filepath.Join(s.keyDir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex, KeySecp256k1File)
 }
 
+// Secp256k1KeyPath returns the sealed key file path for debugging.
+func (s *DKGStore) Secp256k1KeyPath(codeCommitmentHex string, round uint32) string {
+	return s.secp256k1Path(codeCommitmentHex, round)
+}
+
 func (s *DKGStore) LoadOrGenerateEd25519Key(codeCommitmentHex string, round uint32) (kyber.Scalar, kyber.Point, error) {
 	var (
 		edPriv kyber.Scalar

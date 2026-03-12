@@ -57,7 +57,16 @@ func (s *DKGServer) GenerateAndSealKey(_ context.Context, req *pb.GenerateAndSea
 		return nil, status.Errorf(codes.Internal, "failed to load or generate Secp256k1 key")
 	}
 
-	log.Info("Key pairs are successfully generated and sealed or loaded from the existing key files")
+	// Debug: log derived address from generated/loaded secp256k1 key for diagnosing commPubKey mismatch
+	commPubKeyBytes := ecrypto.FromECDSAPub(secpPub)[1:]
+	derivedAddr := ecrypto.Keccak256(commPubKeyBytes)[12:]
+	log.WithFields(log.Fields{
+		"round":            req.Round,
+		"code_commitment":  codeCommitmentHex,
+		"comm_pub_key_hex": hex.EncodeToString(commPubKeyBytes),
+		"derived_address":  hex.EncodeToString(derivedAddr),
+		"key_path":         s.DKGStore.Secp256k1KeyPath(codeCommitmentHex, req.GetRound()),
+	}).Info("Key pairs are successfully generated and sealed or loaded from the existing key files")
 
 	// Only fetch the DKG network (not registrations) since no registrations
 	// exist yet at key generation time.
