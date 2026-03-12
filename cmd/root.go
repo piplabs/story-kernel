@@ -18,7 +18,7 @@ const (
 
 var rootCmd = &cobra.Command{
 	Use:   "story-kernel",
-	Short: "A daemon of story-kernel for IP Vault",
+	Short: "A daemon of story-kernel for IP Vault (v2)",
 }
 
 func Execute() {
