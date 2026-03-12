@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -37,6 +38,18 @@ func TestDKGHappyPath_3Nodes(t *testing.T) {
 	for i, dr := range cluster.DealResponses {
 		require.Len(t, dr.GetDeals(), expectedDeals, "node %d: expected %d deals", i, expectedDeals)
 		t.Logf("[deal] node %d: deals=%d (expected %d)", i, len(dr.GetDeals()), expectedDeals)
+		for j, d := range dr.GetDeals() {
+			enc := d.GetDeal()
+			var dhKey, nonce, sig, cipher string
+			if enc != nil {
+				dhKey = fmt.Sprintf("%x", enc.GetDhKey())
+				nonce = fmt.Sprintf("%x", enc.GetNonce())
+				sig = fmt.Sprintf("%x", enc.GetSignature())
+				cipher = fmt.Sprintf("len=%d", len(enc.GetCipher()))
+			}
+			t.Logf("[deal] node %d deal[%d]: from=%d to=%d signature=%x dh_key=%s nonce=%s encrypted_sig=%s cipher=%s",
+				i, j, d.GetIndex(), d.GetRecipientIndex(), d.GetSignature(), dhKey, nonce, sig, cipher)
+		}
 	}
 
 	// Validate finalize responses
