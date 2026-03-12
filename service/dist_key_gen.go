@@ -71,11 +71,14 @@ func (s *DKGServer) buildInitDKG(
 		return nil, errors.Wrapf(err, "load Ed25519 key (round=%d)", round)
 	}
 
+	// Threshold=0 lets kyber default to MinimumT(len(participants)), ensuring
+	// consistency across all DKG participants regardless of on-chain state timing.
+	// The on-chain operational threshold is enforced at the protocol level, not here.
 	return dkg.NewDistKeyGenerator(
 		s.Suite,
 		longterm,
 		nextPubs,
-		int(threshold),
+		0,
 	)
 }
 
@@ -94,11 +97,13 @@ func (s *DKGServer) rebuildInitDKG(
 		return nil, err
 	}
 
+	// Threshold=0 lets kyber default to MinimumT(len(participants)).
+	// See buildInitDKG for rationale.
 	dkgInst, err := dkg.NewDistKeyGenerator(
 		s.Suite,
 		longterm,
 		st.PubKeys,
-		int(st.Threshold),
+		0,
 	)
 	if err != nil {
 		return nil, err
@@ -243,13 +248,18 @@ func (s *DKGServer) buildResharingPrevDKG(
 	// operational threshold causes an index-out-of-range panic in kyber.
 	oldThreshold := len(share.Commits)
 
+	// Threshold=0 lets kyber default to MinimumT(len(NewNodes)), ensuring the
+	// new polynomial degree is consistent across all participants. The on-chain
+	// operational threshold (nextT) is NOT suitable here — it can differ from the
+	// cryptographic threshold used by kyber, causing index-out-of-range panics
+	// in resharingKey() when deal.Commitments length doesn't match d.newT.
 	return dkg.NewDistKeyHandler(&dkg.Config{
 		Suite:        s.Suite,
 		Longterm:     longterm,
 		OldNodes:     prevPubs,
 		NewNodes:     nextPubs,
 		Share:        share,
-		Threshold:    int(nextT),
+		Threshold:    0,
 		OldThreshold: oldThreshold,
 	})
 }
@@ -301,13 +311,15 @@ func (s *DKGServer) rebuildResharingPrevDKG(
 	// threshold. See buildResharingPrevDKG for details.
 	oldThreshold := len(share.Commits)
 
+	// Threshold=0 lets kyber default to MinimumT(len(NewNodes)).
+	// See buildResharingPrevDKG for rationale.
 	dkgInst, err := dkg.NewDistKeyHandler(&dkg.Config{
 		Suite:        s.Suite,
 		Longterm:     longterm,
 		OldNodes:     prevState.PubKeys,
 		NewNodes:     nextState.PubKeys,
 		Share:        share,
-		Threshold:    int(nextState.Threshold),
+		Threshold:    0,
 		OldThreshold: oldThreshold,
 	})
 	if err != nil {
@@ -450,13 +462,16 @@ func (s *DKGServer) buildResharingNextDKG(codeCommitmentHex string, round, nextT
 		"publicCoeffs_len": len(publicCoeffs),
 	}).Info("DEBUG: buildResharingNextDKG parameters")
 
+	// Threshold=0 lets kyber default to MinimumT(len(NewNodes)), ensuring the
+	// new polynomial degree matches what dealers actually produce in their deals.
+	// See buildResharingPrevDKG for detailed rationale.
 	nextDKG, err := dkg.NewDistKeyHandler(&dkg.Config{
 		Suite:        s.Suite,
 		Longterm:     longterm,
 		OldNodes:     prevPubs,
 		NewNodes:     nextPubs,
 		PublicCoeffs: publicCoeffs,
-		Threshold:    int(nextT),
+		Threshold:    0,
 		OldThreshold: oldThreshold,
 	})
 	if err != nil {
@@ -490,13 +505,15 @@ func (s *DKGServer) rebuildResharingNextDKG(
 	// threshold. See buildResharingNextDKG for details.
 	oldThreshold := len(prevState.PublicCoeffs)
 
+	// Threshold=0 lets kyber default to MinimumT(len(NewNodes)).
+	// See buildResharingNextDKG for rationale.
 	dkgInst, err := dkg.NewDistKeyHandler(&dkg.Config{
 		Suite:        s.Suite,
 		Longterm:     longterm,
 		OldNodes:     prevState.PubKeys,
 		NewNodes:     nextState.PubKeys,
 		PublicCoeffs: prevState.PublicCoeffs,
-		Threshold:    int(nextState.Threshold),
+		Threshold:    0,
 		OldThreshold: oldThreshold,
 	})
 	if err != nil {
