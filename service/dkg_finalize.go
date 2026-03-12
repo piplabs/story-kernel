@@ -87,7 +87,7 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 		return nil, status.Errorf(codes.Internal, "distributed key private share is nil")
 	}
 
-	log.Info("Distributed key share has been generated", "code_commitment", codeCommitmentHex, "round", req.GetRound())
+	log.Infof("Distributed key share has been generated code_commitment=%s round=%d", codeCommitmentHex, req.GetRound())
 
 	pubKeyShare, err := s.Suite.Point().Mul(priShare.V, nil).MarshalBinary()
 	if err != nil {

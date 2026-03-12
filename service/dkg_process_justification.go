@@ -129,7 +129,7 @@ func (s *DKGServer) ProcessJustification(_ context.Context, req *pb.ProcessJusti
 		}
 	}
 
-	log.Info("All justifications have been processed", "code_commitment", codeCommitmentHex, "round", req.GetRound())
+	log.Infof("All justifications have been processed code_commitment=%s round=%d", codeCommitmentHex, req.GetRound())
 
 	return &pb.ProcessJustificationResponse{}, nil
 }

@@ -89,13 +89,13 @@ func (s *DKGServer) ProcessResponses(_ context.Context, req *pb.ProcessResponses
 		for _, distKeyGen := range distKeyGens {
 			j, err := distKeyGen.ProcessResponse(resp)
 			if err != nil {
-				// skip the responses
+				// skip duplicate or already-processed responses
 				log.WithFields(log.Fields{
 					"round":           req.GetRound(),
 					"code_commitment": codeCommitmentHex,
 					"index":           response.GetIndex(),
 					"vss_response":    response.GetVssResponse(),
-				}).Errorf("failed to process the response: %v", err)
+				}).Warnf("skipping duplicate response: %v", err)
 
 				continue
 			}
@@ -124,7 +124,7 @@ func (s *DKGServer) ProcessResponses(_ context.Context, req *pb.ProcessResponses
 		return nil, status.Errorf(codes.Internal, "failed to add responses to the DKG state")
 	}
 
-	log.Info("All responses have been processed", "code_commitment", codeCommitmentHex, "round", req.GetRound())
+	log.Infof("All responses have been processed code_commitment=%s round=%d", codeCommitmentHex, req.GetRound())
 
 	return &pb.ProcessResponsesResponse{
 		Justifications: justifications,

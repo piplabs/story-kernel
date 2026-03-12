@@ -88,7 +88,7 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 		return nil, status.Errorf(codes.Internal, "failed to generate encrypted deals")
 	}
 
-	log.Info("Succeed to generate deals", "code_commitment", codeCommitmentHex, "round", req.GetRound())
+	log.Infof("Succeed to generate deals code_commitment=%s round=%d", codeCommitmentHex, req.GetRound())
 
 	// Set deals into response
 	resp := createGenerateDealsResponse(req.GetRound(), req.GetCodeCommitment(), deals)

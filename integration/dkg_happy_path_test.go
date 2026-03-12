@@ -16,19 +16,27 @@ func TestDKGHappyPath_3Nodes(t *testing.T) {
 	cluster := NewDKGTestCluster(t, 3, 2)
 	defer cluster.Cleanup()
 
+	t.Logf("[setup] nodes=%d threshold=%d codeCommitment=%x round=%d",
+		3, 2, cluster.CodeCommitment, cluster.Round)
+
 	cluster.RunFullDKG()
+
+	t.Log("[phase] RunFullDKG completed")
 
 	// Validate key responses
 	for i, kr := range cluster.KeyResponses {
 		require.NotEmpty(t, kr.GetDkgPubKey(), "node %d: empty DkgPubKey", i)
 		require.NotEmpty(t, kr.GetCommPubKey(), "node %d: empty CommPubKey", i)
 		require.NotEmpty(t, kr.GetEnclaveReport(), "node %d: empty EnclaveReport", i)
+		t.Logf("[key] node %d: dkg_pub_key=%x comm_pub_key=%x enclave_report_len=%d",
+			i, kr.GetDkgPubKey(), kr.GetCommPubKey(), len(kr.GetEnclaveReport()))
 	}
 
 	// Validate deals: each node should generate n-1 deals (one per peer)
 	expectedDeals := len(cluster.Servers) - 1
 	for i, dr := range cluster.DealResponses {
 		require.Len(t, dr.GetDeals(), expectedDeals, "node %d: expected %d deals", i, expectedDeals)
+		t.Logf("[deal] node %d: deals=%d (expected %d)", i, len(dr.GetDeals()), expectedDeals)
 	}
 
 	// Validate finalize responses
@@ -36,6 +44,7 @@ func TestDKGHappyPath_3Nodes(t *testing.T) {
 
 	// All nodes must agree on the global public key
 	globalPubKey := cluster.FinalizeResps[0].GetGlobalPubKey()
+	t.Logf("[finalize] global_pub_key=%x (len=%d)", globalPubKey, len(globalPubKey))
 	require.NotEmpty(t, globalPubKey, "global pub key should not be empty")
 	for i := 1; i < 3; i++ {
 		require.True(t,
@@ -46,6 +55,10 @@ func TestDKGHappyPath_3Nodes(t *testing.T) {
 	// All nodes must agree on public_coeffs
 	coeffs0 := cluster.FinalizeResps[0].GetPublicCoeffs()
 	require.NotEmpty(t, coeffs0)
+	t.Logf("[finalize] public_coeffs count=%d", len(coeffs0))
+	for j, c := range coeffs0 {
+		t.Logf("[finalize] public_coeff[%d]=%x", j, c)
+	}
 	for i := 1; i < 3; i++ {
 		coeffsI := cluster.FinalizeResps[i].GetPublicCoeffs()
 		require.Len(t, coeffsI, len(coeffs0))
@@ -61,6 +74,8 @@ func TestDKGHappyPath_3Nodes(t *testing.T) {
 	for i, fr := range cluster.FinalizeResps {
 		shares[i] = fr.GetPubKeyShare()
 		require.NotEmpty(t, shares[i], "node %d: empty pub_key_share", i)
+		t.Logf("[finalize] node %d: pub_key_share=%x participants_root=%x signature=%x",
+			i, fr.GetPubKeyShare(), fr.GetParticipantsRoot(), fr.GetSignature())
 	}
 	require.False(t, bytes.Equal(shares[0], shares[1]), "node 0 and 1 shares should differ")
 	require.False(t, bytes.Equal(shares[1], shares[2]), "node 1 and 2 shares should differ")
@@ -71,6 +86,7 @@ func TestDKGHappyPath_3Nodes(t *testing.T) {
 
 	regs, err := cluster.MockQC.GetAllVerifiedDKGRegistrations(context.Background(), hex.EncodeToString(cluster.CodeCommitment), cluster.Round)
 	require.NoError(t, err)
+	t.Logf("[registry] loaded %d registrations", len(regs))
 
 	for i, fr := range cluster.FinalizeResps {
 		var participantsRoot [32]byte
@@ -79,6 +95,7 @@ func TestDKGHappyPath_3Nodes(t *testing.T) {
 		// CommPubKey in registration is 65 bytes (with 0x04 prefix)
 		commPubKey := regs[i].GetCommPubKey()
 		require.Len(t, commPubKey, 65)
+		t.Logf("[verify] node %d: comm_pub_key=%x participants_root=%x", i, commPubKey, participantsRoot)
 
 		ok := verifyFinalizationSignature(
 			commPubKey,
@@ -90,6 +107,7 @@ func TestDKGHappyPath_3Nodes(t *testing.T) {
 			fr.GetPubKeyShare(),
 			fr.GetSignature(),
 		)
+		t.Logf("[verify] node %d: signature_ok=%v", i, ok)
 		require.True(t, ok, "node %d: finalization signature verification failed", i)
 	}
 }

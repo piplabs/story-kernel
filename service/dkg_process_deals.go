@@ -94,7 +94,7 @@ func (s *DKGServer) ProcessDeals(_ context.Context, req *pb.ProcessDealsRequest)
 		return nil, status.Errorf(codes.Internal, "failed to add deals to the DKG state")
 	}
 
-	log.Info("All deals have been processed", "code_commitment", codeCommitmentHex, "round", req.GetRound())
+	log.Infof("All deals have been processed code_commitment=%s round=%d", codeCommitmentHex, req.GetRound())
 
 	return &pb.ProcessDealsResponse{
 		CodeCommitment: req.GetCodeCommitment(),
