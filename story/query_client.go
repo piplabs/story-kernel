@@ -314,24 +314,14 @@ func (q *VerifiedQueryClient) GetLatestActiveDKGNetwork(ctx context.Context) (*p
 		return nil, errors.New("no active DKG network found")
 	}
 
-	// The value is a string containing "{code_commitment_hex}_{round}"
-	networkKey := string(networkKeyBz)
-
-	// Parse to get code commitment and round
-	// Use strings.LastIndex since code_commitment_hex itself may contain underscores
-	lastUnderscore := strings.LastIndex(networkKey, "_")
-	if lastUnderscore < 0 || lastUnderscore == len(networkKey)-1 {
-		return nil, fmt.Errorf("failed to parse network key: %s", networkKey)
-	}
-	codeCommitmentHex := networkKey[:lastUnderscore]
+	// The on-chain value is the round number as a string (e.g., "23").
 	var round uint32
-	_, err = fmt.Sscanf(networkKey[lastUnderscore+1:], "%d", &round)
+	_, err = fmt.Sscanf(string(networkKeyBz), "%d", &round)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse round from network key %s: %w", networkKey, err)
+		return nil, fmt.Errorf("failed to parse round from latest active key %s: %w", string(networkKeyBz), err)
 	}
 
-	// Now get the actual network
-	return q.GetDKGNetwork(ctx, codeCommitmentHex, round)
+	return q.GetDKGNetwork(ctx, "", round)
 }
 
 // getStoreData retrieves and verifies data from the store using Merkle proofs.
