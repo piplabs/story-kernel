@@ -139,13 +139,18 @@ func TestCheatingDetection_ReplayedDeal(t *testing.T) {
 		}
 	}
 
-	// Process normally first
-	_, err := cluster.Servers[0].ProcessDeals(ctx, &pb.ProcessDealsRequest{
+	// The real invariant: the full DKG flow can still complete after a replay.
+	// Collect responses from all nodes.
+	processedResps := make([][]*pb.Response, n)
+
+	// Process node 0's deals and capture responses from the first (valid) call.
+	resp0, err := cluster.Servers[0].ProcessDeals(ctx, &pb.ProcessDealsRequest{
 		CodeCommitment: cluster.CodeCommitment,
 		Round:          cluster.Round,
 		Deals:          dealsByRecipient[0],
 	})
-	require.NoError(t, err, "first ProcessDeals should succeed")
+	require.NoError(t, err, "first ProcessDeals on node 0 should succeed")
+	processedResps[0] = resp0.GetResponses()
 
 	// Replaying the same deals — should either be a no-op or return an error,
 	// but must not corrupt DKG state.
@@ -155,18 +160,6 @@ func TestCheatingDetection_ReplayedDeal(t *testing.T) {
 		Deals:          dealsByRecipient[0],
 	})
 
-	// The real invariant: the full DKG flow can still complete after the replay.
-	// Collect responses from all nodes (node 0 was already processed above).
-	processedResps := make([][]*pb.Response, n)
-	resp0, err := cluster.Servers[0].ProcessDeals(ctx, &pb.ProcessDealsRequest{
-		CodeCommitment: cluster.CodeCommitment,
-		Round:          cluster.Round,
-		Deals:          dealsByRecipient[0],
-	})
-	// Node 0 may error or succeed on the third call — capture whatever responses it has
-	if err == nil {
-		processedResps[0] = resp0.GetResponses()
-	}
 	for i := 1; i < n; i++ {
 		resp, e := cluster.Servers[i].ProcessDeals(ctx, &pb.ProcessDealsRequest{
 			CodeCommitment: cluster.CodeCommitment,
