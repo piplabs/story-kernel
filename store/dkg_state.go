@@ -51,12 +51,13 @@ type DKGState struct {
 }
 
 type dkgStateDisk struct {
-	PubKeysBase64  []string            `json:"pub_keys_base_64"`
-	Threshold      uint32              `json:"threshold"`
-	Deals          []dkg.Deal          `json:"deals"`
-	Responses      []dkg.Response      `json:"responses"`
-	Justifications []justificationDisk `json:"justifications,omitempty"`
-	FromRound      uint32              `json:"from_round,omitempty"`
+	PubKeysBase64       []string            `json:"pub_keys_base_64"`
+	Threshold           uint32              `json:"threshold"`
+	Deals               []dkg.Deal          `json:"deals"`
+	Responses           []dkg.Response      `json:"responses"`
+	Justifications      []justificationDisk `json:"justifications,omitempty"`
+	FromRound           uint32              `json:"from_round,omitempty"`
+	PublicCoeffsBase64  []string            `json:"public_coeffs_base_64,omitempty"`
 }
 
 // justificationDisk is the JSON-serializable representation of dkg.Justification.
@@ -282,12 +283,13 @@ func (s *DKGStore) toDisk(st *DKGState) (*dkgStateDisk, error) {
 	}
 
 	d := &dkgStateDisk{
-		Threshold:      st.Threshold,
-		Deals:          st.Deals,
-		Responses:      st.Responses,
-		Justifications: justDisk,
-		FromRound:      st.FromRound,
-		PubKeysBase64:  make([]string, len(st.PubKeys)),
+		Threshold:          st.Threshold,
+		Deals:              st.Deals,
+		Responses:          st.Responses,
+		Justifications:     justDisk,
+		FromRound:          st.FromRound,
+		PubKeysBase64:      make([]string, len(st.PubKeys)),
+		PublicCoeffsBase64: make([]string, len(st.PublicCoeffs)),
 	}
 
 	for i, p := range st.PubKeys {
@@ -296,6 +298,14 @@ func (s *DKGStore) toDisk(st *DKGState) (*dkgStateDisk, error) {
 			return nil, err
 		}
 		d.PubKeysBase64[i] = enc
+	}
+
+	for i, p := range st.PublicCoeffs {
+		enc, err := s.encodePubKey(p)
+		if err != nil {
+			return nil, err
+		}
+		d.PublicCoeffsBase64[i] = enc
 	}
 
 	return d, nil
@@ -314,6 +324,7 @@ func (s *DKGStore) fromDisk(d *dkgStateDisk) (*DKGState, error) {
 		Justifications: justs,
 		FromRound:      d.FromRound,
 		PubKeys:        make([]kyber.Point, len(d.PubKeysBase64)),
+		PublicCoeffs:   make([]kyber.Point, len(d.PublicCoeffsBase64)),
 	}
 
 	for i, enc := range d.PubKeysBase64 {
@@ -322,6 +333,14 @@ func (s *DKGStore) fromDisk(d *dkgStateDisk) (*DKGState, error) {
 			return nil, err
 		}
 		st.PubKeys[i] = p
+	}
+
+	for i, enc := range d.PublicCoeffsBase64 {
+		p, err := s.decodePubKey(enc)
+		if err != nil {
+			return nil, err
+		}
+		st.PublicCoeffs[i] = p
 	}
 
 	return st, nil

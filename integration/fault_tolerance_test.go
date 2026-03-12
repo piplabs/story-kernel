@@ -10,6 +10,7 @@ import (
 	ecrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
 
+	"github.com/piplabs/story-kernel/store"
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
 )
 
@@ -188,8 +189,10 @@ func TestFaultTolerance_NodeRestartCanStillDecrypt(t *testing.T) {
 	})
 	require.NoError(t, err, "node 0 should decrypt before restart")
 
-	// Clear the in-memory dist key share cache to simulate restart
-	cluster.Servers[0].DistKeyShareCache.Set(cluster.Round, nil)
+	// Clear the in-memory dist key share cache to simulate restart.
+	// Replace with a fresh empty cache so Get returns (nil, false),
+	// forcing PartialDecryptTDH2 to reload the share from sealed storage.
+	cluster.Servers[0].DistKeyShareCache = store.NewDistKeyShareCache()
 
 	// Node 0 should reload from sealed file and still succeed
 	result0 := collectPartialDecrypt(t, cluster, 0, ct.Bytes, globalPubKey, label, requesterPriv)
