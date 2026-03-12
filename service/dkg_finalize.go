@@ -20,7 +20,17 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (*pb.FinalizeDKGResponse, error) {
+func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (resp *pb.FinalizeDKGResponse, err error) {
+	// Recover from panics in the kyber DKG library (e.g., index out of range
+	// in resharingKey) to prevent the gRPC server from crashing.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorf("recovered from panic in FinalizeDKG: %v", r)
+			resp = nil
+			err = status.Errorf(codes.Internal, "internal panic during FinalizeDKG: %v", r)
+		}
+	}()
+
 	codeCommitmentHex := hex.EncodeToString(req.GetCodeCommitment())
 
 	// Validate request
