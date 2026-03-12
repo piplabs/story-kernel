@@ -11,7 +11,12 @@ func (s *DKGServer) GetOrLoadRoundContext(
 	round uint32,
 ) (*store.RoundContext, error) {
 	if rc, ok := s.RoundCtxCache.Get(round); ok {
-		return rc, nil
+		// Do not return cached data if threshold is 0 (registration phase).
+		// Threshold is set on-chain by BeginDealing after registration ends,
+		// so a cached value of 0 is stale and must be refreshed.
+		if rc.Network.GetThreshold() > 0 {
+			return rc, nil
+		}
 	}
 
 	network, err := s.QueryClient.GetDKGNetwork(context.Background(), codeCommitmentsHex, round)
