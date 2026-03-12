@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/hex"
+	"runtime/debug"
 	"slices"
 	"strings"
 
@@ -25,7 +26,7 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 	// in resharingKey) to prevent the gRPC server from crashing.
 	defer func() {
 		if r := recover(); r != nil {
-			log.Errorf("recovered from panic in FinalizeDKG: %v", r)
+			log.Errorf("recovered from panic in FinalizeDKG: %v\nstack trace:\n%s", r, debug.Stack())
 			resp = nil
 			err = status.Errorf(codes.Internal, "internal panic during FinalizeDKG: %v", r)
 		}
@@ -77,6 +78,15 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 			return nil, status.Errorf(codes.Internal, "failed to load or rebuild the distributed key generator for resharing")
 		}
 	}
+
+	// DEBUG: Log DKG handler state before calling DistKeyShare
+	log.WithFields(log.Fields{
+		"round":           req.GetRound(),
+		"code_commitment": codeCommitmentHex,
+		"is_resharing":    req.GetIsResharing(),
+		"verifiers_count": len(distKeyGen.Verifiers()),
+		"qual":            distKeyGen.QUAL(),
+	}).Info("DEBUG: DKG handler state before DistKeyShare")
 
 	// Generate Distributed Key Share
 	distKeyShare, err := distKeyGen.DistKeyShare()
