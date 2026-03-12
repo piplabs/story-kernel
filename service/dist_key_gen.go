@@ -156,7 +156,6 @@ func (s *DKGServer) GetResharingPrevDKG(
 		dkgInst, err = s.buildResharingPrevDKG(
 			codeCommitmentHex,
 			fromRound,
-			latest.GetThreshold(),
 			nextThreshold,
 			prevPubs,
 			nextPubs,
@@ -195,7 +194,7 @@ func (s *DKGServer) GetResharingPrevDKG(
 // buildResharingPrevDKG builds the resharing DKG for the previous committee.
 func (s *DKGServer) buildResharingPrevDKG(
 	codeCommitmentHex string,
-	fromRound, prevT, nextT uint32,
+	fromRound, nextT uint32,
 	prevPubs, nextPubs []kyber.Point,
 	isResharing bool,
 ) (*dkg.DistKeyGenerator, error) {
@@ -238,6 +237,12 @@ func (s *DKGServer) buildResharingPrevDKG(
 		return nil, err
 	}
 
+	// OldThreshold must equal len(share.Commits), which is the kyber cryptographic
+	// threshold. share.Commits is the polynomial commitment from the previous DKG
+	// round and has the same semantics as PublicCoeffs. Using the on-chain
+	// operational threshold causes an index-out-of-range panic in kyber.
+	oldThreshold := len(share.Commits)
+
 	return dkg.NewDistKeyHandler(&dkg.Config{
 		Suite:        s.Suite,
 		Longterm:     longterm,
@@ -245,7 +250,7 @@ func (s *DKGServer) buildResharingPrevDKG(
 		NewNodes:     nextPubs,
 		Share:        share,
 		Threshold:    int(nextT),
-		OldThreshold: int(prevT),
+		OldThreshold: oldThreshold,
 	})
 }
 
@@ -292,6 +297,10 @@ func (s *DKGServer) rebuildResharingPrevDKG(
 		return nil, err
 	}
 
+	// OldThreshold must equal len(share.Commits), which is the kyber cryptographic
+	// threshold. See buildResharingPrevDKG for details.
+	oldThreshold := len(share.Commits)
+
 	dkgInst, err := dkg.NewDistKeyHandler(&dkg.Config{
 		Suite:        s.Suite,
 		Longterm:     longterm,
@@ -299,7 +308,7 @@ func (s *DKGServer) rebuildResharingPrevDKG(
 		NewNodes:     nextState.PubKeys,
 		Share:        share,
 		Threshold:    int(nextState.Threshold),
-		OldThreshold: int(prevState.Threshold),
+		OldThreshold: oldThreshold,
 	})
 	if err != nil {
 		return nil, err
@@ -391,7 +400,6 @@ func (s *DKGServer) GetResharingNextDKG(
 		dkgInst, err = s.buildResharingNextDKG(
 			codeCommitmentHex,
 			round,
-			latest.GetThreshold(),
 			threshold,
 			prevPubs,
 			nextPubs,
@@ -418,18 +426,24 @@ func (s *DKGServer) GetResharingNextDKG(
 }
 
 // buildResharingNextDKG builds the resharing DKG for the next committee.
-func (s *DKGServer) buildResharingNextDKG(codeCommitmentHex string, round, prevT, nextT uint32, prevPubs, nextPubs, publicCoeffs []kyber.Point) (*dkg.DistKeyGenerator, error) {
+func (s *DKGServer) buildResharingNextDKG(codeCommitmentHex string, round, nextT uint32, prevPubs, nextPubs, publicCoeffs []kyber.Point) (*dkg.DistKeyGenerator, error) {
 	// Load longterm key (Ed25519)
 	longterm, err := s.LoadLongtermKey(codeCommitmentHex, round)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to load sealed Ed25519 private key for code_commitment=%s round=%d", codeCommitmentHex, round)
 	}
 
+	// OldThreshold must equal len(PublicCoeffs), which is the kyber cryptographic
+	// threshold (degree of the polynomial + 1). This differs from the on-chain
+	// operational threshold stored in DKGNetwork. Using the on-chain threshold
+	// causes an index-out-of-range panic inside kyber's resharingKey().
+	oldThreshold := len(publicCoeffs)
+
 	// Create the next DKG
 	log.WithFields(log.Fields{
 		"code_commitment":  codeCommitmentHex,
 		"round":            round,
-		"prevT":            prevT,
+		"oldThreshold":     oldThreshold,
 		"nextT":            nextT,
 		"prevPubs_len":     len(prevPubs),
 		"nextPubs_len":     len(nextPubs),
@@ -443,7 +457,7 @@ func (s *DKGServer) buildResharingNextDKG(codeCommitmentHex string, round, prevT
 		NewNodes:     nextPubs,
 		PublicCoeffs: publicCoeffs,
 		Threshold:    int(nextT),
-		OldThreshold: int(prevT),
+		OldThreshold: oldThreshold,
 	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to build a next DKG for resharing, code_commitment=%s round=%d", codeCommitmentHex, round)
@@ -472,6 +486,10 @@ func (s *DKGServer) rebuildResharingNextDKG(
 		return nil, err
 	}
 
+	// OldThreshold must equal len(PublicCoeffs), which is the kyber cryptographic
+	// threshold. See buildResharingNextDKG for details.
+	oldThreshold := len(prevState.PublicCoeffs)
+
 	dkgInst, err := dkg.NewDistKeyHandler(&dkg.Config{
 		Suite:        s.Suite,
 		Longterm:     longterm,
@@ -479,7 +497,7 @@ func (s *DKGServer) rebuildResharingNextDKG(
 		NewNodes:     nextState.PubKeys,
 		PublicCoeffs: prevState.PublicCoeffs,
 		Threshold:    int(nextState.Threshold),
-		OldThreshold: int(prevState.Threshold),
+		OldThreshold: oldThreshold,
 	})
 	if err != nil {
 		return nil, err
