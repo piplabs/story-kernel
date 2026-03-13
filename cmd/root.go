@@ -16,6 +16,9 @@ const (
 	configFileName = "config.toml"
 )
 
+// KernelVersion tracks the kernel binary version for upgrade resharing.
+const KernelVersion = "v2"
+
 var rootCmd = &cobra.Command{
 	Use:   "story-kernel",
 	Short: "A daemon of story-kernel for IP Vault",
