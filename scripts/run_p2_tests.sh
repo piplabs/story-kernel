@@ -20,7 +20,7 @@ if [[ ! -f integration-test.manifest.sgx ]]; then
   echo "[runner] Manifest not found. Generating and signing..."
   gramine-manifest -D bin_name=integration-test -D log_level=error \
     story-kernel.manifest.template integration-test.manifest
-  sed -i 's/enclave_size = "1G"/enclave_size = "4G"/' integration-test.manifest
+  sed -i 's/enclave_size = "1G"/enclave_size = "8G"/' integration-test.manifest
   gramine-sgx-sign --manifest integration-test.manifest \
     --output integration-test.manifest.sgx
 fi
@@ -42,10 +42,21 @@ P2_CASES=(
   "TestErrorValidation_ProcessJustification_ZeroRound"
   "TestErrorValidation_ProcessJustification_EmptyJustifications"
   "TestErrorValidation_ProcessJustification_WrongCodeCommitment"
+  "TestErrorValidation_PartialDecrypt_PIDNotCached"
+  "TestErrorValidation_FinalizeDKGZeroRound"
+  "TestErrorValidation_FinalizeDKGEmptyCodeCommitment"
+  "TestErrorValidation_ProcessResponsesEmptyResponses"
+  "TestErrorValidation_EmptyLabel"
+  "TestErrorValidation_EmptyGlobalPubKey"
+  "TestErrorValidation_WrongCodeCommitment_GenerateDeals"
+  "TestErrorValidation_WrongCodeCommitment_ProcessDeals"
+  "TestErrorValidation_WrongCodeCommitment_FinalizeDKG"
+  "TestErrorValidation_WrongCodeCommitment_PartialDecryptTDH2"
   # Cheating detection
   "TestCheatingDetection_ReplayedDeal"
   "TestCheatingDetection_TamperedDeal"
   "TestCheatingDetection_TamperedDealAllNodes"
+  "TestCheatingDetection_PartialDealSkip_ValidDealsStillPersist"
   # Code commitment edge cases
   "TestGetCodeCommitment_Is32Bytes"
   "TestGetCodeCommitment_NoInputRequired"

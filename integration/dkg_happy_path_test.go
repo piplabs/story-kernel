@@ -125,6 +125,49 @@ func TestDKGHappyPath_3Nodes(t *testing.T) {
 	}
 }
 
+// TestDKGHappyPath_ReRegisterAfterAllRegistered verifies that one node re-calling
+// GenerateAndSealKey after all nodes have already registered does not corrupt state.
+// The duplicate call must return the same keys and the full DKG flow must still succeed.
+func TestDKGHappyPath_ReRegisterAfterAllRegistered(t *testing.T) {
+	cluster := NewDKGTestCluster(t, 3, 2)
+	defer cluster.Cleanup()
+
+	ctx := context.Background()
+
+	// All 3 nodes complete registration
+	cluster.GenerateAllKeys()
+
+	// Node 1 re-registers (duplicate call after all nodes are done)
+	resp1st := cluster.KeyResponses[1]
+	resp2nd, err := cluster.Servers[1].GenerateAndSealKey(ctx, &pb.GenerateAndSealKeyRequest{
+		CodeCommitment: cluster.CodeCommitment,
+		Round:          cluster.Round,
+		Address:        cluster.Addresses[1],
+	})
+	require.NoError(t, err, "re-registration should not return an error")
+	require.NotNil(t, resp2nd)
+
+	// Keys must be identical — no new key should be generated
+	require.True(t, bytes.Equal(resp1st.GetDkgPubKey(), resp2nd.GetDkgPubKey()),
+		"re-registration must return the same DKG pub key")
+	require.True(t, bytes.Equal(resp1st.GetCommPubKey(), resp2nd.GetCommPubKey()),
+		"re-registration must return the same comm pub key")
+
+	// The full DKG flow must still complete successfully after the duplicate registration
+	cluster.GenerateAllDeals()
+	cluster.ProcessAllDeals()
+	cluster.ProcessAllResponses()
+	cluster.FinalizeAll()
+
+	globalPubKey := cluster.FinalizeResps[0].GetGlobalPubKey()
+	require.NotEmpty(t, globalPubKey)
+	for i := 1; i < 3; i++ {
+		require.True(t,
+			bytes.Equal(globalPubKey, cluster.FinalizeResps[i].GetGlobalPubKey()),
+			"node %d: global pub key mismatch after re-registration", i)
+	}
+}
+
 // TestDKGHappyPath_Idempotent verifies that GenerateAndSealKey is idempotent.
 func TestDKGHappyPath_Idempotent(t *testing.T) {
 	cluster := NewDKGTestCluster(t, 3, 2)

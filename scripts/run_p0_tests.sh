@@ -20,7 +20,7 @@ if [[ ! -f integration-test.manifest.sgx ]]; then
   echo "[runner] Manifest not found. Generating and signing..."
   gramine-manifest -D bin_name=integration-test -D log_level=error \
     story-kernel.manifest.template integration-test.manifest
-  sed -i 's/enclave_size = "1G"/enclave_size = "4G"/' integration-test.manifest
+  sed -i 's/enclave_size = "1G"/enclave_size = "8G"/' integration-test.manifest
   gramine-sgx-sign --manifest integration-test.manifest \
     --output integration-test.manifest.sgx
 fi

@@ -347,6 +347,75 @@ func mustPubKeyFromBytes(pubKeyBytes []byte) *ecdsa.PublicKey {
 	return pubKey
 }
 
+// collectPartialDecryptSrv is like collectPartialDecrypt but operates on a standalone
+// DKGServer that is not part of a DKGTestCluster (e.g. a newly created node for scale-up).
+func collectPartialDecryptSrv(
+	t *testing.T,
+	srv *service.DKGServer,
+	round uint32,
+	codeCommitment []byte,
+	ciphertext, globalPubKey, label []byte,
+	requesterPriv *ecdsa.PrivateKey,
+) *partialDecryptResult {
+	t.Helper()
+	ctx := context.Background()
+
+	requesterPubBytes := ecrypto.FromECDSAPub(&requesterPriv.PublicKey)
+
+	resp, err := srv.PartialDecryptTDH2(ctx, &pb.PartialDecryptTDH2Request{
+		CodeCommitment:  codeCommitment,
+		Round:           round,
+		Ciphertext:      ciphertext,
+		GlobalPubKey:    globalPubKey,
+		Label:           label,
+		RequesterPubKey: requesterPubBytes,
+	})
+	require.NoError(t, err, "PartialDecryptTDH2 failed on standalone server")
+
+	partialBytes, err := decryptPartialFromRequester(requesterPriv, resp.GetEphemeralPubKey(), resp.GetEncryptedPartialDecryption())
+	require.NoError(t, err, "decryptPartialFromRequester failed on standalone server")
+
+	return &partialDecryptResult{
+		Partial:  &mpc.TDH2PartialDecryption{Bytes: partialBytes},
+		PubShare: resp.GetPubShare(),
+	}
+}
+
+// buildFreshServers creates numNodes new DKGServer instances sharing the provided MockQC.
+// addrOffset is added to the node index when generating addresses, preventing collisions
+// with an existing cluster's addresses. Returns servers, addresses, and temp dirs.
+func buildFreshServers(t *testing.T, mockQC *MockQueryClient, numNodes, addrOffset int) (
+	servers []*service.DKGServer, addresses []string, tempDirs []string,
+) {
+	t.Helper()
+
+	for i := range numNodes {
+		dir, err := os.MkdirTemp("", fmt.Sprintf("dkg-extra-node-%d-*", i))
+		require.NoError(t, err)
+		tempDirs = append(tempDirs, dir)
+
+		cfg := config.DefaultConfig()
+		cfg.SetHomeDir(dir)
+
+		suite := edwards25519.NewBlakeSHA256Ed25519()
+		srv := &service.DKGServer{
+			Cfg:                cfg,
+			QueryClient:        mockQC,
+			Suite:              suite,
+			RoundCtxCache:      store.NewRoundContextCache(),
+			InitDKGCache:       store.NewDKGCache(),
+			ResharingPrevCache: store.NewResharingDKGCache(),
+			ResharingNextCache: store.NewDKGCache(),
+			DistKeyShareCache:  store.NewDistKeyShareCache(),
+			DKGStore:           store.NewDKGStore(cfg.GetKeysDir(), cfg.GetDKGStateDir(), suite),
+			PIDCache:           store.NewPIDCache(),
+		}
+		servers = append(servers, srv)
+		addresses = append(addresses, fmt.Sprintf("%040x", addrOffset+i+1))
+	}
+	return
+}
+
 // buildTDH2AccessStructure creates a threshold AccessStructure for TDH2 combining.
 // Names must match those used when collecting partial decryptions (nodeNames[i] -> PID i+1).
 func buildTDH2AccessStructure(threshold int, nodeNames []string) (*mpc.AccessStructure, error) {
