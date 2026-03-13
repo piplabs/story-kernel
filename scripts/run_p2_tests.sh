@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# P2 Integration Tests — Error validation, cheating detection, and edge cases.
+# P2 Integration Tests — Robustness: secondary input checks and edge cases.
 # Continues on failure and prints a summary at the end.
 set -uo pipefail
 
@@ -27,45 +27,21 @@ fi
 
 # ── P2 test list ─────────────────────────────────────────────────────
 P2_CASES=(
-  # Error validation
-  "TestErrorValidation_EmptyCodeCommitment"
-  "TestErrorValidation_ZeroRound"
-  "TestErrorValidation_EmptyAddress"
-  "TestErrorValidation_WrongCodeCommitment"
+  # Error validation — secondary input checks
   "TestErrorValidation_GenerateDealsZeroRound"
   "TestErrorValidation_ProcessDealsEmptyDeals"
-  "TestErrorValidation_EmptyCiphertext"
-  "TestErrorValidation_MissingRequesterPubKey"
-  "TestErrorValidation_InvalidRequesterPubKey"
-  "TestErrorValidation_RoundMismatchPartialDecrypt"
-  "TestErrorValidation_ProcessJustification_EmptyCodeCommitment"
   "TestErrorValidation_ProcessJustification_ZeroRound"
+  "TestErrorValidation_ProcessJustification_EmptyCodeCommitment"
   "TestErrorValidation_ProcessJustification_EmptyJustifications"
-  "TestErrorValidation_ProcessJustification_WrongCodeCommitment"
-  "TestErrorValidation_PartialDecrypt_PIDNotCached"
-  "TestErrorValidation_FinalizeDKGZeroRound"
-  "TestErrorValidation_FinalizeDKGEmptyCodeCommitment"
   "TestErrorValidation_ProcessResponsesEmptyResponses"
   "TestErrorValidation_EmptyLabel"
   "TestErrorValidation_EmptyGlobalPubKey"
-  "TestErrorValidation_WrongCodeCommitment_GenerateDeals"
-  "TestErrorValidation_WrongCodeCommitment_ProcessDeals"
-  "TestErrorValidation_WrongCodeCommitment_FinalizeDKG"
-  "TestErrorValidation_WrongCodeCommitment_PartialDecryptTDH2"
-  # Cheating detection
-  "TestCheatingDetection_ReplayedDeal"
-  "TestCheatingDetection_TamperedDeal"
-  "TestCheatingDetection_TamperedDealAllNodes"
-  "TestCheatingDetection_PartialDealSkip_ValidDealsStillPersist"
-  # Code commitment edge cases
-  "TestGetCodeCommitment_Is32Bytes"
+  # Code commitment — edge cases
   "TestGetCodeCommitment_NoInputRequired"
   "TestGetCodeCommitment_RepeatedCallsConsistent"
-  # Process justification
-  "TestProcessJustification_AcceptsStructuredInput"
-  "TestProcessJustification_AllNodesAcceptInput"
+  # Process justification — edge cases
   "TestProcessJustification_MultipleJustifications"
-  "TestProcessJustification_Resharing_AcceptsStructuredInput"
+  "TestProcessJustification_AllNodesAcceptInput"
 )
 
 # ── Runner ───────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# P1 Integration Tests — Fault tolerance, persistence, resharing, and idempotency.
+# P1 Integration Tests — Production reliability: idempotency, fault tolerance, cheating, input validation, resharing.
 # Continues on failure and prints a summary at the end.
 set -uo pipefail
 
@@ -27,20 +27,44 @@ fi
 
 # ── P1 test list ─────────────────────────────────────────────────────
 P1_CASES=(
+  # DKG happy path
+  "TestDKGHappyPath_ReRegisterAfterAllRegistered"
   "TestDKGHappyPath_Idempotent"
-  "TestFaultTolerance_OneNodeDown"
-  "TestFaultTolerance_TwoNodesDown"
-  "TestFaultTolerance_NodeRestartCanStillDecrypt"
+  # TDH2 decrypt
+  "TestTDH2_AllCombinations"
+  # Fault tolerance
   "TestFaultTolerance_PartialDecryptNodeUnavailable"
-  "TestPersistence_RestartRecovery"
+  "TestFaultTolerance_NodeRestartCanStillDecrypt"
+  # Cheating detection
+  "TestCheatingDetection_TamperedDeal"
+  "TestCheatingDetection_TamperedDealAllNodes"
+  "TestCheatingDetection_ReplayedDeal"
+  "TestCheatingDetection_PartialDealSkip_ValidDealsStillPersist"
+  # Persistence
   "TestPersistence_AllNodesRestart"
   "TestPersistence_SealedKeysSurviveCleanup"
-  "TestResharing_KeyRotation"
-  "TestResharing_AllCombinationsAfterResharing"
+  # Error validation — input validation
+  "TestErrorValidation_ZeroRound"
+  "TestErrorValidation_EmptyCodeCommitment"
+  "TestErrorValidation_EmptyAddress"
+  "TestErrorValidation_EmptyCiphertext"
+  "TestErrorValidation_InvalidRequesterPubKey"
+  "TestErrorValidation_MissingRequesterPubKey"
+  "TestErrorValidation_RoundMismatchPartialDecrypt"
+  "TestErrorValidation_FinalizeDKGZeroRound"
+  "TestErrorValidation_FinalizeDKGEmptyCodeCommitment"
+  # Resharing
   "TestResharing_PubKeySharesDiffer"
+  "TestResharing_AllCombinationsAfterResharing"
   "TestResharing_ProcessResponses_SurvivesMissingPrevDKG"
   "TestResharing_ScaleDown_3To2"
   "TestResharing_ScaleUp_3To5"
+  # Code commitment
+  "TestGetCodeCommitment_Is32Bytes"
+  "TestGetCodeCommitment_ConsistentAcrossNodes"
+  # Process justification
+  "TestProcessJustification_AcceptsStructuredInput"
+  "TestProcessJustification_Resharing_AcceptsStructuredInput"
 )
 
 # ── Runner ───────────────────────────────────────────────────────────

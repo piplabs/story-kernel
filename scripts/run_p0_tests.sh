@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# P0 Integration Tests — Core DKG and TDH2 functionality.
+# P0 Integration Tests — Security boundary, core DKG/TDH2, and critical fault tolerance.
 # Continues on failure and prints a summary at the end.
 set -uo pipefail
 
@@ -27,12 +27,28 @@ fi
 
 # ── P0 test list ─────────────────────────────────────────────────────
 P0_CASES=(
+  # DKG happy path
   "TestDKGHappyPath_3Nodes"
+  # TDH2 decrypt
   "TestTDH2_PartialDecryptAndCombine"
   "TestTDH2_ThresholdNotMet"
-  "TestTDH2_AllCombinations"
+  # Fault tolerance
+  "TestFaultTolerance_OneNodeDown"
+  "TestFaultTolerance_TwoNodesDown"
+  # Persistence
+  "TestPersistence_RestartRecovery"
+  # Error validation — security boundary (wrong code_commitment / PID)
+  "TestErrorValidation_WrongCodeCommitment"
+  "TestErrorValidation_PartialDecrypt_PIDNotCached"
+  "TestErrorValidation_WrongCodeCommitment_GenerateDeals"
+  "TestErrorValidation_WrongCodeCommitment_ProcessDeals"
+  "TestErrorValidation_WrongCodeCommitment_FinalizeDKG"
+  "TestErrorValidation_WrongCodeCommitment_PartialDecryptTDH2"
+  "TestErrorValidation_ProcessJustification_WrongCodeCommitment"
+  # Resharing
+  "TestResharing_KeyRotation"
+  # Code commitment
   "TestGetCodeCommitment_ReturnsValidCommitment"
-  "TestGetCodeCommitment_ConsistentAcrossNodes"
 )
 
 # ── Runner ───────────────────────────────────────────────────────────
