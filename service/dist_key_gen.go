@@ -52,6 +52,16 @@ func (s *DKGServer) GetInitDKG(
 		if err != nil {
 			return nil, err
 		}
+
+		// Persist threshold and pub keys so the DKG can be rebuilt after
+		// a kernel restart. Without this, HasDKGState returns false (threshold=0,
+		// pubkeys=nil) and rebuildInitDKG cannot reconstruct the instance.
+		if err := s.DKGStore.SaveDKGState(&store.DKGState{
+			Threshold: threshold,
+			PubKeys:   nextPubs,
+		}, codeCommitmentHex, round); err != nil {
+			return nil, errors.Wrapf(err, "persist initial DKG state (round=%d)", round)
+		}
 	}
 
 	s.InitDKGCache.Set(round, dkgInst)
@@ -66,6 +76,10 @@ func (s *DKGServer) buildInitDKG(
 	round, threshold uint32,
 	nextPubs []kyber.Point,
 ) (*dkg.DistKeyGenerator, error) {
+	if threshold == 0 {
+		return nil, errors.Errorf("threshold must be > 0 for initial DKG (round=%d); on-chain threshold may not be set yet", round)
+	}
+
 	longterm, err := s.LoadLongtermKey(codeCommitmentHex, round)
 	if err != nil {
 		return nil, errors.Wrapf(err, "load Ed25519 key (round=%d)", round)
@@ -199,6 +213,13 @@ func (s *DKGServer) buildResharingPrevDKG(
 	prevPubs, nextPubs []kyber.Point,
 	isResharing bool,
 ) (*dkg.DistKeyGenerator, error) {
+	if nextT == 0 {
+		return nil, errors.Errorf("nextT must be > 0 for resharing prev DKG (fromRound=%d); on-chain threshold may not be set yet", fromRound)
+	}
+	if prevT == 0 {
+		return nil, errors.Errorf("prevT must be > 0 for resharing prev DKG (fromRound=%d)", fromRound)
+	}
+
 	log.WithFields(log.Fields{
 		"code_commitment": codeCommitmentHex,
 		"from_round":      fromRound,
@@ -426,13 +447,19 @@ func (s *DKGServer) GetResharingNextDKG(
 
 // buildResharingNextDKG builds the resharing DKG for the next committee.
 func (s *DKGServer) buildResharingNextDKG(codeCommitmentHex string, round, prevT, nextT uint32, prevPubs, nextPubs, publicCoeffs []kyber.Point) (*dkg.DistKeyGenerator, error) {
+	if nextT == 0 {
+		return nil, errors.Errorf("nextT must be > 0 for resharing next DKG (round=%d); on-chain threshold may not be set yet", round)
+	}
+	if prevT == 0 {
+		return nil, errors.Errorf("prevT must be > 0 for resharing next DKG (round=%d)", round)
+	}
+
 	// Load longterm key (Ed25519)
 	longterm, err := s.LoadLongtermKey(codeCommitmentHex, round)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to load sealed Ed25519 private key for code_commitment=%s round=%d", codeCommitmentHex, round)
 	}
 
-	// Debug: log all critical values before building the resharing DKG
 	log.WithFields(log.Fields{
 		"code_commitment":  codeCommitmentHex,
 		"round":            round,
