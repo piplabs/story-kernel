@@ -1205,8 +1205,7 @@ type PartialDecryptTDH2Request struct {
 	Ciphertext      []byte                 `protobuf:"bytes,3,opt,name=ciphertext,proto3" json:"ciphertext,omitempty"`
 	Label           []byte                 `protobuf:"bytes,4,opt,name=label,proto3" json:"label,omitempty"`
 	GlobalPubKey    []byte                 `protobuf:"bytes,5,opt,name=global_pub_key,proto3" json:"global_pub_key,omitempty"`
-	SealedShareId   string                 `protobuf:"bytes,6,opt,name=sealed_share_id,proto3" json:"sealed_share_id,omitempty"`
-	RequesterPubKey []byte                 `protobuf:"bytes,7,opt,name=requester_pub_key,proto3" json:"requester_pub_key,omitempty"` // secp256k1 uncompressed
+	RequesterPubKey []byte                 `protobuf:"bytes,6,opt,name=requester_pub_key,proto3" json:"requester_pub_key,omitempty"` // secp256k1 uncompressed
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1274,13 +1273,6 @@ func (x *PartialDecryptTDH2Request) GetGlobalPubKey() []byte {
 		return x.GlobalPubKey
 	}
 	return nil
-}
-
-func (x *PartialDecryptTDH2Request) GetSealedShareId() string {
-	if x != nil {
-		return x.SealedShareId
-	}
-	return ""
 }
 
 func (x *PartialDecryptTDH2Request) GetRequesterPubKey() []byte {
@@ -1442,7 +1434,7 @@ const file_tee_proto_rawDesc = "" +
 	"\x0eglobal_pub_key\x18\x04 \x01(\fR\x0eglobal_pub_key\x12$\n" +
 	"\rpublic_coeffs\x18\x05 \x03(\fR\rpublic_coeffs\x12$\n" +
 	"\rpub_key_share\x18\x06 \x01(\fR\rpub_key_share\x12\x1c\n" +
-	"\tsignature\x18\a \x01(\fR\tsignature\"\x91\x02\n" +
+	"\tsignature\x18\a \x01(\fR\tsignature\"\xe7\x01\n" +
 	"\x19PartialDecryptTDH2Request\x12(\n" +
 	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
 	"\x05round\x18\x02 \x01(\rR\x05round\x12\x1e\n" +
@@ -1450,9 +1442,8 @@ const file_tee_proto_rawDesc = "" +
 	"ciphertext\x18\x03 \x01(\fR\n" +
 	"ciphertext\x12\x14\n" +
 	"\x05label\x18\x04 \x01(\fR\x05label\x12&\n" +
-	"\x0eglobal_pub_key\x18\x05 \x01(\fR\x0eglobal_pub_key\x12(\n" +
-	"\x0fsealed_share_id\x18\x06 \x01(\tR\x0fsealed_share_id\x12,\n" +
-	"\x11requester_pub_key\x18\a \x01(\fR\x11requester_pub_key\"\xca\x01\n" +
+	"\x0eglobal_pub_key\x18\x05 \x01(\fR\x0eglobal_pub_key\x12,\n" +
+	"\x11requester_pub_key\x18\x06 \x01(\fR\x11requester_pub_key\"\xca\x01\n" +
 	"\x1aPartialDecryptTDH2Response\x12B\n" +
 	"\x1cencrypted_partial_decryption\x18\x01 \x01(\fR\x1cencrypted_partial_decryption\x12,\n" +
 	"\x11ephemeral_pub_key\x18\x02 \x01(\fR\x11ephemeral_pub_key\x12\x1c\n" +
