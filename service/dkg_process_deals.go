@@ -66,6 +66,16 @@ func (s *DKGServer) ProcessDeals(_ context.Context, req *pb.ProcessDealsRequest)
 		}
 	}
 
+	// Debug: log verifier state BEFORE processing deals
+	verifiersBefore := distKeyGen.Verifiers()
+	log.WithFields(log.Fields{
+		"round":           req.GetRound(),
+		"code_commitment": codeCommitmentHex,
+		"num_verifiers":   len(verifiersBefore),
+		"num_deals_in":    len(req.GetDeals()),
+		"is_resharing":    req.GetIsResharing(),
+	}).Info("ProcessDeals: verifier state BEFORE processing")
+
 	var (
 		pbResps []*pb.Response
 		deals   []dkg.Deal
@@ -83,9 +93,33 @@ func (s *DKGServer) ProcessDeals(_ context.Context, req *pb.ProcessDealsRequest)
 			continue
 		}
 
+		log.WithFields(log.Fields{
+			"round":           req.GetRound(),
+			"code_commitment": codeCommitmentHex,
+			"dealer_index":    deal.Index,
+			"resp_status":     resp.Response.Status,
+		}).Info("ProcessDeals: deal processed successfully")
+
 		pbResp := types.ConvertToRespProto(resp)
 		pbResps = append(pbResps, pbResp)
 		deals = append(deals, *deal)
+	}
+
+	// Debug: log verifier state AFTER processing deals
+	verifiersAfter := distKeyGen.Verifiers()
+	for idx, v := range verifiersAfter {
+		deal := v.Deal()
+		commitLen := 0
+		if deal != nil {
+			commitLen = len(deal.Commitments)
+		}
+		log.WithFields(log.Fields{
+			"round":          req.GetRound(),
+			"verifier_idx":   idx,
+			"has_deal":       deal != nil,
+			"commitment_len": commitLen,
+			"deal_certified": v.DealCertified(),
+		}).Info("ProcessDeals: verifier state AFTER processing")
 	}
 
 	if err := s.DKGStore.AddDeals(codeCommitmentHex, req.GetRound(), deals); err != nil {
@@ -94,7 +128,12 @@ func (s *DKGServer) ProcessDeals(_ context.Context, req *pb.ProcessDealsRequest)
 		return nil, status.Errorf(codes.Internal, "failed to add deals to the DKG state")
 	}
 
-	log.Info("All deals have been processed", "code_commitment", codeCommitmentHex, "round", req.GetRound())
+	log.WithFields(log.Fields{
+		"code_commitment": codeCommitmentHex,
+		"round":           req.GetRound(),
+		"deals_applied":   len(deals),
+		"responses_out":   len(pbResps),
+	}).Info("All deals have been processed")
 
 	return &pb.ProcessDealsResponse{
 		CodeCommitment: req.GetCodeCommitment(),
