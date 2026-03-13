@@ -17,7 +17,7 @@ const (
 )
 
 // KernelVersion tracks the kernel binary version for upgrade resharing.
-const KernelVersion = "v2"
+const KernelVersion = "v3"
 
 var rootCmd = &cobra.Command{
 	Use:   "story-kernel",
