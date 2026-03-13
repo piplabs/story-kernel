@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/piplabs/story-kernel/store"
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
@@ -198,6 +199,16 @@ func (s *DKGServer) buildResharingPrevDKG(
 	prevPubs, nextPubs []kyber.Point,
 	isResharing bool,
 ) (*dkg.DistKeyGenerator, error) {
+	log.WithFields(log.Fields{
+		"code_commitment": codeCommitmentHex,
+		"from_round":      fromRound,
+		"prevT":           prevT,
+		"nextT":           nextT,
+		"num_prevPubs":    len(prevPubs),
+		"num_nextPubs":    len(nextPubs),
+		"is_resharing":    isResharing,
+	}).Info("buildResharingPrevDKG: creating DKG handler")
+
 	longterm, err := s.DKGStore.LoadSealedEd25519Key(codeCommitmentHex, fromRound)
 	if err != nil {
 		return nil, err
@@ -322,6 +333,11 @@ func (s *DKGServer) GetResharingNextDKG(
 	nextPubs []kyber.Point,
 ) (*dkg.DistKeyGenerator, error) {
 	if dkgInst, ok := s.ResharingNextCache.Get(round); ok {
+		log.WithFields(log.Fields{
+			"round":           round,
+			"code_commitment": codeCommitmentHex,
+		}).Info("GetResharingNextDKG: cache hit")
+
 		return dkgInst, nil
 	}
 
@@ -335,23 +351,49 @@ func (s *DKGServer) GetResharingNextDKG(
 		return nil, err
 	}
 
+	log.WithFields(log.Fields{
+		"round":              round,
+		"code_commitment":    codeCommitmentHex,
+		"stNext_threshold":   stNext.Threshold,
+		"stNext_pubkeys_len": len(stNext.PubKeys),
+		"stNext_from_round":  stNext.FromRound,
+		"exists_prev":        existsPrev,
+		"num_deals":          len(stNext.Deals),
+		"num_responses":      len(stNext.Responses),
+	}).Info("GetResharingNextDKG: state check")
+
 	var dkgInst *dkg.DistKeyGenerator
 
 	if stNext.Threshold != 0 && len(stNext.PubKeys) != 0 && existsPrev {
+		log.Info("GetResharingNextDKG: taking rebuild path")
 		dkgInst, err = s.rebuildResharingNextDKG(codeCommitmentHex, round)
 		if err != nil {
 			return nil, err
 		}
 	} else {
+		log.Info("GetResharingNextDKG: taking fresh build path")
+
 		latest, err := s.QueryClient.GetLatestActiveDKGNetwork(context.Background())
 		if err != nil {
 			return nil, err
 		}
 
+		log.WithFields(log.Fields{
+			"latest_round":     latest.GetRound(),
+			"latest_threshold": latest.GetThreshold(),
+			"latest_total":     latest.GetTotal(),
+		}).Info("GetResharingNextDKG: latest active DKG network")
+
 		prevPubs, publicCoeffs, err := s.fetchLatestPubKeysAndCoeffs(codeCommitmentHex, latest)
 		if err != nil {
 			return nil, err
 		}
+
+		log.WithFields(log.Fields{
+			"num_prevPubs":     len(prevPubs),
+			"num_publicCoeffs": len(publicCoeffs),
+			"threshold":        threshold,
+		}).Info("GetResharingNextDKG: fetched prev data")
 
 		dkgInst, err = s.buildResharingNextDKG(
 			codeCommitmentHex,
@@ -389,6 +431,17 @@ func (s *DKGServer) buildResharingNextDKG(codeCommitmentHex string, round, prevT
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to load sealed Ed25519 private key for code_commitment=%s round=%d", codeCommitmentHex, round)
 	}
+
+	// Debug: log all critical values before building the resharing DKG
+	log.WithFields(log.Fields{
+		"code_commitment":  codeCommitmentHex,
+		"round":            round,
+		"prevT":            prevT,
+		"nextT":            nextT,
+		"num_prevPubs":     len(prevPubs),
+		"num_nextPubs":     len(nextPubs),
+		"num_publicCoeffs": len(publicCoeffs),
+	}).Info("buildResharingNextDKG: creating DKG handler")
 
 	// Create the next DKG
 	nextDKG, err := dkg.NewDistKeyHandler(&dkg.Config{

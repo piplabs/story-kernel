@@ -60,11 +60,38 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 			return nil, status.Errorf(codes.Internal, "failed to load or rebuild initial distributed key generator")
 		}
 	} else {
+		log.WithFields(log.Fields{
+			"round":           req.GetRound(),
+			"code_commitment": codeCommitmentHex,
+			"threshold":       rc.Network.GetThreshold(),
+			"num_sorted_pubs": len(rc.SortedPubKeys),
+		}).Info("FinalizeDKG: loading resharing next DKG")
+
 		distKeyGen, err = s.GetResharingNextDKG(codeCommitmentHex, req.GetRound(), rc.Network.GetThreshold(), rc.SortedPubKeys)
 		if err != nil {
 			log.Errorf("failed to load or rebuild the distributed key generator for resharing: %v", err)
 
 			return nil, status.Errorf(codes.Internal, "failed to load or rebuild the distributed key generator for resharing")
+		}
+
+		// Debug: log DKG handler state before DistKeyShare to diagnose resharing panics
+		verifiers := distKeyGen.Verifiers()
+		log.WithFields(log.Fields{
+			"num_verifiers": len(verifiers),
+			"is_resharing":  true,
+		}).Info("FinalizeDKG: DKG handler state before DistKeyShare")
+		for idx, v := range verifiers {
+			deal := v.Deal()
+			commitLen := 0
+			if deal != nil {
+				commitLen = len(deal.Commitments)
+			}
+			log.WithFields(log.Fields{
+				"verifier_idx":   idx,
+				"has_deal":       deal != nil,
+				"commitment_len": commitLen,
+				"deal_certified": v.DealCertified(),
+			}).Info("FinalizeDKG: verifier detail")
 		}
 	}
 
