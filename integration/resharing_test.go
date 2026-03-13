@@ -445,9 +445,9 @@ func TestResharing_ProcessResponses_SurvivesMissingPrevDKG(t *testing.T) {
 }
 
 // TestResharing_ScaleDown_3To2 verifies resharing from a 3-node committee (round 1, threshold=2)
-// to a smaller 2-node committee (round 2, threshold=1). Node 2 leaves the committee; only
-// nodes 0 and 1 continue. After resharing the global_pub_key must be preserved, and either
-// remaining node alone can produce a valid partial decryption (threshold=1).
+// to a smaller 2-node committee (round 2, threshold=2). Node 2 leaves the committee; only
+// nodes 0 and 1 continue. After resharing the global_pub_key must be preserved, and both
+// remaining nodes together can decrypt data encrypted with the old key (2-of-2).
 func TestResharing_ScaleDown_3To2(t *testing.T) {
 	cluster := NewDKGTestCluster(t, 3, 2)
 	defer cluster.Cleanup()
@@ -473,9 +473,10 @@ func TestResharing_ScaleDown_3To2(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Round 2: only nodes 0 and 1 continue (node 2 leaves), new threshold=1
+	// Round 2: only nodes 0 and 1 continue (node 2 leaves), threshold=2 (2-of-2).
+	// Note: kyber DKG requires threshold >= 2; threshold=1 is invalid for Pedersen resharing.
 	const nextN = 2
-	const nextThreshold = uint32(1)
+	const nextThreshold = uint32(2)
 	t.Logf("[ScaleDown] Round 2 committee: %d nodes threshold=%d (node 2 leaves)", nextN, nextThreshold)
 
 	// Configure MockQC: round 1 as latest active, round 2 as resharing target
@@ -648,25 +649,27 @@ func TestResharing_ScaleDown_3To2(t *testing.T) {
 			i, len(results[i].PubShare), len(results[i].Partial.Bytes))
 	}
 
-	// threshold=1: each single node should independently decrypt old ciphertext
+	// threshold=2: both nodes must cooperate to decrypt (2-of-2)
 	nodeNames := []string{NodeName(0), NodeName(1)}
-	as, err := buildTDH2AccessStructure(1, nodeNames)
+	as, err := buildTDH2AccessStructure(2, nodeNames)
 	require.NoError(t, err)
 
-	for _, nodeIdx := range []int{0, 1} {
-		name := NodeName(nodeIdx)
-		t.Run(fmt.Sprintf("single-node-%s", name), func(t *testing.T) {
-			pubShares := map[string][]byte{name: results[nodeIdx].PubShare}
-			pdMap := map[string]*mpc.TDH2PartialDecryption{name: results[nodeIdx].Partial}
+	t.Run("both-nodes-2of2", func(t *testing.T) {
+		pubShares := map[string][]byte{
+			NodeName(0): results[0].PubShare,
+			NodeName(1): results[1].PubShare,
+		}
+		pdMap := map[string]*mpc.TDH2PartialDecryption{
+			NodeName(0): results[0].Partial,
+			NodeName(1): results[1].Partial,
+		}
 
-			decrypted, err := mpc.TDH2Combine(as, tdh2PubKey, pubShares, ct, label, pdMap)
-			require.NoError(t, err, "[ScaleDown] single-node combine failed for %s", name)
-			require.Equal(t, plaintext, decrypted,
-				"[ScaleDown] decrypted text mismatch for %s", name)
-			t.Logf("[ScaleDown] %s alone decrypted successfully (threshold=1)", name)
-		})
-	}
-	t.Logf("[ScaleDown] PASS: 2-node committee with threshold=1 can decrypt after scale-down resharing")
+		decrypted, err := mpc.TDH2Combine(as, tdh2PubKey, pubShares, ct, label, pdMap)
+		require.NoError(t, err, "[ScaleDown] 2-of-2 combine failed")
+		require.Equal(t, plaintext, decrypted, "[ScaleDown] decrypted text mismatch")
+		t.Logf("[ScaleDown] both nodes together decrypted successfully (threshold=2)")
+	})
+	t.Logf("[ScaleDown] PASS: 2-node committee with threshold=2 can decrypt after scale-down resharing")
 }
 
 // TestResharing_ScaleUp_3To5 verifies resharing from a 3-node committee (round 1, threshold=2)
