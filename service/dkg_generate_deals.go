@@ -15,8 +15,11 @@ import (
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
 
 	"go.dedis.ch/kyber/v4"
+	"go.dedis.ch/kyber/v4/share"
 	dkg "go.dedis.ch/kyber/v4/share/dkg/pedersen"
+	vss "go.dedis.ch/kyber/v4/share/vss/pedersen"
 	"go.dedis.ch/kyber/v4/sign/schnorr"
+	"go.dedis.ch/protobuf"
 	"golang.org/x/crypto/hkdf"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -189,19 +192,20 @@ func corruptFirstDeal(s *DKGServer, deals map[int]*dkg.Deal, ccHex string, round
 			return errors.Wrap(err, "create AEAD")
 		}
 
-		// We need the original plaintext deal to corrupt it.
-		// Since we can't decrypt (no original ephemeral key), we'll use the
-		// dealer's stored deals directly from the DKG instance.
-		// The DKG Dealer stores d.deals[i] as plaintext vss.Deal.
-		//
-		// Actually, we can access the plaintext through the protobuf encoding
-		// that kyber uses. But we don't have access to the Dealer object here.
-		//
-		// Simplest approach: create a fake plaintext with corrupted share.
-		// The share value doesn't match commitments → VerifyDeal fails → complaint.
-		fakePlaintext := make([]byte, 128) // arbitrary corrupted data
-		for i := range fakePlaintext {
-			fakePlaintext[i] = byte(i) ^ 0xAA
+		// Build a valid vss.Deal protobuf with a random share value.
+		// The share won't match commitments → VerifyDeal fails → complaint.
+		fakeDeal := &vss.Deal{
+			SessionID: []byte("fake-session-for-justification-test"),
+			SecShare: &share.PriShare{
+				I: idx,
+				V: s.Suite.Scalar().Pick(s.Suite.RandomStream()),
+			},
+			T:           uint32(rc.Network.GetThreshold()),
+			Commitments: []kyber.Point{s.Suite.Point().Pick(s.Suite.RandomStream())},
+		}
+		fakePlaintext, err := protobuf.Encode(fakeDeal)
+		if err != nil {
+			return errors.Wrap(err, "encode fake deal")
 		}
 
 		// Encrypt with new AEAD
