@@ -29,6 +29,10 @@ type Config struct {
 	GRPC GRPCConfig `mapstructure:"grpc"`
 
 	LightClient LightClientConfig `mapstructure:"light_client"`
+
+	// TestCorruptDeal corrupts first deal's cipher and re-signs to trigger
+	// complaint/justification flow. DEBUG ONLY — never use in production.
+	TestCorruptDeal bool `mapstructure:"test_corrupt_deal"`
 }
 
 type GRPCConfig struct {

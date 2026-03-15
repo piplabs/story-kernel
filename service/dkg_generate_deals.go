@@ -12,6 +12,7 @@ import (
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
 
 	dkg "go.dedis.ch/kyber/v4/share/dkg/pedersen"
+	"go.dedis.ch/kyber/v4/sign/schnorr"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -96,12 +97,58 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 		return nil, status.Errorf(codes.Internal, "failed to generate encrypted deals")
 	}
 
+	// DEBUG: corrupt first deal's cipher and re-sign at DKG level.
+	// Outer Schnorr passes, inner AEAD decryption produces garbage → VerifyDeal fails → complaint.
+	if s.Cfg.TestCorruptDeal {
+		if err := corruptFirstDeal(s, deals, codeCommitmentHex, req.GetRound()); err != nil {
+			log.Warnf("[DEBUG] Failed to corrupt deal: %v", err)
+		}
+	}
+
 	log.Info("Succeed to generate deals", "code_commitment", codeCommitmentHex, "round", req.GetRound())
 
 	// Set deals into response
 	resp := createGenerateDealsResponse(req.GetRound(), req.GetCodeCommitment(), deals)
 
 	return resp, nil
+}
+
+// corruptFirstDeal corrupts one deal's cipher and re-signs at DKG level.
+// Outer Schnorr passes but inner AEAD decryption produces garbage →
+// VerifyDeal fails → StatusComplaint. DEBUG ONLY.
+func corruptFirstDeal(s *DKGServer, deals map[int]*dkg.Deal, ccHex string, round uint32) error {
+	for idx, deal := range deals {
+		if len(deal.Deal.Cipher) == 0 {
+			continue
+		}
+
+		// Corrupt cipher
+		for i := 0; i < 8 && i < len(deal.Deal.Cipher); i++ {
+			deal.Deal.Cipher[i] ^= 0xFF
+		}
+
+		// Re-sign at DKG level so outer signature check passes
+		longterm, err := s.DKGStore.LoadSealedEd25519Key(ccHex, round)
+		if err != nil {
+			return errors.Wrap(err, "load longterm key for re-signing")
+		}
+
+		buff, err := deal.MarshalBinary()
+		if err != nil {
+			return errors.Wrap(err, "marshal corrupted deal")
+		}
+
+		deal.Signature, err = schnorr.Sign(s.Suite, longterm, buff)
+		if err != nil {
+			return errors.Wrap(err, "re-sign corrupted deal")
+		}
+
+		log.Warnf("[DEBUG] Corrupted deal cipher and re-signed: recipient_index=%d round=%d", idx, round)
+
+		return nil
+	}
+
+	return nil
 }
 
 func validateGenerateDealsRequest(req *pb.GenerateDealsRequest) error {
