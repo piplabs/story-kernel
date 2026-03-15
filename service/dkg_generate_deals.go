@@ -7,6 +7,8 @@ import (
 
 	"crypto/aes"
 	"crypto/cipher"
+	"reflect"
+	"unsafe"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -108,7 +110,7 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 	// DEBUG: corrupt first deal's cipher and re-sign at DKG level.
 	// Outer Schnorr passes, inner AEAD decryption produces garbage → VerifyDeal fails → complaint.
 	if s.Cfg.TestCorruptDeal {
-		if err := corruptFirstDeal(s, deals, codeCommitmentHex, req.GetRound()); err != nil {
+		if err := corruptFirstDeal(s, distKeyGen, deals, codeCommitmentHex, req.GetRound()); err != nil {
 			log.Warnf("[DEBUG] Failed to corrupt deal: %v", err)
 		}
 	}
@@ -121,98 +123,76 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 	return resp, nil
 }
 
-// corruptFirstDeal decrypts a deal's AEAD cipher, corrupts the plaintext share,
-// re-encrypts with the same shared secret, and re-signs at the DKG level.
-// This produces a deal that passes both outer Schnorr and inner AEAD verification,
-// but fails VSS share verification → StatusComplaint → justification flow.
+// corruptFirstDeal uses reflect to access the dealer's plaintext deal,
+// corrupts the share value, re-encrypts with new ECDH, and re-signs.
+// Produces a deal that passes all checks except VerifyDeal → complaint.
 // DEBUG ONLY — must never be enabled in production.
-func corruptFirstDeal(s *DKGServer, deals map[int]*dkg.Deal, ccHex string, round uint32) error {
+func corruptFirstDeal(s *DKGServer, distKeyGen *dkg.DistKeyGenerator, deals map[int]*dkg.Deal, ccHex string, round uint32) error {
 	longterm, err := s.DKGStore.LoadSealedEd25519Key(ccHex, round)
 	if err != nil {
 		return errors.Wrap(err, "load longterm key")
 	}
 
-	// Get the round context for the verifier public keys
 	rc, err := s.GetOrLoadRoundContext(ccHex, round)
 	if err != nil {
 		return errors.Wrap(err, "get round context")
 	}
 
-	// Build hkdfContext (same as kyber's vss.context function)
 	dealerPub := s.Suite.Point().Mul(longterm, nil)
 	hkdfCtx := vssContext(s.Suite, dealerPub, rc.SortedPubKeys)
 
+	// Access dealer via reflect to get plaintext deals
+	dkgVal := reflect.ValueOf(distKeyGen).Elem()
+	dealerField := dkgVal.FieldByName("dealer")
+	if !dealerField.IsValid() {
+		return errors.New("cannot access dealer field via reflect")
+	}
+
+	// dealer is *vss.Dealer — call PlaintextDeal method
+	dealerIface := reflect.NewAt(dealerField.Type(), unsafe.Pointer(dealerField.UnsafeAddr())).Elem().Interface()
+
 	for idx, deal := range deals {
-		if len(deal.Deal.Cipher) == 0 || len(deal.Deal.DHKey) == 0 {
-			continue
-		}
-
-		// Parse the ephemeral DH public key from the deal
-		dhKey := s.Suite.Point()
-		if err := dhKey.UnmarshalBinary(deal.Deal.DHKey); err != nil {
-			return errors.Wrap(err, "unmarshal DH key")
-		}
-
-		// Compute ECDH shared secret: dealer_longterm * recipient_dhKey
-		// Wait — the deal's DHKey is the DEALER's ephemeral key, not the recipient's.
-		// The shared secret is: dealer_ephemeral * recipient_pubkey
-		// But we don't have the ephemeral private key anymore.
-		//
-		// Alternative: use dealer_longterm * recipient_pubkey to derive shared secret.
-		// This matches how the RECIPIENT decrypts: recipient_longterm * dealer_dhKey.
-		// But dealer_dhKey is the ephemeral public key, not the dealer's longterm key.
-		//
-		// Actually, the kyber encryption uses:
-		//   Dealer side: dhSecret (ephemeral) * vPub (verifier/recipient pubkey) → pre
-		//   Verifier side: v.longterm * dhKey (dealer's ephemeral pubkey) → pre
-		// Both compute the same ECDH point.
-		//
-		// We DON'T have the ephemeral private key. It was generated inside Deals()
-		// and discarded. So we can't re-encrypt using the same shared secret.
-		//
-		// Solution: generate a NEW ephemeral key, compute new shared secret,
-		// encrypt the corrupted plaintext, and update DHKey + Signature.
-
-		// Generate new ephemeral key pair
-		newDHSecret := s.Suite.Scalar().Pick(s.Suite.RandomStream())
-		newDHPublic := s.Suite.Point().Mul(newDHSecret, nil)
-
-		// Get recipient's public key (idx is the recipient index in sorted pubkeys)
 		if idx >= len(rc.SortedPubKeys) {
 			continue
 		}
-		recipientPub := rc.SortedPubKeys[idx]
 
-		// Compute new shared secret: newDHSecret * recipientPub
+		// Get plaintext deal via reflect method call
+		dealer := dealerIface.(*vss.Dealer)
+		plainDeal, err := dealer.PlaintextDeal(idx)
+		if err != nil {
+			return errors.Wrapf(err, "get plaintext deal for index %d", idx)
+		}
+
+		// Corrupt the share value (XOR with random scalar)
+		corruptedShare := s.Suite.Scalar().Add(plainDeal.SecShare.V, s.Suite.Scalar().One())
+		corruptedDeal := &vss.Deal{
+			SessionID:   plainDeal.SessionID,
+			SecShare:    &share.PriShare{I: plainDeal.SecShare.I, V: corruptedShare},
+			T:           plainDeal.T,
+			Commitments: plainDeal.Commitments,
+		}
+
+		// Encode to protobuf
+		dealBuff, err := protobuf.Encode(corruptedDeal)
+		if err != nil {
+			return errors.Wrap(err, "encode corrupted deal")
+		}
+
+		// Generate new ephemeral key and encrypt
+		newDHSecret := s.Suite.Scalar().Pick(s.Suite.RandomStream())
+		newDHPublic := s.Suite.Point().Mul(newDHSecret, nil)
+		recipientPub := rc.SortedPubKeys[idx]
 		pre := s.Suite.Point().Mul(newDHSecret, recipientPub)
 
-		// Create AEAD cipher with new shared secret
 		gcm, err := vssNewAEAD(s.Suite, pre, hkdfCtx)
 		if err != nil {
 			return errors.Wrap(err, "create AEAD")
 		}
 
-		// Build a valid vss.Deal protobuf with a random share value.
-		// The share won't match commitments → VerifyDeal fails → complaint.
-		fakeDeal := &vss.Deal{
-			SessionID: []byte("fake-session-for-justification-test"),
-			SecShare: &share.PriShare{
-				I: idx,
-				V: s.Suite.Scalar().Pick(s.Suite.RandomStream()),
-			},
-			T:           uint32(rc.Network.GetThreshold()),
-			Commitments: []kyber.Point{s.Suite.Point().Pick(s.Suite.RandomStream())},
-		}
-		fakePlaintext, err := protobuf.Encode(fakeDeal)
-		if err != nil {
-			return errors.Wrap(err, "encode fake deal")
-		}
-
-		// Encrypt with new AEAD
 		nonce := make([]byte, gcm.NonceSize())
-		encrypted := gcm.Seal(nil, nonce, fakePlaintext, hkdfCtx)
+		encrypted := gcm.Seal(nil, nonce, dealBuff, hkdfCtx)
 
-		// Update the deal with new DH key, cipher, nonce
+		// Update deal
 		newDHBytes, _ := newDHPublic.MarshalBinary()
 		newDHSig, err := schnorr.Sign(s.Suite, longterm, newDHBytes)
 		if err != nil {
@@ -229,13 +209,12 @@ func corruptFirstDeal(s *DKGServer, deals map[int]*dkg.Deal, ccHex string, round
 		if err != nil {
 			return errors.Wrap(err, "marshal corrupted deal")
 		}
-
 		deal.Signature, err = schnorr.Sign(s.Suite, longterm, buff)
 		if err != nil {
 			return errors.Wrap(err, "re-sign corrupted deal")
 		}
 
-		log.Warnf("[DEBUG] Corrupted deal with new AEAD encryption: recipient_index=%d round=%d", idx, round)
+		log.Warnf("[DEBUG] Corrupted deal share (correct SessionID): recipient=%d round=%d", idx, round)
 
 		return nil
 	}
