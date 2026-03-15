@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -199,13 +198,12 @@ func (m *MockDB) Compact(start, end []byte) error {
 
 func createTestDKGNetwork() *pb.DKGNetwork {
 	return &pb.DKGNetwork{
-		CodeCommitment: []byte("test_code_commitment_bytes"),
-		Round:          1,
-		ActiveValSet:   []string{"validator1", "validator2", "validator3"},
-		Total:          3,
-		Threshold:      2,
-		PublicCoeffs:   [][]byte{[]byte("coeff1"), []byte("coeff2")},
-		IsResharing:    false,
+		Round:        1,
+		ActiveValSet: []string{"validator1", "validator2", "validator3"},
+		Total:        3,
+		Threshold:    2,
+		PublicCoeffs: [][]byte{[]byte("coeff1"), []byte("coeff2")},
+		IsResharing:  false,
 	}
 }
 
@@ -376,12 +374,20 @@ func TestVerifySimpleProof(t *testing.T) {
 }
 
 func TestVerifyMultiStoreProof(t *testing.T) {
-	t.Run("missing module exist proof", func(t *testing.T) {
-		moduleProof := &ics23.CommitmentProof{Proof: &ics23.CommitmentProof_Nonexist{Nonexist: &ics23.NonExistenceProof{}}}
+	t.Run("missing both exist and nonexist proof", func(t *testing.T) {
+		moduleProof := &ics23.CommitmentProof{} // neither exist nor nonexist
 		simpleProof := createValidICS23Proof([]byte("k"), []byte("v"))
 		err := verifyMultiStoreProof(moduleProof, simpleProof, "ics23:iavl", "ics23:simple", []byte("k"), []byte("s"), []byte("q"), []byte("v"), []byte("h"))
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "module proof missing ExistProof")
+		assert.Contains(t, err.Error(), "module proof missing both ExistProof and NonExistProof")
+	})
+	t.Run("nonexist module proof attempts verification", func(t *testing.T) {
+		moduleProof := &ics23.CommitmentProof{Proof: &ics23.CommitmentProof_Nonexist{Nonexist: &ics23.NonExistenceProof{}}}
+		simpleProof := createValidICS23Proof([]byte("k"), []byte("v"))
+		err := verifyMultiStoreProof(moduleProof, simpleProof, "ics23:iavl", "ics23:simple", []byte("k"), []byte("s"), []byte("q"), nil, []byte("h"))
+		assert.Error(t, err)
+		// Should attempt non-existence verification (and fail because proof is empty)
+		assert.Contains(t, err.Error(), "non-existence proof verification failed")
 	})
 	t.Run("missing simple exist proof", func(t *testing.T) {
 		moduleProof := createValidICS23Proof([]byte("k"), []byte("v"))
@@ -415,8 +421,8 @@ func TestMarshaling(t *testing.T) {
 		var decoded pb.DKGNetwork
 		err = cdc.Unmarshal(data, &decoded)
 		require.NoError(t, err)
-		assert.True(t, bytes.Equal(network.GetCodeCommitment(), decoded.GetCodeCommitment()))
 		assert.Equal(t, network.GetRound(), decoded.GetRound())
+		assert.Equal(t, network.GetActiveValSet(), decoded.GetActiveValSet())
 	})
 	t.Run("DKGRegistration", func(t *testing.T) {
 		reg := createTestDKGRegistration()
@@ -545,10 +551,11 @@ func TestNewCometLogger(t *testing.T) {
 }
 
 func TestGetLatestActiveDKGNetwork_ParseError(t *testing.T) {
-	invalidKey := "invalid_format"
-	var codeCommitmentHex string
+	// On-chain latest active round value is just a round number string.
+	// Non-numeric values should fail parsing.
+	invalidKey := "not_a_number"
 	var round uint32
-	_, err := fmt.Sscanf(invalidKey, "%s_%d", &codeCommitmentHex, &round)
+	_, err := fmt.Sscanf(invalidKey, "%d", &round)
 	assert.Error(t, err)
 }
 
@@ -615,15 +622,15 @@ func TestGetDKGNetwork_Flow(t *testing.T) {
 	})
 }
 
-func TestGetAllVerifiedDKGRegistrations_Flow(t *testing.T) {
+func TestGetAllParticipantDKGRegistrations_Flow(t *testing.T) {
 	verifiedStatus := pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED
 	assert.Equal(t, pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED, verifiedStatus)
 }
 
-func TestGetAllVerifiedDKGRegistrations_FailFast(t *testing.T) {
+func TestGetAllParticipantDKGRegistrations_FailFast(t *testing.T) {
 	t.Run("returns error immediately on query failure", func(t *testing.T) {
 		// Simulates the fail-fast behavior: any single getDKGRegistration error
-		// should propagate up as an error from GetAllVerifiedDKGRegistrations
+		// should propagate up as an error from GetAllParticipantDKGRegistrations
 		err := fmt.Errorf("failed to get registration for validator val1: connection refused")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to get registration for validator")
@@ -703,37 +710,32 @@ func TestMinWitnessValidation(t *testing.T) {
 }
 
 func TestGetLatestActiveDKGNetwork_Parsing(t *testing.T) {
-	t.Run("parses network key", func(t *testing.T) {
-		networkKey := "test_code_commitment_123"
-		lastUnderscore := strings.LastIndex(networkKey, "_")
-		require.Positive(t, lastUnderscore)
-		codeCommitmentHex := networkKey[:lastUnderscore]
+	t.Run("parses round number", func(t *testing.T) {
+		// On-chain latest active round value is just a round number string.
+		networkKeyBz := []byte("123")
 		var round uint32
-		_, err := fmt.Sscanf(networkKey[lastUnderscore+1:], "%d", &round)
+		_, err := fmt.Sscanf(string(networkKeyBz), "%d", &round)
 		assert.NoError(t, err)
-		assert.Equal(t, "test_code_commitment", codeCommitmentHex)
 		assert.Equal(t, uint32(123), round)
 	})
-	t.Run("parses key without underscore in code commitment", func(t *testing.T) {
-		networkKey := "abcdef_42"
-		lastUnderscore := strings.LastIndex(networkKey, "_")
-		require.Positive(t, lastUnderscore)
-		codeCommitmentHex := networkKey[:lastUnderscore]
+	t.Run("parses single digit round", func(t *testing.T) {
+		networkKeyBz := []byte("1")
 		var round uint32
-		_, err := fmt.Sscanf(networkKey[lastUnderscore+1:], "%d", &round)
+		_, err := fmt.Sscanf(string(networkKeyBz), "%d", &round)
 		assert.NoError(t, err)
-		assert.Equal(t, "abcdef", codeCommitmentHex)
-		assert.Equal(t, uint32(42), round)
+		assert.Equal(t, uint32(1), round)
 	})
-	t.Run("handles missing underscore", func(t *testing.T) {
-		networkKey := "invalidformat"
-		lastUnderscore := strings.LastIndex(networkKey, "_")
-		assert.Equal(t, -1, lastUnderscore)
+	t.Run("handles non-numeric value", func(t *testing.T) {
+		networkKeyBz := []byte("invalid")
+		var round uint32
+		_, err := fmt.Sscanf(string(networkKeyBz), "%d", &round)
+		assert.Error(t, err)
 	})
-	t.Run("handles trailing underscore", func(t *testing.T) {
-		networkKey := "code_commitment_"
-		lastUnderscore := strings.LastIndex(networkKey, "_")
-		assert.Equal(t, len(networkKey)-1, lastUnderscore)
+	t.Run("handles empty value", func(t *testing.T) {
+		networkKeyBz := []byte("")
+		var round uint32
+		_, err := fmt.Sscanf(string(networkKeyBz), "%d", &round)
+		assert.Error(t, err)
 	})
 }
 

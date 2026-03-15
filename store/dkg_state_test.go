@@ -213,6 +213,77 @@ func TestFromRoundZeroOmitted(t *testing.T) {
 	require.Equal(t, uint32(0), restored.FromRound)
 }
 
+// TestPublicCoeffsRoundTrip verifies that PublicCoeffs survive
+// serialization and deserialization through toDisk/fromDisk.
+func TestPublicCoeffsRoundTrip(t *testing.T) {
+	t.Parallel()
+	store := newTestDKGStore(t)
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+
+	pub := suite.Point().Mul(suite.Scalar().Pick(suite.RandomStream()), nil)
+	coeff1 := suite.Point().Mul(suite.Scalar().Pick(suite.RandomStream()), nil)
+	coeff2 := suite.Point().Mul(suite.Scalar().Pick(suite.RandomStream()), nil)
+	original := &DKGState{
+		PubKeys:      []kyber.Point{pub},
+		Threshold:    2,
+		FromRound:    5,
+		PublicCoeffs: []kyber.Point{coeff1, coeff2},
+	}
+
+	disk, err := store.toDisk(original)
+	require.NoError(t, err)
+	require.Len(t, disk.PublicCoeffsBase64, 2)
+
+	restored, err := store.fromDisk(disk)
+	require.NoError(t, err)
+	require.Len(t, restored.PublicCoeffs, 2)
+	require.True(t, restored.PublicCoeffs[0].Equal(coeff1))
+	require.True(t, restored.PublicCoeffs[1].Equal(coeff2))
+}
+
+// TestPublicCoeffsPersistence verifies that PublicCoeffs are persisted to disk
+// and can be loaded back correctly via SetPrevDKGState.
+func TestPublicCoeffsPersistence(t *testing.T) {
+	t.Parallel()
+	store := newTestDKGStore(t)
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+	codeCommitment := "pubcoeffs1234567890"
+	round := uint32(3)
+
+	ensureStateDir(t, store, codeCommitment, round)
+
+	pub := suite.Point().Mul(suite.Scalar().Pick(suite.RandomStream()), nil)
+	coeff := suite.Point().Mul(suite.Scalar().Pick(suite.RandomStream()), nil)
+	require.NoError(t, store.SetPrevDKGState(codeCommitment, round, 2, []kyber.Point{pub}, []kyber.Point{coeff}))
+
+	st, err := store.LoadDKGState(codeCommitment, round)
+	require.NoError(t, err)
+	require.Len(t, st.PublicCoeffs, 1)
+	require.True(t, st.PublicCoeffs[0].Equal(coeff))
+}
+
+// TestEmptyPublicCoeffsOmitted verifies that an empty PublicCoeffs slice
+// is omitted from the JSON representation.
+func TestEmptyPublicCoeffsOmitted(t *testing.T) {
+	t.Parallel()
+	store := newTestDKGStore(t)
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+
+	pub := suite.Point().Mul(suite.Scalar().Pick(suite.RandomStream()), nil)
+	original := &DKGState{
+		PubKeys:   []kyber.Point{pub},
+		Threshold: 2,
+	}
+
+	disk, err := store.toDisk(original)
+	require.NoError(t, err)
+	require.Empty(t, disk.PublicCoeffsBase64)
+
+	restored, err := store.fromDisk(disk)
+	require.NoError(t, err)
+	require.Empty(t, restored.PublicCoeffs)
+}
+
 // TestBackwardCompatibility verifies that loading a state file without
 // justifications field still works (backward compatibility with existing state files).
 func TestBackwardCompatibility(t *testing.T) {

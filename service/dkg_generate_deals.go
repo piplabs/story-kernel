@@ -46,13 +46,21 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 		return nil, status.Errorf(codes.Internal, "failed to get or load roundContext")
 	}
 
-	if err := s.CachePID(codeCommitmentHex, req.Round, rc.Registrations); err != nil {
-		log.WithFields(log.Fields{
-			"round":           req.GetRound(),
-			"code_commitment": codeCommitmentHex,
-		}).Errorf("failed to cache PID: %v", err)
+	// For resharing rounds, skip CachePID because:
+	// 1. The dealer's identity is resolved through longterm key matching in the kyber DKG
+	//    library (dkg.Config.Longterm vs OldNodes), not through the PID cache.
+	// 2. During upgrade resharing, the current round's key is sealed by the new binary's
+	//    enclave, making it inaccessible from the old binary that generates deals.
+	// 3. PIDCache is only consumed by PartialDecryptTDH2, which receives PID in its request.
+	if !req.GetIsResharing() {
+		if err := s.CachePID(codeCommitmentHex, req.Round, rc.Registrations); err != nil {
+			log.WithFields(log.Fields{
+				"round":           req.GetRound(),
+				"code_commitment": codeCommitmentHex,
+			}).Errorf("failed to cache PID: %v", err)
 
-		return nil, status.Errorf(codes.Internal, "failed to cache PID")
+			return nil, status.Errorf(codes.Internal, "failed to cache PID")
+		}
 	}
 
 	// Load DKG state from cache or rebuild from state

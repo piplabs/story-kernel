@@ -41,7 +41,7 @@ const (
 // This can be implemented by either HTTP client or verified light client.
 type QueryClient interface {
 	GetDKGNetwork(ctx context.Context, codeCommitmentHex string, round uint32) (*pb.DKGNetwork, error)
-	GetAllVerifiedDKGRegistrations(ctx context.Context, codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error)
+	GetAllParticipantDKGRegistrations(ctx context.Context, codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error)
 	GetLatestActiveDKGNetwork(ctx context.Context) (*pb.DKGNetwork, error)
 	VerifyStartBlock(ctx context.Context, startBlockHeight int64, startBlockHash []byte) error
 	Close() error
@@ -231,8 +231,11 @@ func (q *VerifiedQueryClient) GetDKGNetwork(ctx context.Context, codeCommitmentH
 	return &network, nil
 }
 
-// The validator addresses must be obtained from GetDKGNetwork first.
-func (q *VerifiedQueryClient) GetAllVerifiedDKGRegistrations(ctx context.Context, codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error) {
+// GetAllParticipantDKGRegistrations returns all DKG registrations that are part of
+// the active participant set (VERIFIED or FINALIZED status). Both statuses must be
+// included because validators finalize at different times — earlier finalizers
+// transition their status from VERIFIED to FINALIZED before later finalizers query.
+func (q *VerifiedQueryClient) GetAllParticipantDKGRegistrations(ctx context.Context, codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error) {
 	// First get the network to know which validators are registered
 	network, err := q.GetDKGNetwork(ctx, codeCommitmentHex, round)
 	if err != nil {
@@ -243,7 +246,9 @@ func (q *VerifiedQueryClient) GetAllVerifiedDKGRegistrations(ctx context.Context
 		return nil, errors.New("no active validators in network")
 	}
 
-	// Query each validator's registration individually
+	// Query each validator's registration individually.
+	// Not all validators in ActiveValSet may have registered for DKG
+	// (e.g., bootnodes or validators that missed registration).
 	var registrations []*pb.DKGRegistration
 	for _, validatorAddr := range network.GetActiveValSet() {
 		reg, err := q.getDKGRegistration(ctx, codeCommitmentHex, round, validatorAddr)
@@ -251,19 +256,28 @@ func (q *VerifiedQueryClient) GetAllVerifiedDKGRegistrations(ctx context.Context
 			return nil, fmt.Errorf("failed to get registration for validator %s: %w", validatorAddr, err)
 		}
 
-		if reg.GetStatus() == pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED {
+		// Skip validators that didn't register (non-existence proven)
+		if reg == nil {
+			log.Debugf("Validator %s has no DKG registration for round %d, skipping", validatorAddr, round)
+
+			continue
+		}
+
+		if reg.GetStatus() == pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED ||
+			reg.GetStatus() == pb.DKGRegStatus_DKG_REG_STATUS_FINALIZED {
 			registrations = append(registrations, reg)
 		}
 	}
 
 	if len(registrations) == 0 {
-		return nil, errors.New("no verified registrations found")
+		return nil, errors.New("no participant registrations found")
 	}
 
 	return registrations, nil
 }
 
 // getDKGRegistration retrieves a single DKG registration.
+// Returns (nil, nil) if the validator has no registration (verified via non-existence proof).
 func (q *VerifiedQueryClient) getDKGRegistration(ctx context.Context, codeCommitmentHex string, round uint32, validatorAddr string) (*pb.DKGRegistration, error) {
 	key := GetDKGRegistrationKey(codeCommitmentHex, round, validatorAddr)
 
@@ -272,8 +286,9 @@ func (q *VerifiedQueryClient) getDKGRegistration(ctx context.Context, codeCommit
 		return nil, fmt.Errorf("failed to get DKG registration: %w", err)
 	}
 
+	// No data means the key doesn't exist (proven by non-existence proof)
 	if len(bz) == 0 {
-		return nil, errors.New("DKG registration not found")
+		return nil, nil
 	}
 
 	// Decode DKGRegistration from protobuf
@@ -299,24 +314,14 @@ func (q *VerifiedQueryClient) GetLatestActiveDKGNetwork(ctx context.Context) (*p
 		return nil, errors.New("no active DKG network found")
 	}
 
-	// The value is a string containing "{code_commitment_hex}_{round}"
-	networkKey := string(networkKeyBz)
-
-	// Parse to get code commitment and round
-	// Use strings.LastIndex since code_commitment_hex itself may contain underscores
-	lastUnderscore := strings.LastIndex(networkKey, "_")
-	if lastUnderscore < 0 || lastUnderscore == len(networkKey)-1 {
-		return nil, fmt.Errorf("failed to parse network key: %s", networkKey)
-	}
-	codeCommitmentHex := networkKey[:lastUnderscore]
+	// The on-chain value is the round number as a string (e.g., "23").
 	var round uint32
-	_, err = fmt.Sscanf(networkKey[lastUnderscore+1:], "%d", &round)
+	_, err = fmt.Sscanf(string(networkKeyBz), "%d", &round)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse round from network key %s: %w", networkKey, err)
+		return nil, fmt.Errorf("failed to parse round from latest active key %s: %w", string(networkKeyBz), err)
 	}
 
-	// Now get the actual network
-	return q.GetDKGNetwork(ctx, codeCommitmentHex, round)
+	return q.GetDKGNetwork(ctx, "", round)
 }
 
 // getStoreData retrieves and verifies data from the store using Merkle proofs.
@@ -487,14 +492,18 @@ func identifyProofIndices(proofTypes []string) (moduleProofIdx, simpleProofIdx i
 }
 
 // verifyMultiStoreProof verifies a multi-store proof chain (Module + Simple).
+// Supports both existence proofs (key exists with value) and non-existence proofs
+// (key does not exist in the module store).
 func verifyMultiStoreProof(
 	moduleProof, simpleProof *ics23.CommitmentProof,
 	moduleType, simpleType string,
 	moduleKey, simpleKey, queryKey, value, appHash []byte,
 ) error {
-	// Validate proof structure
-	if moduleProof.GetExist() == nil {
-		return errors.New("module proof missing ExistProof")
+	// Determine proof type: existence or non-existence
+	isNonExistence := moduleProof.GetNonexist() != nil
+
+	if !isNonExistence && moduleProof.GetExist() == nil {
+		return errors.New("module proof missing both ExistProof and NonExistProof")
 	}
 	if simpleProof.GetExist() == nil {
 		return errors.New("simple proof missing ExistProof")
@@ -504,27 +513,53 @@ func verifyMultiStoreProof(
 	//
 	// In Cosmos SDK multi-store architecture:
 	// 1. Simple proof proves: storeKey -> moduleRoot (in the multi-store root = AppHash)
-	// 2. Module proof (IAVL/SMT) proves: key -> value (in the module's tree with root = moduleRoot)
+	// 2. Module proof (IAVL/SMT) proves: key -> value (existence) or key absence (non-existence)
 	//
 	// The connection point is:
 	// - simpleProof.GetExist().Value contains the expected moduleRoot
-	// - moduleProof must prove key->value under that exact moduleRoot
+	// - moduleProof must verify under that exact moduleRoot
 	//
-	// Verification order:
-	// 1. Get expected moduleRoot from Simple proof's value
-	// 2. Verify module proof with that moduleRoot
-	// 3. Verify Simple proof with AppHash
+	// For non-existence proofs (querying a key that doesn't exist):
+	// - Module proof is a NonExistProof proving key absence in the module IAVL tree
+	// - Simple proof is still an ExistProof proving the module root in the multi-store
 
 	expectedModuleRoot := simpleProof.GetExist().Value
 
-	// Verify module proof (IAVL/SMT)
-	if err := verifyModuleProof(moduleProof, moduleType, moduleKey, queryKey, value, expectedModuleRoot); err != nil {
+	if isNonExistence {
+		// Verify non-existence of key in module store
+		if err := verifyModuleNonExistenceProof(moduleProof, moduleType, moduleKey, queryKey, expectedModuleRoot); err != nil {
+			return err
+		}
+	} else {
+		// Verify existence of key->value in module store
+		if err := verifyModuleProof(moduleProof, moduleType, moduleKey, queryKey, value, expectedModuleRoot); err != nil {
+			return err
+		}
+	}
+
+	// Verify simple proof (always existence — module store is present in multi-store)
+	if err := verifySimpleProof(simpleProof, simpleType, simpleKey, expectedModuleRoot, appHash); err != nil {
 		return err
 	}
 
-	// Verify simple proof
-	if err := verifySimpleProof(simpleProof, simpleType, simpleKey, expectedModuleRoot, appHash); err != nil {
-		return err
+	return nil
+}
+
+// verifyModuleNonExistenceProof proves that a key does NOT exist in the module store.
+func verifyModuleNonExistenceProof(
+	moduleProof *ics23.CommitmentProof,
+	moduleType string,
+	moduleKey, queryKey, expectedModuleRoot []byte,
+) error {
+	proofKey := moduleKey
+	if len(proofKey) == 0 {
+		proofKey = queryKey
+	}
+
+	spec := getProofSpec(moduleType)
+
+	if !ics23.VerifyNonMembership(spec, expectedModuleRoot, moduleProof, proofKey) {
+		return errors.New("module non-existence proof verification failed: key absence not proven under expected module root")
 	}
 
 	return nil
