@@ -88,6 +88,13 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 		return nil, status.Errorf(codes.Internal, "failed to generate encrypted deals")
 	}
 
+	// Optionally corrupt one deal for justification flow testing.
+	if s.Cfg.DKGTestCorruptDeal {
+		if err := s.corruptOneDeal(codeCommitmentHex, req.GetRound(), distKeyGen, deals); err != nil {
+			log.Warnf("Deal corruption failed (continuing with valid deals): %v", err)
+		}
+	}
+
 	log.Info("Succeed to generate deals", "code_commitment", codeCommitmentHex, "round", req.GetRound())
 
 	// Set deals into response
