@@ -36,6 +36,14 @@ type GRPCConfig struct {
 	// DebugMode enables development features such as gRPC reflection.
 	// Must remain false in production to avoid exposing service metadata.
 	DebugMode bool `mapstructure:"debug_mode"`
+
+	// TLS configuration for gRPC server.
+	// All three fields must be set to enable TLS.
+	// When TLSCertFile and TLSKeyFile are set, the server uses TLS.
+	// When TLSCAFile is also set, the server requires client certificates (mTLS).
+	TLSCertFile string `mapstructure:"tls_cert_file"`
+	TLSKeyFile  string `mapstructure:"tls_key_file"`
+	TLSCAFile   string `mapstructure:"tls_ca_file"`
 }
 
 type LightClientConfig struct {
@@ -66,11 +74,43 @@ func (c *Config) validate() error {
 		return errors.New("listen address for gRPC should not be empty")
 	}
 
+	if err := c.GRPC.Validate(); err != nil {
+		return fmt.Errorf("validate gRPC config: %w", err)
+	}
+
 	if err := c.LightClient.Validate(); err != nil {
 		return fmt.Errorf("validate light client config: %w", err)
 	}
 
 	return nil
+}
+
+// Validate checks the gRPC TLS configuration for consistency.
+// TLS cert and key must both be set or both be empty.
+// CA file is optional — when set alongside cert/key, mTLS is enabled.
+func (c GRPCConfig) Validate() error {
+	hasCert := c.TLSCertFile != ""
+	hasKey := c.TLSKeyFile != ""
+
+	if hasCert != hasKey {
+		return errors.New("tls_cert_file and tls_key_file must both be set or both be empty")
+	}
+
+	if c.TLSCAFile != "" && !hasCert {
+		return errors.New("tls_ca_file requires tls_cert_file and tls_key_file to be set")
+	}
+
+	return nil
+}
+
+// TLSEnabled returns true if the server TLS cert and key are configured.
+func (c GRPCConfig) TLSEnabled() bool {
+	return c.TLSCertFile != "" && c.TLSKeyFile != ""
+}
+
+// MTLSEnabled returns true if mutual TLS (client certificate verification) is configured.
+func (c GRPCConfig) MTLSEnabled() bool {
+	return c.TLSEnabled() && c.TLSCAFile != ""
 }
 
 func (c *Config) SetHomeDir(dir string) {

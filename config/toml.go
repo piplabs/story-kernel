@@ -21,6 +21,13 @@ log-level = "{{ .LogLevel }}"
 # gRPC server listen address
 listen_addr = "{{ .GRPC.ListenAddr }}"
 
+# TLS configuration (optional).
+# Set tls_cert_file and tls_key_file to enable server-side TLS.
+# Additionally set tls_ca_file to require client certificates (mTLS).
+# tls_cert_file = "/path/to/server.crt"
+# tls_key_file = "/path/to/server.key"
+# tls_ca_file = "/path/to/ca.crt"
+
 [light_client]
 # Chain ID of the Story network
 chain_id = "{{ .LightClient.ChainID }}"
