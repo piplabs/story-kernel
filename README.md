@@ -152,13 +152,71 @@ trusted_height = 1000000
 trusted_hash = "ABCD1234..."
 ```
 
-### 6. Start the Service
+### 6. (Optional) Enable TLS/mTLS
+
+By default, the gRPC server runs without TLS. To secure the connection between Story and story-kernel:
+
+**Generate certificates:**
+
+```bash
+# Create CA
+openssl genrsa -out ca.key 2048
+openssl req -new -x509 -days 365 -key ca.key -out ca.crt -subj "/CN=Story-Kernel-CA"
+
+# Create server cert (for story-kernel)
+openssl genrsa -out server.key 2048
+openssl req -new -key server.key -out server.csr -subj "/CN=story-kernel"
+echo "subjectAltName = IP:127.0.0.1, DNS:localhost" > server-ext.cnf
+openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out server.crt -days 365 -extfile server-ext.cnf
+
+# Create client cert (for story consensus client)
+openssl genrsa -out client.key 2048
+openssl req -new -key client.key -out client.csr -subj "/CN=story-client"
+openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out client.crt -days 365
+```
+
+**Server-side TLS only** (story-kernel verifies its identity to story):
+
+```toml
+# In ~/.story-kernel/config.toml
+[grpc]
+listen_addr = ":50051"
+tls_cert_file = "/path/to/server.crt"
+tls_key_file = "/path/to/server.key"
+```
+
+**Mutual TLS** (both sides verify each other):
+
+```toml
+# In ~/.story-kernel/config.toml
+[grpc]
+listen_addr = ":50051"
+tls_cert_file = "/path/to/server.crt"
+tls_key_file = "/path/to/server.key"
+tls_ca_file = "/path/to/ca.crt"      # enables client cert verification
+```
+
+On the **story consensus client** side, configure in `story.toml`:
+
+```toml
+[dkg]
+kernel-endpoints = ["tls://127.0.0.1:50051"]
+kernel-tls-ca-file = "/path/to/ca.crt"
+kernel-tls-cert-file = "/path/to/client.crt"   # for mTLS
+kernel-tls-key-file = "/path/to/client.key"     # for mTLS
+```
+
+> If no TLS fields are set, the gRPC connection runs in plaintext (insecure) mode — no changes needed for existing deployments.
+
+### 7. Start the Service
 
 ```bash
 gramine-sgx story-kernel start
 ```
 
-### 7. (Optional) Setup as Systemd Service
+### 8. (Optional) Setup as Systemd Service
 
 ```bash
 sudo tee /etc/systemd/system/story-kernel.service > /dev/null <<EOF
