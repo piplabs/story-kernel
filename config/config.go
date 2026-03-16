@@ -30,6 +30,13 @@ type Config struct {
 	GRPC GRPCConfig `mapstructure:"grpc"`
 
 	LightClient LightClientConfig `mapstructure:"light_client"`
+
+	// DKGTestCorruptDeal enables deal corruption for justification flow testing.
+	// When true, GenerateDeals will produce one deal with an invalid VSS share
+	// (V+1) that passes Schnorr signature verification but fails VerifyDeal,
+	// triggering a StatusComplaint response and the justification pipeline.
+	// This is set via CLI flag only and is NOT persisted in config.toml.
+	DKGTestCorruptDeal bool `mapstructure:"-"`
 }
 
 type GRPCConfig struct {

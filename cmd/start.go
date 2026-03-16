@@ -11,6 +11,11 @@ import (
 	"github.com/piplabs/story-kernel/server"
 )
 
+func init() {
+	startCmd.Flags().Bool(FlagDKGTestCorruptDeal, false,
+		"Corrupt one deal share for justification flow testing (DO NOT use in production)")
+}
+
 var startCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the story-kernel gRPC server",
@@ -18,6 +23,11 @@ var startCmd = &cobra.Command{
 		cfg, err := loadConfigFromHome(cmd)
 		if err != nil {
 			return err
+		}
+
+		cfg.DKGTestCorruptDeal, _ = cmd.Flags().GetBool(FlagDKGTestCorruptDeal)
+		if cfg.DKGTestCorruptDeal {
+			log.Warn("⚠ DKG test mode: one deal will be corrupted per GenerateDeals call")
 		}
 
 		svr, errChan := server.Serve(cfg)

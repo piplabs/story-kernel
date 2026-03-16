@@ -1,5 +1,6 @@
 package cmd
 
 const (
-	FlagHome = "home"
+	FlagHome               = "home"
+	FlagDKGTestCorruptDeal = "dkg-test-corrupt-deal"
 )
