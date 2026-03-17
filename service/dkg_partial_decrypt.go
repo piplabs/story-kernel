@@ -133,7 +133,7 @@ func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecry
 		return nil, status.Errorf(codes.Internal, "failed to encrypt partial")
 	}
 
-	signature, err := s.signPartialDecryptResponse(req.GetCodeCommitment(), req.GetRound(), encryptedPartial, ephPubKey, pubShareBz)
+	signature, err := s.signPartialDecryptResponse(codeCommitmentHex, req.GetRound(), req.GetCiphertext(), encryptedPartial, ephPubKey, pubShareBz)
 	if err != nil {
 		log.Errorf("failed to sign partial decrypt response: %v", err)
 
@@ -191,16 +191,15 @@ func (s *DKGServer) verifyRoundMatchesLatestNetwork(ctx context.Context, round u
 	return nil
 }
 
-func (s *DKGServer) signPartialDecryptResponse(codeCommitment []byte, round uint32, encryptedPartial []byte, ephPubKey []byte, pubShareBz []byte) ([]byte, error) {
-	encoded := make([]byte, 0, len(codeCommitment)+4+len(encryptedPartial)+len(ephPubKey)+len(pubShareBz))
-	encoded = append(encoded, codeCommitment...)
+func (s *DKGServer) signPartialDecryptResponse(codeCommitmentHex string, round uint32, ciphertext []byte, encryptedPartial []byte, ephPubKey []byte, pubShareBz []byte) ([]byte, error) {
+	encoded := make([]byte, 0, 4+len(ciphertext)+len(encryptedPartial)+len(ephPubKey)+len(pubShareBz))
 	encoded = append(encoded, uint32ToBytes(round)...)
+	encoded = append(encoded, ciphertext...)
 	encoded = append(encoded, encryptedPartial...)
 	encoded = append(encoded, ephPubKey...)
 	encoded = append(encoded, pubShareBz...)
 	respHash := ecrypto.Keccak256(encoded)
 
-	codeCommitmentHex := hex.EncodeToString(codeCommitment)
 	priv, err := s.DKGStore.LoadSealedSecp256k1Key(codeCommitmentHex, round)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load sealed secp256k1 key: %w", err)
