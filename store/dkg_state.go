@@ -18,7 +18,8 @@ import (
 
 // stateMu protects concurrent DKG state file access within this process.
 // Replaces file-based flock which is not supported in SGX/Gramine (ENOSYS).
-var stateMu sync.Mutex
+// Uses RWMutex to allow concurrent reads while serializing writes.
+var stateMu sync.RWMutex
 
 type DKGState struct {
 	PubKeys        []kyber.Point
@@ -124,8 +125,8 @@ func (s *DKGStore) updateState(codeCommitmentHex string, round uint32, update fu
 func (s *DKGStore) LoadDKGState(codeCommitmentHex string, round uint32) (*DKGState, error) {
 	path := s.statePath(codeCommitmentHex, round)
 
-	stateMu.Lock()
-	defer stateMu.Unlock()
+	stateMu.RLock()
+	defer stateMu.RUnlock()
 
 	return s.loadState(path)
 }
