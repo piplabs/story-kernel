@@ -35,6 +35,17 @@ func (s *DKGServer) GetInitDKG(
 		return dkgInst, nil
 	}
 
+	// Serialize per-round to prevent concurrent RPCs from both observing a
+	// cache miss and racing to build+save the same DKG state.
+	mu := s.getInitDKGMu(round)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Re-check cache after acquiring lock; another goroutine may have populated it.
+	if dkgInst, ok := s.InitDKGCache.Get(round); ok {
+		return dkgInst, nil
+	}
+
 	exists, err := s.DKGStore.HasDKGState(codeCommitmentHex, round)
 	if err != nil {
 		return nil, err
@@ -138,6 +149,14 @@ func (s *DKGServer) GetResharingPrevDKG(
 	latest *pb.DKGNetwork,
 ) (*dkg.DistKeyGenerator, error) {
 	fromRound := latest.GetRound()
+
+	if dkgInst, ok := s.ResharingPrevCache.Get(fromRound, toRound); ok {
+		return dkgInst, nil
+	}
+
+	mu := s.getResharePrevMu(fromRound, toRound)
+	mu.Lock()
+	defer mu.Unlock()
 
 	if dkgInst, ok := s.ResharingPrevCache.Get(fromRound, toRound); ok {
 		return dkgInst, nil
@@ -352,6 +371,14 @@ func (s *DKGServer) GetResharingNextDKG(
 	round, threshold uint32,
 	nextPubs []kyber.Point,
 ) (*dkg.DistKeyGenerator, error) {
+	if dkgInst, ok := s.ResharingNextCache.Get(round); ok {
+		return dkgInst, nil
+	}
+
+	mu := s.getReshareNextMu(round)
+	mu.Lock()
+	defer mu.Unlock()
+
 	if dkgInst, ok := s.ResharingNextCache.Get(round); ok {
 		return dkgInst, nil
 	}
