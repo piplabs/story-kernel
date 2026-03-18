@@ -122,7 +122,7 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 	}
 
 	// Calculate participants root from verified registrations
-	registrations, err := s.QueryClient.GetAllVerifiedDKGRegistrations(context.Background(), codeCommitmentHex, req.GetRound())
+	registrations, err := s.QueryClient.GetAllParticipantDKGRegistrations(context.Background(), codeCommitmentHex, req.GetRound())
 	if err != nil {
 		log.Errorf("failed to get verified DKG registrations: %v", err)
 

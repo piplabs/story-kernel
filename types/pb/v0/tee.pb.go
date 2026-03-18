@@ -364,16 +364,19 @@ func (x *GenerateAndSealKeyResponse) GetEnclaveReport() []byte {
 }
 
 type DKGRegistration struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Round         uint32                 `protobuf:"varint,1,opt,name=round,proto3" json:"round,omitempty"`
-	ValidatorAddr string                 `protobuf:"bytes,2,opt,name=validator_addr,proto3" json:"validator_addr,omitempty"`
-	Index         uint32                 `protobuf:"varint,3,opt,name=index,proto3" json:"index,omitempty"`
-	DkgPubKey     []byte                 `protobuf:"bytes,4,opt,name=dkg_pub_key,proto3" json:"dkg_pub_key,omitempty"`
-	CommPubKey    []byte                 `protobuf:"bytes,5,opt,name=comm_pub_key,proto3" json:"comm_pub_key,omitempty"`
-	EnclaveReport []byte                 `protobuf:"bytes,6,opt,name=enclave_report,proto3" json:"enclave_report,omitempty"`
-	Status        DKGRegStatus           `protobuf:"varint,7,opt,name=status,proto3,enum=story.dkg.v1.types.DKGRegStatus" json:"status,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Round          uint32                 `protobuf:"varint,1,opt,name=round,proto3" json:"round,omitempty"`
+	ValidatorAddr  string                 `protobuf:"bytes,2,opt,name=validator_addr,proto3" json:"validator_addr,omitempty"`
+	Index          uint32                 `protobuf:"varint,3,opt,name=index,proto3" json:"index,omitempty"`
+	DkgPubKey      []byte                 `protobuf:"bytes,4,opt,name=dkg_pub_key,proto3" json:"dkg_pub_key,omitempty"`
+	CommPubKey     []byte                 `protobuf:"bytes,5,opt,name=comm_pub_key,proto3" json:"comm_pub_key,omitempty"`
+	PubKeyShare    []byte                 `protobuf:"bytes,6,opt,name=pub_key_share,proto3" json:"pub_key_share,omitempty"`
+	EnclaveReport  []byte                 `protobuf:"bytes,7,opt,name=enclave_report,proto3" json:"enclave_report,omitempty"`
+	Status         DKGRegStatus           `protobuf:"varint,8,opt,name=status,proto3,enum=story.dkg.v1.types.DKGRegStatus" json:"status,omitempty"`
+	CodeCommitment []byte                 `protobuf:"bytes,9,opt,name=code_commitment,proto3" json:"code_commitment,omitempty"`
+	EnclaveType    []byte                 `protobuf:"bytes,10,opt,name=enclave_type,proto3" json:"enclave_type,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *DKGRegistration) Reset() {
@@ -441,6 +444,13 @@ func (x *DKGRegistration) GetCommPubKey() []byte {
 	return nil
 }
 
+func (x *DKGRegistration) GetPubKeyShare() []byte {
+	if x != nil {
+		return x.PubKeyShare
+	}
+	return nil
+}
+
 func (x *DKGRegistration) GetEnclaveReport() []byte {
 	if x != nil {
 		return x.EnclaveReport
@@ -455,19 +465,33 @@ func (x *DKGRegistration) GetStatus() DKGRegStatus {
 	return DKGRegStatus_DKG_REG_STATUS_UNSPECIFIED
 }
 
+func (x *DKGRegistration) GetCodeCommitment() []byte {
+	if x != nil {
+		return x.CodeCommitment
+	}
+	return nil
+}
+
+func (x *DKGRegistration) GetEnclaveType() []byte {
+	if x != nil {
+		return x.EnclaveType
+	}
+	return nil
+}
+
 type DKGNetwork struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
-	CodeCommitment   []byte                 `protobuf:"bytes,1,opt,name=code_commitment,proto3" json:"code_commitment,omitempty"`
-	Round            uint32                 `protobuf:"varint,2,opt,name=round,proto3" json:"round,omitempty"`
-	StartBlockHeight int64                  `protobuf:"varint,3,opt,name=start_block_height,proto3" json:"start_block_height,omitempty"`
-	StartBlockHash   []byte                 `protobuf:"bytes,4,opt,name=start_block_hash,proto3" json:"start_block_hash,omitempty"`
-	ActiveValSet     []string               `protobuf:"bytes,5,rep,name=active_val_set,proto3" json:"active_val_set,omitempty"`
-	Total            uint32                 `protobuf:"varint,6,opt,name=total,proto3" json:"total,omitempty"`
-	Threshold        uint32                 `protobuf:"varint,7,opt,name=threshold,proto3" json:"threshold,omitempty"`
-	Stage            DKGStage               `protobuf:"varint,8,opt,name=stage,proto3,enum=story.dkg.v1.types.DKGStage" json:"stage,omitempty"`
-	IsResharing      bool                   `protobuf:"varint,9,opt,name=is_resharing,proto3" json:"is_resharing,omitempty"`
-	GlobalPublicKey  []byte                 `protobuf:"bytes,10,opt,name=global_public_key,proto3" json:"global_public_key,omitempty"`
-	PublicCoeffs     [][]byte               `protobuf:"bytes,11,rep,name=public_coeffs,proto3" json:"public_coeffs,omitempty"`
+	Round            uint32                 `protobuf:"varint,1,opt,name=round,proto3" json:"round,omitempty"`
+	StartBlockHeight int64                  `protobuf:"varint,2,opt,name=start_block_height,proto3" json:"start_block_height,omitempty"`
+	StartBlockHash   []byte                 `protobuf:"bytes,3,opt,name=start_block_hash,proto3" json:"start_block_hash,omitempty"`
+	ActiveValSet     []string               `protobuf:"bytes,4,rep,name=active_val_set,proto3" json:"active_val_set,omitempty"`
+	Total            uint32                 `protobuf:"varint,5,opt,name=total,proto3" json:"total,omitempty"`
+	Threshold        uint32                 `protobuf:"varint,6,opt,name=threshold,proto3" json:"threshold,omitempty"`
+	Stage            DKGStage               `protobuf:"varint,7,opt,name=stage,proto3,enum=story.dkg.v1.types.DKGStage" json:"stage,omitempty"`
+	IsResharing      bool                   `protobuf:"varint,8,opt,name=is_resharing,proto3" json:"is_resharing,omitempty"`
+	GlobalPublicKey  []byte                 `protobuf:"bytes,9,opt,name=global_public_key,proto3" json:"global_public_key,omitempty"`
+	PublicCoeffs     [][]byte               `protobuf:"bytes,10,rep,name=public_coeffs,proto3" json:"public_coeffs,omitempty"`
+	IsUpgrade        bool                   `protobuf:"varint,11,opt,name=is_upgrade,proto3" json:"is_upgrade,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -500,13 +524,6 @@ func (x *DKGNetwork) ProtoReflect() protoreflect.Message {
 // Deprecated: Use DKGNetwork.ProtoReflect.Descriptor instead.
 func (*DKGNetwork) Descriptor() ([]byte, []int) {
 	return file_tee_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *DKGNetwork) GetCodeCommitment() []byte {
-	if x != nil {
-		return x.CodeCommitment
-	}
-	return nil
 }
 
 func (x *DKGNetwork) GetRound() uint32 {
@@ -577,6 +594,13 @@ func (x *DKGNetwork) GetPublicCoeffs() [][]byte {
 		return x.PublicCoeffs
 	}
 	return nil
+}
+
+func (x *DKGNetwork) GetIsUpgrade() bool {
+	if x != nil {
+		return x.IsUpgrade
+	}
+	return false
 }
 
 type GenerateDealsRequest struct {
@@ -1370,29 +1394,35 @@ const file_tee_proto_rawDesc = "" +
 	"\x10start_block_hash\x18\x04 \x01(\fR\x10start_block_hash\x12 \n" +
 	"\vdkg_pub_key\x18\x05 \x01(\fR\vdkg_pub_key\x12\"\n" +
 	"\fcomm_pub_key\x18\x06 \x01(\fR\fcomm_pub_key\x12&\n" +
-	"\x0eenclave_report\x18\a \x01(\fR\x0eenclave_report\"\x8d\x02\n" +
+	"\x0eenclave_report\x18\a \x01(\fR\x0eenclave_report\"\x81\x03\n" +
 	"\x0fDKGRegistration\x12\x14\n" +
 	"\x05round\x18\x01 \x01(\rR\x05round\x12&\n" +
 	"\x0evalidator_addr\x18\x02 \x01(\tR\x0evalidator_addr\x12\x14\n" +
 	"\x05index\x18\x03 \x01(\rR\x05index\x12 \n" +
 	"\vdkg_pub_key\x18\x04 \x01(\fR\vdkg_pub_key\x12\"\n" +
-	"\fcomm_pub_key\x18\x05 \x01(\fR\fcomm_pub_key\x12&\n" +
-	"\x0eenclave_report\x18\x06 \x01(\fR\x0eenclave_report\x128\n" +
-	"\x06status\x18\a \x01(\x0e2 .story.dkg.v1.types.DKGRegStatusR\x06status\"\xb0\x03\n" +
+	"\fcomm_pub_key\x18\x05 \x01(\fR\fcomm_pub_key\x12$\n" +
+	"\rpub_key_share\x18\x06 \x01(\fR\rpub_key_share\x12&\n" +
+	"\x0eenclave_report\x18\a \x01(\fR\x0eenclave_report\x128\n" +
+	"\x06status\x18\b \x01(\x0e2 .story.dkg.v1.types.DKGRegStatusR\x06status\x12(\n" +
+	"\x0fcode_commitment\x18\t \x01(\fR\x0fcode_commitment\x12\"\n" +
+	"\fenclave_type\x18\n" +
+	" \x01(\fR\fenclave_type\"\xa6\x03\n" +
 	"\n" +
-	"DKGNetwork\x12(\n" +
-	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
-	"\x05round\x18\x02 \x01(\rR\x05round\x12.\n" +
-	"\x12start_block_height\x18\x03 \x01(\x03R\x12start_block_height\x12*\n" +
-	"\x10start_block_hash\x18\x04 \x01(\fR\x10start_block_hash\x12&\n" +
-	"\x0eactive_val_set\x18\x05 \x03(\tR\x0eactive_val_set\x12\x14\n" +
-	"\x05total\x18\x06 \x01(\rR\x05total\x12\x1c\n" +
-	"\tthreshold\x18\a \x01(\rR\tthreshold\x122\n" +
-	"\x05stage\x18\b \x01(\x0e2\x1c.story.dkg.v1.types.DKGStageR\x05stage\x12\"\n" +
-	"\fis_resharing\x18\t \x01(\bR\fis_resharing\x12,\n" +
-	"\x11global_public_key\x18\n" +
-	" \x01(\fR\x11global_public_key\x12$\n" +
-	"\rpublic_coeffs\x18\v \x03(\fR\rpublic_coeffs\"z\n" +
+	"DKGNetwork\x12\x14\n" +
+	"\x05round\x18\x01 \x01(\rR\x05round\x12.\n" +
+	"\x12start_block_height\x18\x02 \x01(\x03R\x12start_block_height\x12*\n" +
+	"\x10start_block_hash\x18\x03 \x01(\fR\x10start_block_hash\x12&\n" +
+	"\x0eactive_val_set\x18\x04 \x03(\tR\x0eactive_val_set\x12\x14\n" +
+	"\x05total\x18\x05 \x01(\rR\x05total\x12\x1c\n" +
+	"\tthreshold\x18\x06 \x01(\rR\tthreshold\x122\n" +
+	"\x05stage\x18\a \x01(\x0e2\x1c.story.dkg.v1.types.DKGStageR\x05stage\x12\"\n" +
+	"\fis_resharing\x18\b \x01(\bR\fis_resharing\x12,\n" +
+	"\x11global_public_key\x18\t \x01(\fR\x11global_public_key\x12$\n" +
+	"\rpublic_coeffs\x18\n" +
+	" \x03(\fR\rpublic_coeffs\x12\x1e\n" +
+	"\n" +
+	"is_upgrade\x18\v \x01(\bR\n" +
+	"is_upgrade\"z\n" +
 	"\x14GenerateDealsRequest\x12(\n" +
 	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
 	"\x05round\x18\x02 \x01(\rR\x05round\x12\"\n" +

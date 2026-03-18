@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"runtime/debug"
 
 	cmtdb "github.com/cometbft/cometbft-db"
 	log "github.com/sirupsen/logrus"
@@ -19,12 +20,16 @@ import (
 
 	"go.dedis.ch/kyber/v4/group/edwards25519"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
 )
 
 func Serve(cfg *config.Config) (*grpc.Server, chan error) {
 	errCh := make(chan error)
-	svr := grpc.NewServer()
+	svr := grpc.NewServer(
+		grpc.UnaryInterceptor(recoveryInterceptor()),
+	)
 
 	// Initialize query client
 	queryClient, err := initializeQueryClient(cfg)
@@ -155,6 +160,28 @@ func fallbackToConfigTrustedBlock(ctx context.Context, cfg *config.Config, db cm
 	log.Info("Consider updating trusted_height and trusted_hash in config.toml with a more recent block to avoid this on future restarts")
 
 	return queryClient, nil
+}
+
+// recoveryInterceptor returns a gRPC unary interceptor that catches panics
+// (e.g., from the kyber DKG library) and converts them to Internal errors,
+// preventing the entire gRPC server from crashing.
+func recoveryInterceptor() grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context,
+		req interface{},
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (resp interface{}, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errorf("recovered from panic in %s: %v\n%s", info.FullMethod, r, debug.Stack())
+				resp = nil
+				err = status.Errorf(codes.Internal, "internal server error in %s", info.FullMethod)
+			}
+		}()
+
+		return handler(ctx, req)
+	}
 }
 
 func registerAllServices(svr *grpc.Server, cfg *config.Config, queryClient story.QueryClient) {

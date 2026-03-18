@@ -1,7 +1,6 @@
 package story
 
 import (
-	"encoding/binary"
 	"fmt"
 )
 
@@ -17,44 +16,36 @@ const (
 const (
 	DKGNetworkPrefix        byte = 1
 	DKGRegistrationPrefix   byte = 3
-	LatestActiveRoundPrefix byte = 4 // Added based on keeper implementation
+	LatestActiveRoundPrefix byte = 4
 )
 
-// Where key is "{code_commitment_hex}_{round}".
-func GetDKGNetworkKey(codeCommitmentHex string, round uint32) []byte {
-	// Collections uses: prefix | string_key_length (varint) | string_key
-	key := fmt.Sprintf("%s_%d", codeCommitmentHex, round)
+// GetDKGNetworkKey returns the store key for a DKG network.
+// Matches story keeper's key: strconv.FormatUint(round, 10).
+func GetDKGNetworkKey(_ string, round uint32) []byte {
+	key := fmt.Sprintf("%d", round)
 
 	return buildCollectionKey(DKGNetworkPrefix, []byte(key))
 }
 
-// Where key is "{code_commitment_hex}_{round}_{validator_addr}".
-func GetDKGRegistrationKey(codeCommitmentHex string, round uint32, validatorAddr string) []byte {
-	// Collections uses: prefix | string_key_length (varint) | string_key
-	key := fmt.Sprintf("%s_%d_%s", codeCommitmentHex, round, validatorAddr)
+// GetDKGRegistrationKey returns the store key for a DKG registration.
+// Matches story keeper's key: fmt.Sprintf("%d_%s", round, strings.ToLower(addr.Hex())).
+func GetDKGRegistrationKey(_ string, round uint32, validatorAddr string) []byte {
+	key := fmt.Sprintf("%d_%s", round, validatorAddr)
 
 	return buildCollectionKey(DKGRegistrationPrefix, []byte(key))
 }
 
 // GetLatestActiveRoundKey returns the storage key for the latest active round pointer.
 func GetLatestActiveRoundKey() []byte {
-	// Latest active round stores a string value (the key of the latest active network)
-	// It uses a simple Item collection with just the prefix
 	return []byte{LatestActiveRoundPrefix}
 }
 
-// Collections string keys format: prefix | length_varint | key_bytes.
+// buildCollectionKey builds a Cosmos SDK collections store key.
+// Cosmos SDK collections.Map with StringKey uses: prefix | key_bytes (no length prefix).
 func buildCollectionKey(prefix byte, key []byte) []byte {
-	// Calculate varint size for key length
-	keyLen := len(key)
-	varintBuf := make([]byte, binary.MaxVarintLen64)
-	varintLen := binary.PutUvarint(varintBuf, uint64(keyLen))
-
-	// Build final key: prefix | length | key
-	result := make([]byte, 1+varintLen+keyLen)
+	result := make([]byte, 1+len(key))
 	result[0] = prefix
-	copy(result[1:], varintBuf[:varintLen])
-	copy(result[1+varintLen:], key)
+	copy(result[1:], key)
 
 	return result
 }
