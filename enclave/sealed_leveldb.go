@@ -62,6 +62,7 @@ func newSealedLevelDBWithOpts(name, dir string, o *opt.Options) (*SealedLevelDB,
 	}
 
 	if err != nil {
+		_ = stor.Close()
 		return nil, fmt.Errorf("failed to open leveldb: %w", err)
 	}
 
