@@ -176,7 +176,7 @@ func recoveryInterceptor() grpc.UnaryServerInterceptor {
 			if r := recover(); r != nil {
 				log.Errorf("recovered from panic in %s: %v\n%s", info.FullMethod, r, debug.Stack())
 				resp = nil
-				err = status.Errorf(codes.Internal, "internal panic in %s: %v", info.FullMethod, r)
+				err = status.Errorf(codes.Internal, "internal server error in %s", info.FullMethod)
 			}
 		}()
 
