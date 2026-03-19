@@ -88,6 +88,12 @@ func (s *DKGServer) ProcessDeals(_ context.Context, req *pb.ProcessDealsRequest)
 		deals = append(deals, *deal)
 	}
 
+	// Reject the request if every submitted deal failed processing.
+	if len(deals) == 0 {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"all %d submitted deals were rejected", len(req.GetDeals()))
+	}
+
 	if err := s.DKGStore.AddDeals(codeCommitmentHex, req.GetRound(), deals); err != nil {
 		log.Errorf("failed to add deals to the DKG state: %v", err)
 
