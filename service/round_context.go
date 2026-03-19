@@ -8,6 +8,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/piplabs/story-kernel/store"
+	pb "github.com/piplabs/story-kernel/types/pb/v0"
 )
 
 const (
@@ -93,6 +94,10 @@ func (s *DKGServer) fetchRoundContext(
 		return nil, err
 	}
 
+	if err := validateRegistrations(registrations, network, round); err != nil {
+		return nil, fmt.Errorf("registration validation failed: %w", err)
+	}
+
 	sortedPubs, err := extractSortedPubKeys(s.Suite, registrations)
 	if err != nil {
 		return nil, err
@@ -104,4 +109,33 @@ func (s *DKGServer) fetchRoundContext(
 		Registrations: registrations,
 		SortedPubKeys: sortedPubs,
 	}, nil
+}
+
+// validateRegistrations checks that the fetched registrations are consistent
+// with the on-chain network state before they are used to build DKG state.
+func validateRegistrations(regs []*pb.DKGRegistration, network *pb.DKGNetwork, round uint32) error {
+	// Registration count must match the network's expected total.
+	if uint32(len(regs)) != network.GetTotal() {
+		return fmt.Errorf("registration count %d does not match network total %d",
+			len(regs), network.GetTotal())
+	}
+
+	// No duplicate Index values allowed.
+	seen := make(map[uint32]struct{}, len(regs))
+	for _, reg := range regs {
+		if _, exists := seen[reg.GetIndex()]; exists {
+			return fmt.Errorf("duplicate registration index %d", reg.GetIndex())
+		}
+		seen[reg.GetIndex()] = struct{}{}
+	}
+
+	// Each registration's Round must match the requested round.
+	for _, reg := range regs {
+		if reg.GetRound() != round {
+			return fmt.Errorf("registration round %d does not match requested round %d (validator %s)",
+				reg.GetRound(), round, reg.GetValidatorAddr())
+		}
+	}
+
+	return nil
 }
