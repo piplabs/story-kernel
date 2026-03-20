@@ -27,14 +27,14 @@ func (s *DKGServer) ProcessResponses(_ context.Context, req *pb.ProcessResponses
 			"num_responses":   len(req.GetResponses()),
 		}).Errorf("invalid request: %v", err)
 
-		return nil, status.Errorf(codes.Internal, "invalid request")
+		return nil, status.Errorf(codes.InvalidArgument, "invalid request")
 	}
 
 	// Validate code commitment
 	if err := enclave.ValidateCodeCommitment(req.GetCodeCommitment()); err != nil {
 		log.Errorf("failed to validate code commitment: %v", err)
 
-		return nil, status.Errorf(codes.Internal, "failed to validate code commitment")
+		return nil, status.Errorf(codes.InvalidArgument, "failed to validate code commitment")
 	}
 
 	rc, err := s.GetOrLoadRoundContext(codeCommitmentHex, req.GetRound())

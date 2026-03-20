@@ -35,7 +35,7 @@ func (s *DKGServer) ProcessDeals(_ context.Context, req *pb.ProcessDealsRequest)
 	if err := enclave.ValidateCodeCommitment(req.GetCodeCommitment()); err != nil {
 		log.Errorf("failed to validate code commitment: %v", err)
 
-		return nil, status.Errorf(codes.Internal, "failed to validate code commitment")
+		return nil, status.Errorf(codes.InvalidArgument, "failed to validate code commitment")
 	}
 
 	rc, err := s.GetOrLoadRoundContext(codeCommitmentHex, req.GetRound())
