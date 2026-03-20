@@ -1,6 +1,8 @@
 package store
 
 import (
+	"bytes"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -197,6 +199,55 @@ func (s *DKGStore) SetPublicCoeffs(
 	return s.updateState(codeCommitmentHex, round, func(st *DKGState) {
 		st.PublicCoeffs = publicCoeffs
 	})
+}
+
+// SetPrivateCoeffs persists the dealer's private polynomial coefficients
+// using SGX sealed storage. These coefficients are secret material — knowing
+// them allows reconstructing every participant's share — so they require the
+// same protection level as Ed25519 private keys.
+//
+// They are used during rebuildInitDKG to restore the exact polynomial that
+// was used to generate deals, preventing session ID mismatches after restart.
+func (s *DKGStore) SetPrivateCoeffs(codeCommitmentHex string, round uint32, coeffs [][]byte) error {
+	path := s.privateCoeffsPath(codeCommitmentHex, round)
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("failed to create directory for private coeffs: %w", err)
+	}
+
+	// Encode coefficients as gob (same pattern as DistKeyShare sealing)
+	var buf bytes.Buffer
+	if err := gob.NewEncoder(&buf).Encode(coeffs); err != nil {
+		return fmt.Errorf("failed to encode private coeffs: %w", err)
+	}
+
+	return s.sealer.SealToFile(buf.Bytes(), path)
+}
+
+// LoadPrivateCoeffs loads sealed private polynomial coefficients from disk.
+// Returns nil slice if the file does not exist (e.g., GenerateDeals not yet called).
+func (s *DKGStore) LoadPrivateCoeffs(codeCommitmentHex string, round uint32) ([][]byte, error) {
+	path := s.privateCoeffsPath(codeCommitmentHex, round)
+
+	data, err := s.sealer.UnsealFromFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf("failed to unseal private coeffs: %w", err)
+	}
+
+	var coeffs [][]byte
+	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&coeffs); err != nil {
+		return nil, fmt.Errorf("failed to decode private coeffs: %w", err)
+	}
+
+	return coeffs, nil
+}
+
+func (s *DKGStore) privateCoeffsPath(codeCommitmentHex string, round uint32) string {
+	return filepath.Join(s.stateDir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex, PrivateCoeffsFile)
 }
 
 func (s *DKGStore) AddDeals(codeCommitmentHex string, round uint32, deals []dkg.Deal) error {
