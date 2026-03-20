@@ -96,6 +96,26 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 		return nil, status.Errorf(codes.Internal, "failed to generate encrypted deals")
 	}
 
+	// Persist dealer polynomial coefficients for restart recovery.
+	// If GenerateDeals succeeds but the kernel restarts before FinalizeDKG,
+	// rebuildInitDKG needs the original polynomial to restore the dealer
+	// state (session ID, commitments) correctly. Without this, a new random
+	// polynomial would be generated, causing DKG failures.
+	//
+	// NOTE: This currently only covers initial (non-resharing) rounds via
+	// rebuildInitDKG. Resharing rounds (GetResharingPrevDKG) use the previous
+	// round's DistKeyShare as the secret coefficient, so the polynomial is
+	// deterministic and does not need separate persistence. If resharing
+	// polynomial behavior changes in the future, this may need to be extended.
+	coeffs, extractErr := extractDealerPolyCoeffs(distKeyGen, s.Suite)
+	if extractErr == nil && len(coeffs) > 0 {
+		if persistErr := s.DKGStore.SetPrivateCoeffs(codeCommitmentHex, req.GetRound(), coeffs); persistErr != nil {
+			log.Warnf("failed to persist dealer polynomial coefficients: %v", persistErr)
+		}
+	} else if extractErr != nil {
+		log.Warnf("failed to extract dealer polynomial coefficients: %v", extractErr)
+	}
+
 	log.Info("Succeed to generate deals", "code_commitment", codeCommitmentHex, "round", req.GetRound())
 
 	// Set deals into response
