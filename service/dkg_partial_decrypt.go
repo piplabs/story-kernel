@@ -50,7 +50,8 @@ func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecry
 		return nil, status.Errorf(codes.InvalidArgument, "invalid request: %v", err)
 	}
 
-	if err := s.verifyRoundMatchesLatestNetwork(ctx, req.GetRound()); err != nil {
+	latestNetwork, err := s.verifyRoundMatchesLatestNetwork(ctx, req.GetRound())
+	if err != nil {
 		log.WithFields(log.Fields{
 			"round": req.GetRound(),
 		}).Errorf("round does not match latest network: %v", err)
@@ -69,6 +70,18 @@ func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecry
 		log.Errorf("PID not found in cache for round %d", req.GetRound())
 
 		return nil, status.Errorf(codes.FailedPrecondition, "PID not found: SetupDKGNetwork may not have been called for this round")
+	}
+
+	// Validate PID is within the expected range for the network.
+	if ownPID < 1 || ownPID > latestNetwork.GetTotal() {
+		log.WithFields(log.Fields{
+			"round": req.GetRound(),
+			"pid":   ownPID,
+			"total": latestNetwork.GetTotal(),
+		}).Errorf("PID out of bounds")
+
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"invalid PID %d: must be in range [1, %d]", ownPID, latestNetwork.GetTotal())
 	}
 	codeCommitmentHex := hex.EncodeToString(req.GetCodeCommitment())
 
@@ -177,18 +190,18 @@ func validatePartialDecryptTDH2Request(req *pb.PartialDecryptTDH2Request) error 
 }
 
 // verifyRoundMatchesLatestNetwork fetches the latest active DKG network and verifies
-// that the given round matches the network's round.
-func (s *DKGServer) verifyRoundMatchesLatestNetwork(ctx context.Context, round uint32) error {
+// that the given round matches the network's round. Returns the network on success.
+func (s *DKGServer) verifyRoundMatchesLatestNetwork(ctx context.Context, round uint32) (*pb.DKGNetwork, error) {
 	latest, err := s.QueryClient.GetLatestActiveDKGNetwork(ctx)
 	if err != nil {
-		return fmt.Errorf("get latest active DKG network: %w", err)
+		return nil, fmt.Errorf("get latest active DKG network: %w", err)
 	}
 
 	if latest.GetRound() != round {
-		return fmt.Errorf("round mismatch: request round %d != latest network round %d", round, latest.GetRound())
+		return nil, fmt.Errorf("round mismatch: request round %d != latest network round %d", round, latest.GetRound())
 	}
 
-	return nil
+	return latest, nil
 }
 
 func (s *DKGServer) signPartialDecryptResponse(codeCommitmentHex string, round uint32, ciphertext []byte, encryptedPartial []byte, ephPubKey []byte, pubShareBz []byte) ([]byte, error) {
