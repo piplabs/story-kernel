@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 )
@@ -38,9 +39,9 @@ type GRPCConfig struct {
 	DebugMode bool `mapstructure:"debug_mode"`
 
 	// TLS configuration for gRPC server.
-	// All three fields must be set to enable TLS.
-	// When TLSCertFile and TLSKeyFile are set, the server uses TLS.
-	// When TLSCAFile is also set, the server requires client certificates (mTLS).
+	// When TLSCertFile and TLSKeyFile are set, the server uses server-side TLS.
+	// When TLSCAFile is additionally set, the server requires and verifies
+	// client certificates (mutual TLS / mTLS). TLSCAFile alone has no effect.
 	TLSCertFile string `mapstructure:"tls_cert_file"`
 	TLSKeyFile  string `mapstructure:"tls_key_file"`
 	TLSCAFile   string `mapstructure:"tls_ca_file"`
@@ -98,6 +99,22 @@ func (c GRPCConfig) Validate() error {
 
 	if c.TLSCAFile != "" && !hasCert {
 		return errors.New("tls_ca_file requires tls_cert_file and tls_key_file to be set")
+	}
+
+	// Verify configured TLS files exist on disk to catch misconfigurations
+	// early at startup, not later when credentials are loaded.
+	for _, f := range []struct {
+		path, field string
+	}{
+		{c.TLSCertFile, "tls_cert_file"},
+		{c.TLSKeyFile, "tls_key_file"},
+		{c.TLSCAFile, "tls_ca_file"},
+	} {
+		if f.path != "" {
+			if _, err := os.Stat(f.path); err != nil {
+				return fmt.Errorf("%s: %w", f.field, err)
+			}
+		}
 	}
 
 	return nil

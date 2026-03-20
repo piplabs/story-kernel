@@ -159,23 +159,29 @@ By default, the gRPC server runs without TLS. To secure the connection between S
 **Generate certificates:**
 
 ```bash
-# Create CA
-openssl genrsa -out ca.key 2048
+# Create CA (ECDSA P-256 recommended for performance)
+openssl ecparam -genkey -name prime256v1 -out ca.key
 openssl req -new -x509 -days 365 -key ca.key -out ca.crt -subj "/CN=Story-Kernel-CA"
 
 # Create server cert (for story-kernel)
-openssl genrsa -out server.key 2048
+# NOTE: Replace SAN values with actual hostnames/IPs in production
+openssl ecparam -genkey -name prime256v1 -out server.key
 openssl req -new -key server.key -out server.csr -subj "/CN=story-kernel"
 echo "subjectAltName = IP:127.0.0.1, DNS:localhost" > server-ext.cnf
 openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
   -out server.crt -days 365 -extfile server-ext.cnf
 
 # Create client cert (for story consensus client)
-openssl genrsa -out client.key 2048
+openssl ecparam -genkey -name prime256v1 -out client.key
 openssl req -new -key client.key -out client.csr -subj "/CN=story-client"
 openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
   -out client.crt -days 365
+
+# Restrict key file permissions
+chmod 600 ca.key server.key client.key
 ```
+
+> Certificate rotation requires a service restart. Gramine SGX users must add cert paths to the manifest's `allowed_files`.
 
 **Server-side TLS only** (story-kernel verifies its identity to story):
 

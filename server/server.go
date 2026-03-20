@@ -213,13 +213,12 @@ func recoveryInterceptor() grpc.UnaryServerInterceptor {
 func loadServerTLSCredentials(grpcCfg config.GRPCConfig) (credentials.TransportCredentials, error) {
 	cert, err := tls.LoadX509KeyPair(grpcCfg.TLSCertFile, grpcCfg.TLSKeyFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load server cert/key (%s, %s): %w",
-			grpcCfg.TLSCertFile, grpcCfg.TLSKeyFile, err)
+		return nil, fmt.Errorf("failed to load server tls_cert_file / tls_key_file: %w", err)
 	}
 
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
+		MinVersion:   tls.VersionTLS13,
 	}
 
 	// If CA file is provided, enable mutual TLS by requiring and verifying
@@ -227,12 +226,12 @@ func loadServerTLSCredentials(grpcCfg config.GRPCConfig) (credentials.TransportC
 	if grpcCfg.TLSCAFile != "" {
 		caCert, err := os.ReadFile(grpcCfg.TLSCAFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read CA cert file %s: %w", grpcCfg.TLSCAFile, err)
+			return nil, fmt.Errorf("failed to read tls_ca_file: %w", err)
 		}
 
 		caPool := x509.NewCertPool()
 		if !caPool.AppendCertsFromPEM(caCert) {
-			return nil, fmt.Errorf("failed to parse CA cert from %s", grpcCfg.TLSCAFile)
+			return nil, fmt.Errorf("failed to parse CA certificate from tls_ca_file")
 		}
 
 		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
