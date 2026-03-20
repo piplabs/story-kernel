@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 )
@@ -36,6 +37,14 @@ type GRPCConfig struct {
 	// DebugMode enables development features such as gRPC reflection.
 	// Must remain false in production to avoid exposing service metadata.
 	DebugMode bool `mapstructure:"debug_mode"`
+
+	// TLS configuration for gRPC server.
+	// When TLSCertFile and TLSKeyFile are set, the server uses server-side TLS.
+	// When TLSCAFile is additionally set, the server requires and verifies
+	// client certificates (mutual TLS / mTLS). TLSCAFile alone has no effect.
+	TLSCertFile string `mapstructure:"tls_cert_file"`
+	TLSKeyFile  string `mapstructure:"tls_key_file"`
+	TLSCAFile   string `mapstructure:"tls_ca_file"`
 }
 
 type LightClientConfig struct {
@@ -66,11 +75,59 @@ func (c *Config) validate() error {
 		return errors.New("listen address for gRPC should not be empty")
 	}
 
+	if err := c.GRPC.Validate(); err != nil {
+		return fmt.Errorf("validate gRPC config: %w", err)
+	}
+
 	if err := c.LightClient.Validate(); err != nil {
 		return fmt.Errorf("validate light client config: %w", err)
 	}
 
 	return nil
+}
+
+// Validate checks the gRPC TLS configuration for consistency.
+// TLS cert and key must both be set or both be empty.
+// CA file is optional — when set alongside cert/key, mTLS is enabled.
+func (c GRPCConfig) Validate() error {
+	hasCert := c.TLSCertFile != ""
+	hasKey := c.TLSKeyFile != ""
+
+	if hasCert != hasKey {
+		return errors.New("tls_cert_file and tls_key_file must both be set or both be empty")
+	}
+
+	if c.TLSCAFile != "" && !hasCert {
+		return errors.New("tls_ca_file requires tls_cert_file and tls_key_file to be set")
+	}
+
+	// Verify configured TLS files exist on disk to catch misconfigurations
+	// early at startup, not later when credentials are loaded.
+	for _, f := range []struct {
+		path, field string
+	}{
+		{c.TLSCertFile, "tls_cert_file"},
+		{c.TLSKeyFile, "tls_key_file"},
+		{c.TLSCAFile, "tls_ca_file"},
+	} {
+		if f.path != "" {
+			if _, err := os.Stat(f.path); err != nil {
+				return fmt.Errorf("%s: %w", f.field, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// TLSEnabled returns true if the server TLS cert and key are configured.
+func (c GRPCConfig) TLSEnabled() bool {
+	return c.TLSCertFile != "" && c.TLSKeyFile != ""
+}
+
+// MTLSEnabled returns true if mutual TLS (client certificate verification) is configured.
+func (c GRPCConfig) MTLSEnabled() bool {
+	return c.TLSEnabled() && c.TLSCAFile != ""
 }
 
 func (c *Config) SetHomeDir(dir string) {

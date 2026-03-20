@@ -2,10 +2,13 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"runtime/debug"
 
 	cmtdb "github.com/cometbft/cometbft-db"
@@ -21,15 +24,36 @@ import (
 	"go.dedis.ch/kyber/v4/group/edwards25519"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 )
 
 func Serve(cfg *config.Config) (*grpc.Server, chan error) {
 	errCh := make(chan error)
-	svr := grpc.NewServer(
+
+	serverOpts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(recoveryInterceptor()),
-	)
+	}
+
+	if cfg.GRPC.TLSEnabled() {
+		tlsCreds, err := loadServerTLSCredentials(cfg.GRPC)
+		if err != nil {
+			log.Fatalf("Failed to load TLS credentials: %v", err)
+		}
+
+		serverOpts = append(serverOpts, grpc.Creds(tlsCreds))
+
+		if cfg.GRPC.MTLSEnabled() {
+			log.Info("gRPC server TLS enabled with mutual TLS (client certificate required)")
+		} else {
+			log.Info("gRPC server TLS enabled (server-side only)")
+		}
+	} else {
+		log.Warn("gRPC server running without TLS. Set tls_cert_file and tls_key_file to enable.")
+	}
+
+	svr := grpc.NewServer(serverOpts...)
 
 	// Initialize query client
 	queryClient, err := initializeQueryClient(cfg)
@@ -182,6 +206,39 @@ func recoveryInterceptor() grpc.UnaryServerInterceptor {
 
 		return handler(ctx, req)
 	}
+}
+
+// loadServerTLSCredentials loads the server certificate/key and optionally the CA
+// certificate for client verification (mTLS).
+func loadServerTLSCredentials(grpcCfg config.GRPCConfig) (credentials.TransportCredentials, error) {
+	cert, err := tls.LoadX509KeyPair(grpcCfg.TLSCertFile, grpcCfg.TLSKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load server tls_cert_file / tls_key_file: %w", err)
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS13,
+	}
+
+	// If CA file is provided, enable mutual TLS by requiring and verifying
+	// client certificates against the CA.
+	if grpcCfg.TLSCAFile != "" {
+		caCert, err := os.ReadFile(grpcCfg.TLSCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read tls_ca_file: %w", err)
+		}
+
+		caPool := x509.NewCertPool()
+		if !caPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse CA certificate from tls_ca_file")
+		}
+
+		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+		tlsConfig.ClientCAs = caPool
+	}
+
+	return credentials.NewTLS(tlsConfig), nil
 }
 
 func registerAllServices(svr *grpc.Server, cfg *config.Config, queryClient story.QueryClient) {
