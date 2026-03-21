@@ -26,6 +26,7 @@ message GenerateAndSealKeyRequest {
   bytes code_commitment = 1 [json_name = "code_commitment"];
   uint32 round = 2 [json_name = "round"];
   string address = 3 [json_name = "address"];
+  bytes enclave_type = 4 [json_name = "enclave_type"];
 }
 
 message GenerateAndSealKeyResponse {
@@ -150,8 +151,10 @@ message PartialDecryptTDH2Request {
   uint32 round = 2 [json_name = "round"];
   bytes ciphertext = 3 [json_name = "ciphertext"];
   bytes label = 4 [json_name = "label"];
-  bytes global_pub_key = 5 [json_name = "global_pub_key"];
-  bytes requester_pub_key = 6 [json_name = "requester_pub_key"]; // secp256k1 uncompressed
+  uint32 pid = 5 [json_name = "pid"];
+  bytes global_pub_key = 6 [json_name = "global_pub_key"];
+  string sealed_share_id = 7 [json_name = "sealed_share_id"];
+  bytes requester_pub_key = 8 [json_name = "requester_pub_key"]; // secp256k1 uncompressed
 }
 
 message PartialDecryptTDH2Response {
