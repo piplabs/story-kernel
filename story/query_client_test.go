@@ -27,6 +27,9 @@ import (
 // Mock Implementations
 // =============================================================================
 
+// Compile-time check that MockLightClient satisfies the LightClient interface.
+var _ LightClient = (*MockLightClient)(nil)
+
 type MockLightClient struct {
 	mock.Mock
 }
@@ -847,4 +850,370 @@ func BenchmarkVerifyProof(b *testing.B) {
 	for range b.N {
 		_ = client.verifyProof(proofOps, []byte("key"), []byte("value"), []byte("hash"), 100, 101)
 	}
+}
+
+// =============================================================================
+// Integration Tests with Mock Light Client
+// =============================================================================
+
+// newTestVerifiedQueryClient creates a VerifiedQueryClient with a mock light client
+// and default config, suitable for unit testing methods that depend on the light client.
+func newTestVerifiedQueryClient(mockLC *MockLightClient) *VerifiedQueryClient {
+	return &VerifiedQueryClient{
+		cfg: &config.Config{
+			LightClient: config.LightClientConfig{},
+		},
+		lightClient: mockLC,
+		mutex:       &sync.Mutex{},
+		cdc:         MakeCodec(),
+	}
+}
+
+// TestGetLastBlockHeight_UpdateReturnsBlock verifies that getLastBlockHeight
+// returns the block height from a successful Update call.
+func TestGetLastBlockHeight_UpdateReturnsBlock(t *testing.T) {
+	mockLC := new(MockLightClient)
+	lb := &cmttypes.LightBlock{
+		SignedHeader: &cmttypes.SignedHeader{
+			Header: &cmttypes.Header{Height: 500},
+		},
+	}
+	mockLC.On("Update", mock.Anything, mock.Anything).Return(lb, nil)
+
+	client := newTestVerifiedQueryClient(mockLC)
+	height, err := client.getLastBlockHeight(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, int64(500), height)
+	mockLC.AssertExpectations(t)
+}
+
+// TestGetLastBlockHeight_UpdateReturnsNil verifies that when Update returns nil,
+// getLastBlockHeight falls back to LastTrustedHeight.
+func TestGetLastBlockHeight_UpdateReturnsNil(t *testing.T) {
+	mockLC := new(MockLightClient)
+	mockLC.On("Update", mock.Anything, mock.Anything).Return(nil, nil)
+	mockLC.On("LastTrustedHeight").Return(int64(300), nil)
+
+	client := newTestVerifiedQueryClient(mockLC)
+	height, err := client.getLastBlockHeight(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, int64(300), height)
+	mockLC.AssertExpectations(t)
+}
+
+// TestGetLastBlockHeight_UpdateError verifies that an Update error is propagated.
+func TestGetLastBlockHeight_UpdateError(t *testing.T) {
+	mockLC := new(MockLightClient)
+	mockLC.On("Update", mock.Anything, mock.Anything).Return(nil, errors.New("provider unreachable"))
+
+	client := newTestVerifiedQueryClient(mockLC)
+	_, err := client.getLastBlockHeight(t.Context())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to update light client")
+	mockLC.AssertExpectations(t)
+}
+
+// TestGetLastBlockHeight_LastTrustedHeightError verifies that a LastTrustedHeight
+// error is propagated when Update returns nil.
+func TestGetLastBlockHeight_LastTrustedHeightError(t *testing.T) {
+	mockLC := new(MockLightClient)
+	mockLC.On("Update", mock.Anything, mock.Anything).Return(nil, nil)
+	mockLC.On("LastTrustedHeight").Return(int64(0), errors.New("db corrupted"))
+
+	client := newTestVerifiedQueryClient(mockLC)
+	_, err := client.getLastBlockHeight(t.Context())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to get last trusted height")
+	mockLC.AssertExpectations(t)
+}
+
+// TestLastBlockCaching_Success verifies that lastBlockCaching updates the cached height.
+func TestLastBlockCaching_Success(t *testing.T) {
+	mockLC := new(MockLightClient)
+	lb := &cmttypes.LightBlock{
+		SignedHeader: &cmttypes.SignedHeader{
+			Header: &cmttypes.Header{Height: 1000},
+		},
+	}
+	mockLC.On("Update", mock.Anything, mock.Anything).Return(lb, nil)
+
+	client := newTestVerifiedQueryClient(mockLC)
+	assert.Equal(t, int64(0), client.GetCachedLastBlockHeight())
+
+	err := client.lastBlockCaching(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, int64(1000), client.GetCachedLastBlockHeight())
+	mockLC.AssertExpectations(t)
+}
+
+// TestLastBlockCaching_Error verifies that lastBlockCaching returns error
+// without modifying the cached height.
+func TestLastBlockCaching_Error(t *testing.T) {
+	mockLC := new(MockLightClient)
+	mockLC.On("Update", mock.Anything, mock.Anything).Return(nil, errors.New("sync failed"))
+
+	client := newTestVerifiedQueryClient(mockLC)
+	client.cachedLastBlockHeight = 50
+
+	err := client.lastBlockCaching(t.Context())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to refresh last block")
+	// Cached height should remain unchanged on error
+	assert.Equal(t, int64(50), client.GetCachedLastBlockHeight())
+	mockLC.AssertExpectations(t)
+}
+
+// TestSafeUpdateLightClient verifies thread-safe delegation to lightClient.Update.
+func TestSafeUpdateLightClient(t *testing.T) {
+	mockLC := new(MockLightClient)
+	lb := &cmttypes.LightBlock{
+		SignedHeader: &cmttypes.SignedHeader{
+			Header: &cmttypes.Header{Height: 42},
+		},
+	}
+	mockLC.On("Update", mock.Anything, mock.Anything).Return(lb, nil)
+
+	client := newTestVerifiedQueryClient(mockLC)
+	block, err := client.safeUpdateLightClient(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, block)
+	assert.Equal(t, int64(42), block.Height)
+	mockLC.AssertExpectations(t)
+}
+
+// TestSafeVerifyLightBlockAtHeight verifies thread-safe delegation to
+// lightClient.VerifyLightBlockAtHeight.
+func TestSafeVerifyLightBlockAtHeight(t *testing.T) {
+	mockLC := new(MockLightClient)
+	lb := &cmttypes.LightBlock{
+		SignedHeader: &cmttypes.SignedHeader{
+			Header: &cmttypes.Header{Height: 200},
+		},
+	}
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, int64(200), mock.Anything).Return(lb, nil)
+
+	client := newTestVerifiedQueryClient(mockLC)
+	block, err := client.safeVerifyLightBlockAtHeight(t.Context(), 200)
+	require.NoError(t, err)
+	require.NotNil(t, block)
+	assert.Equal(t, int64(200), block.Height)
+	mockLC.AssertExpectations(t)
+}
+
+// TestSafeVerifyLightBlockAtHeight_Error verifies error propagation.
+func TestSafeVerifyLightBlockAtHeight_Error(t *testing.T) {
+	mockLC := new(MockLightClient)
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, int64(999), mock.Anything).
+		Return(nil, errors.New("block not found"))
+
+	client := newTestVerifiedQueryClient(mockLC)
+	_, err := client.safeVerifyLightBlockAtHeight(t.Context(), 999)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "block not found")
+	mockLC.AssertExpectations(t)
+}
+
+// TestVerifyStartBlock_InvalidHeight_WithMock verifies that invalid heights are rejected
+// using the mock-injected client.
+func TestVerifyStartBlock_InvalidHeight_WithMock(t *testing.T) {
+	client := newTestVerifiedQueryClient(new(MockLightClient))
+
+	err := client.VerifyStartBlock(t.Context(), 0, []byte("hash"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid start block height")
+
+	err = client.VerifyStartBlock(t.Context(), -1, []byte("hash"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid start block height")
+}
+
+// TestVerifyStartBlock_EmptyHash_WithMock verifies that empty hash is rejected
+// using the mock-injected client.
+func TestVerifyStartBlock_EmptyHash_WithMock(t *testing.T) {
+	client := newTestVerifiedQueryClient(new(MockLightClient))
+
+	err := client.VerifyStartBlock(t.Context(), 100, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "start block hash is empty")
+
+	err = client.VerifyStartBlock(t.Context(), 100, []byte{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "start block hash is empty")
+}
+
+// TestVerifyStartBlock_VerifyError verifies that light client verification
+// errors are propagated.
+func TestVerifyStartBlock_VerifyError(t *testing.T) {
+	mockLC := new(MockLightClient)
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, int64(100), mock.Anything).
+		Return(nil, errors.New("verification failed"))
+
+	client := newTestVerifiedQueryClient(mockLC)
+	err := client.VerifyStartBlock(t.Context(), 100, []byte("somehash"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to verify start block at height 100")
+	mockLC.AssertExpectations(t)
+}
+
+// TestVerifyStartBlock_HashMismatch verifies that a hash mismatch is detected.
+func TestVerifyStartBlock_HashMismatch(t *testing.T) {
+	mockLC := new(MockLightClient)
+	// Create a light block with a known hash
+	lb := &cmttypes.LightBlock{
+		SignedHeader: &cmttypes.SignedHeader{
+			Header: &cmttypes.Header{Height: 100},
+		},
+	}
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, int64(100), mock.Anything).Return(lb, nil)
+
+	client := newTestVerifiedQueryClient(mockLC)
+	// Use a hash that will not match the block hash
+	err := client.VerifyStartBlock(t.Context(), 100, []byte("definitely_wrong_hash_that_wont_match"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "start block hash mismatch")
+	mockLC.AssertExpectations(t)
+}
+
+// TestVerifyStartBlock_Success verifies that matching hash passes verification.
+func TestVerifyStartBlock_Success(t *testing.T) {
+	mockLC := new(MockLightClient)
+
+	// Build a minimal light block with enough data to produce a non-empty hash.
+	// A Header with populated fields is sufficient for Hash() to return a value.
+	header := &cmttypes.Header{
+		Height:  100,
+		ChainID: "test-chain",
+		Time:    time.Now(),
+		// ValidatorsHash is required for a non-empty header hash
+		ValidatorsHash: cmttypes.NewValidatorSet(nil).Hash(),
+	}
+	lb := &cmttypes.LightBlock{
+		SignedHeader: &cmttypes.SignedHeader{
+			Header: header,
+		},
+	}
+	// Get the actual hash from the light block
+	actualHash := lb.Hash().Bytes()
+	require.NotEmpty(t, actualHash, "test setup: light block hash must not be empty")
+
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, int64(100), mock.Anything).Return(lb, nil)
+
+	client := newTestVerifiedQueryClient(mockLC)
+	err := client.VerifyStartBlock(t.Context(), 100, actualHash)
+	require.NoError(t, err)
+	mockLC.AssertExpectations(t)
+}
+
+// TestStartSchedulingLastBlockCaching_StopsOnContextCancel verifies that
+// the background goroutine stops when the context is cancelled.
+func TestStartSchedulingLastBlockCaching_StopsOnContextCancel(t *testing.T) {
+	mockLC := new(MockLightClient)
+	// Allow any number of Update calls (may or may not fire before cancel)
+	mockLC.On("Update", mock.Anything, mock.Anything).
+		Return(nil, nil).Maybe()
+	mockLC.On("LastTrustedHeight").Return(int64(1), nil).Maybe()
+
+	client := newTestVerifiedQueryClient(mockLC)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		client.startSchedulingLastBlockCaching(ctx)
+		close(done)
+	}()
+
+	// Cancel immediately to test clean shutdown
+	cancel()
+
+	select {
+	case <-done:
+		// success: goroutine exited
+	case <-time.After(5 * time.Second):
+		t.Fatal("startSchedulingLastBlockCaching did not stop after context cancel")
+	}
+}
+
+// TestGetQueryBlockHeight_AfterCaching verifies that getQueryBlockHeight
+// returns the cached height after lastBlockCaching.
+func TestGetQueryBlockHeight_AfterCaching(t *testing.T) {
+	mockLC := new(MockLightClient)
+	lb := &cmttypes.LightBlock{
+		SignedHeader: &cmttypes.SignedHeader{
+			Header: &cmttypes.Header{Height: 750},
+		},
+	}
+	mockLC.On("Update", mock.Anything, mock.Anything).Return(lb, nil)
+
+	client := newTestVerifiedQueryClient(mockLC)
+	require.NoError(t, client.lastBlockCaching(t.Context()))
+
+	height := client.getQueryBlockHeight()
+	assert.Equal(t, int64(750), height)
+}
+
+// TestConcurrentSafeOperations verifies that concurrent calls to safe methods
+// do not race (verified by -race detector).
+func TestConcurrentSafeOperations(t *testing.T) {
+	mockLC := new(MockLightClient)
+	lb := &cmttypes.LightBlock{
+		SignedHeader: &cmttypes.SignedHeader{
+			Header: &cmttypes.Header{Height: 100},
+		},
+	}
+	mockLC.On("Update", mock.Anything, mock.Anything).Return(lb, nil)
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, mock.Anything, mock.Anything).Return(lb, nil)
+
+	client := newTestVerifiedQueryClient(mockLC)
+
+	var wg sync.WaitGroup
+	for range 50 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, _ = client.safeUpdateLightClient(t.Context())
+		}()
+		go func() {
+			defer wg.Done()
+			_, _ = client.safeVerifyLightBlockAtHeight(t.Context(), 100)
+		}()
+	}
+	wg.Wait()
+}
+
+// TestBuildCollectionKey verifies the key construction helper.
+func TestBuildCollectionKey(t *testing.T) {
+	key := buildCollectionKey(DKGNetworkPrefix, []byte("test_1"))
+	require.NotEmpty(t, key)
+	// First byte should be the prefix
+	assert.Equal(t, DKGNetworkPrefix, key[0])
+	// Key should contain the original bytes
+	assert.Contains(t, string(key), "test_1")
+}
+
+// TestBuildCollectionKey_DifferentPrefixes verifies that different prefixes
+// produce different keys.
+func TestBuildCollectionKey_DifferentPrefixes(t *testing.T) {
+	key1 := buildCollectionKey(DKGNetworkPrefix, []byte("same"))
+	key2 := buildCollectionKey(DKGRegistrationPrefix, []byte("same"))
+	assert.False(t, bytes.Equal(key1, key2), "different prefixes should produce different keys")
+}
+
+// TestGetDKGNetworkKey_Deterministic verifies that the same inputs always
+// produce the same key.
+func TestGetDKGNetworkKey_Deterministic(t *testing.T) {
+	key1 := GetDKGNetworkKey("commitment", 5)
+	key2 := GetDKGNetworkKey("commitment", 5)
+	assert.True(t, bytes.Equal(key1, key2))
+
+	// Different round should produce different key
+	key3 := GetDKGNetworkKey("commitment", 6)
+	assert.False(t, bytes.Equal(key1, key3))
+}
+
+// TestGetDKGRegistrationKey_IncludesValidator verifies that different validators
+// produce different keys.
+func TestGetDKGRegistrationKey_IncludesValidator(t *testing.T) {
+	key1 := GetDKGRegistrationKey("cc", 1, "val1")
+	key2 := GetDKGRegistrationKey("cc", 1, "val2")
+	assert.False(t, bytes.Equal(key1, key2), "different validators should produce different keys")
 }
