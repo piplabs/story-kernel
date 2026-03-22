@@ -54,11 +54,19 @@ type TrustedBlockInfo struct {
 	TrustedBlockHash   []byte
 }
 
+// LightClient abstracts the CometBFT light client methods used by
+// VerifiedQueryClient, enabling mock injection for unit testing.
+type LightClient interface {
+	Update(ctx context.Context, now time.Time) (*cmttypes.LightBlock, error)
+	VerifyLightBlockAtHeight(ctx context.Context, height int64, now time.Time) (*cmttypes.LightBlock, error)
+	LastTrustedHeight() (int64, error)
+}
+
 // VerifiedQueryClient is a query client that verifies all responses using light client and Merkle proofs.
 type VerifiedQueryClient struct {
 	cfg                   *config.Config
 	rpcClient             *rpchttp.HTTP
-	lightClient           *light.Client
+	lightClient           LightClient
 	db                    cmtdb.DB
 	mutex                 *sync.Mutex
 	cdc                   *codec.ProtoCodec
