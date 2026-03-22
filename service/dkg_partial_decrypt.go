@@ -124,6 +124,22 @@ func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecry
 
 	ct := &mpc.TDH2Ciphertext{Bytes: req.GetCiphertext()}
 
+	log.WithFields(log.Fields{
+		"round":          req.GetRound(),
+		"pid":            ownPID,
+		"global_pub_key": hex.EncodeToString(req.GetGlobalPubKey()),
+		"label":          hex.EncodeToString(req.GetLabel()),
+		"ciphertext_len": len(req.GetCiphertext()),
+		"ciphertext_hex": hex.EncodeToString(req.GetCiphertext()),
+		"priv_share_len": len(privShare.Bytes),
+	}).Info("TDH2 partial decrypt: inputs")
+
+	// Verify ciphertext independently before attempting partial decrypt
+	verifyErr := mpc.TDH2Verify(pubKey, ct.Bytes, req.GetLabel())
+	log.WithFields(log.Fields{
+		"verify_result": verifyErr,
+	}).Info("TDH2 partial decrypt: ciphertext verify")
+
 	pd, err := mpc.TDH2PartialDecrypt(int(ownPID), privShare, pubKey, ct, req.GetLabel())
 	if err != nil {
 		log.Errorf("TDH2 partial decrypt failed: %v", err)
