@@ -11,7 +11,12 @@ import (
 	"time"
 
 	cmtdb "github.com/cometbft/cometbft-db"
+	abcitypes "github.com/cometbft/cometbft/abci/types"
+	cmtbytes "github.com/cometbft/cometbft/libs/bytes"
+	"github.com/cometbft/cometbft/light/provider"
 	"github.com/cometbft/cometbft/proto/tendermint/crypto"
+	"github.com/cometbft/cometbft/rpc/client"
+	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	cmttypes "github.com/cometbft/cometbft/types"
 	"github.com/cosmos/cosmos-sdk/codec"
 	ics23 "github.com/cosmos/ics23/go"
@@ -71,6 +76,30 @@ func (m *MockLightClient) LastTrustedHeight() (int64, error) {
 	}
 
 	return height, args.Error(1)
+}
+
+// Compile-time check that MockRPCClient satisfies the RPCClient interface.
+var _ RPCClient = (*MockRPCClient)(nil)
+
+// MockRPCClient is a mock implementation of the RPCClient interface.
+type MockRPCClient struct {
+	mock.Mock
+}
+
+func (m *MockRPCClient) ABCIQueryWithOptions(
+	ctx context.Context, path string, data cmtbytes.HexBytes, opts client.ABCIQueryOptions,
+) (*ctypes.ResultABCIQuery, error) {
+	args := m.Called(ctx, path, data, opts)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+
+	result, ok := args.Get(0).(*ctypes.ResultABCIQuery)
+	if !ok {
+		return nil, fmt.Errorf("type assertion failed: expected *ctypes.ResultABCIQuery")
+	}
+
+	return result, args.Error(1)
 }
 
 type MockDB struct {
@@ -869,6 +898,20 @@ func newTestVerifiedQueryClient(mockLC *MockLightClient) *VerifiedQueryClient {
 	}
 }
 
+// newFullTestVerifiedQueryClient creates a VerifiedQueryClient with both mock RPC
+// and light client, suitable for testing functions that use both.
+func newFullTestVerifiedQueryClient(mockRPC *MockRPCClient, mockLC *MockLightClient) *VerifiedQueryClient {
+	return &VerifiedQueryClient{
+		cfg: &config.Config{
+			LightClient: config.LightClientConfig{},
+		},
+		rpcClient:   mockRPC,
+		lightClient: mockLC,
+		mutex:       &sync.Mutex{},
+		cdc:         MakeCodec(),
+	}
+}
+
 // TestGetLastBlockHeight_UpdateReturnsBlock verifies that getLastBlockHeight
 // returns the block height from a successful Update call.
 func TestGetLastBlockHeight_UpdateReturnsBlock(t *testing.T) {
@@ -1216,4 +1259,1423 @@ func TestGetDKGRegistrationKey_IncludesValidator(t *testing.T) {
 	key1 := GetDKGRegistrationKey("cc", 1, "val1")
 	key2 := GetDKGRegistrationKey("cc", 1, "val2")
 	assert.False(t, bytes.Equal(key1, key2), "different validators should produce different keys")
+}
+
+// =============================================================================
+// RPC Client Mock Tests
+// =============================================================================
+
+// makeValidABCIResult builds a valid ResultABCIQuery with proof ops for testing.
+func makeValidABCIResult(key, value []byte, height int64) *ctypes.ResultABCIQuery {
+	proofOps := createMockProofOps(key, value, []byte(StoreKey), []byte("module_root"))
+
+	return &ctypes.ResultABCIQuery{
+		Response: abcitypes.ResponseQuery{
+			Key:      key,
+			Value:    value,
+			Height:   height,
+			ProofOps: proofOps,
+		},
+	}
+}
+
+func TestQueryWithProof(t *testing.T) {
+	tests := []struct {
+		name        string
+		setupRPC    func(*MockRPCClient)
+		storeKey    string
+		key         []byte
+		height      int64
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "successful query returns result",
+			setupRPC: func(m *MockRPCClient) {
+				result := makeValidABCIResult([]byte("mykey"), []byte("myvalue"), 100)
+				m.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(result, nil)
+			},
+			storeKey: StoreKey,
+			key:      []byte("mykey"),
+			height:   100,
+			wantErr:  false,
+		},
+		{
+			name: "rpc call error",
+			setupRPC: func(m *MockRPCClient) {
+				m.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(nil, errors.New("connection refused"))
+			},
+			storeKey:    StoreKey,
+			key:         []byte("mykey"),
+			height:      100,
+			wantErr:     true,
+			errContains: "ABCI query failed",
+		},
+		{
+			name: "error response code",
+			setupRPC: func(m *MockRPCClient) {
+				result := &ctypes.ResultABCIQuery{
+					Response: abcitypes.ResponseQuery{
+						Code:      1,
+						Log:       "not found",
+						Codespace: "dkg",
+						Key:       []byte("mykey"),
+						Height:    100,
+					},
+				}
+				m.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(result, nil)
+			},
+			storeKey:    StoreKey,
+			key:         []byte("mykey"),
+			height:      100,
+			wantErr:     true,
+			errContains: "error response",
+		},
+		{
+			name: "empty key in response",
+			setupRPC: func(m *MockRPCClient) {
+				result := &ctypes.ResultABCIQuery{
+					Response: abcitypes.ResponseQuery{
+						Key:    []byte{},
+						Value:  []byte("value"),
+						Height: 100,
+					},
+				}
+				m.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(result, nil)
+			},
+			storeKey:    StoreKey,
+			key:         []byte("mykey"),
+			height:      100,
+			wantErr:     true,
+			errContains: "empty key in response",
+		},
+		{
+			name: "nil proof ops in response",
+			setupRPC: func(m *MockRPCClient) {
+				result := &ctypes.ResultABCIQuery{
+					Response: abcitypes.ResponseQuery{
+						Key:      []byte("mykey"),
+						Value:    []byte("value"),
+						Height:   100,
+						ProofOps: nil,
+					},
+				}
+				m.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(result, nil)
+			},
+			storeKey:    StoreKey,
+			key:         []byte("mykey"),
+			height:      100,
+			wantErr:     true,
+			errContains: "no proof ops in response",
+		},
+		{
+			name: "empty proof ops in response",
+			setupRPC: func(m *MockRPCClient) {
+				result := &ctypes.ResultABCIQuery{
+					Response: abcitypes.ResponseQuery{
+						Key:      []byte("mykey"),
+						Value:    []byte("value"),
+						Height:   100,
+						ProofOps: &crypto.ProofOps{Ops: []crypto.ProofOp{}},
+					},
+				}
+				m.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(result, nil)
+			},
+			storeKey:    StoreKey,
+			key:         []byte("mykey"),
+			height:      100,
+			wantErr:     true,
+			errContains: "no proof ops in response",
+		},
+		{
+			name: "invalid height in response",
+			setupRPC: func(m *MockRPCClient) {
+				proofOps := createMockProofOps([]byte("mykey"), []byte("value"), []byte(StoreKey), []byte("root"))
+				result := &ctypes.ResultABCIQuery{
+					Response: abcitypes.ResponseQuery{
+						Key:      []byte("mykey"),
+						Value:    []byte("value"),
+						Height:   0,
+						ProofOps: proofOps,
+					},
+				}
+				m.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(result, nil)
+			},
+			storeKey:    StoreKey,
+			key:         []byte("mykey"),
+			height:      100,
+			wantErr:     true,
+			errContains: "invalid height in response",
+		},
+		{
+			name: "negative height in response",
+			setupRPC: func(m *MockRPCClient) {
+				proofOps := createMockProofOps([]byte("mykey"), []byte("value"), []byte(StoreKey), []byte("root"))
+				result := &ctypes.ResultABCIQuery{
+					Response: abcitypes.ResponseQuery{
+						Key:      []byte("mykey"),
+						Value:    []byte("value"),
+						Height:   -1,
+						ProofOps: proofOps,
+					},
+				}
+				m.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(result, nil)
+			},
+			storeKey:    StoreKey,
+			key:         []byte("mykey"),
+			height:      100,
+			wantErr:     true,
+			errContains: "invalid height in response",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRPC := new(MockRPCClient)
+			tt.setupRPC(mockRPC)
+
+			client := newFullTestVerifiedQueryClient(mockRPC, new(MockLightClient))
+			result, err := client.queryWithProof(t.Context(), tt.storeKey, tt.key, tt.height)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+				assert.Nil(t, result)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				assert.Equal(t, tt.key, result.Response.Key)
+			}
+
+			mockRPC.AssertExpectations(t)
+		})
+	}
+}
+
+func TestQueryWithProof_VerifiesPath(t *testing.T) {
+	// Verify that the correct ABCI query path is constructed
+	mockRPC := new(MockRPCClient)
+	expectedPath := "/store/dkg/key"
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, expectedPath, mock.Anything, mock.Anything).
+		Return(makeValidABCIResult([]byte("k"), []byte("v"), 50), nil)
+
+	client := newFullTestVerifiedQueryClient(mockRPC, new(MockLightClient))
+	_, err := client.queryWithProof(t.Context(), StoreKey, []byte("k"), 50)
+	require.NoError(t, err)
+	mockRPC.AssertExpectations(t)
+}
+
+func TestQueryWithProof_PassesProveAndHeight(t *testing.T) {
+	// Verify that Prove=true and correct height are passed in options
+	mockRPC := new(MockRPCClient)
+	expectedOpts := client.ABCIQueryOptions{
+		Prove:  true,
+		Height: 42,
+	}
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, expectedOpts).
+		Return(makeValidABCIResult([]byte("k"), []byte("v"), 42), nil)
+
+	client := newFullTestVerifiedQueryClient(mockRPC, new(MockLightClient))
+	_, err := client.queryWithProof(t.Context(), StoreKey, []byte("k"), 42)
+	require.NoError(t, err)
+	mockRPC.AssertExpectations(t)
+}
+
+func TestWaitAndGetAppHash(t *testing.T) {
+	tests := []struct {
+		name        string
+		setupLC     func(*MockLightClient)
+		height      int64
+		wantErr     bool
+		errContains string
+		wantHash    []byte
+	}{
+		{
+			name: "immediate success",
+			setupLC: func(m *MockLightClient) {
+				lb := &cmttypes.LightBlock{
+					SignedHeader: &cmttypes.SignedHeader{
+						Header: &cmttypes.Header{
+							Height:  101,
+							AppHash: cmtbytes.HexBytes([]byte("apphash_101")),
+						},
+					},
+				}
+				m.On("VerifyLightBlockAtHeight", mock.Anything, int64(101), mock.Anything).Return(lb, nil)
+			},
+			height:   101,
+			wantErr:  false,
+			wantHash: []byte("apphash_101"),
+		},
+		{
+			name: "non-retryable error fails immediately",
+			setupLC: func(m *MockLightClient) {
+				m.On("VerifyLightBlockAtHeight", mock.Anything, int64(101), mock.Anything).
+					Return(nil, errors.New("verification failed"))
+			},
+			height:      101,
+			wantErr:     true,
+			errContains: "failed to verify block at height 101",
+		},
+		{
+			name: "height too high retries then succeeds",
+			setupLC: func(m *MockLightClient) {
+				lb := &cmttypes.LightBlock{
+					SignedHeader: &cmttypes.SignedHeader{
+						Header: &cmttypes.Header{
+							Height:  101,
+							AppHash: cmtbytes.HexBytes([]byte("apphash_ok")),
+						},
+					},
+				}
+				// First call: height too high; second call: success
+				m.On("VerifyLightBlockAtHeight", mock.Anything, int64(101), mock.Anything).
+					Return(nil, provider.ErrHeightTooHigh).Once()
+				m.On("VerifyLightBlockAtHeight", mock.Anything, int64(101), mock.Anything).
+					Return(lb, nil).Once()
+			},
+			height:   101,
+			wantErr:  false,
+			wantHash: []byte("apphash_ok"),
+		},
+		{
+			name: "height too high exhausts retries",
+			setupLC: func(m *MockLightClient) {
+				// All retries return ErrHeightTooHigh
+				m.On("VerifyLightBlockAtHeight", mock.Anything, int64(101), mock.Anything).
+					Return(nil, provider.ErrHeightTooHigh)
+			},
+			height:      101,
+			wantErr:     true,
+			errContains: "timeout waiting for block 101",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockLC := new(MockLightClient)
+			tt.setupLC(mockLC)
+
+			// Use minimal retry config for fast tests
+			client := &VerifiedQueryClient{
+				cfg: &config.Config{
+					LightClient: config.LightClientConfig{
+						MaxBlockWaitRetries: 3,
+						BlockWaitRetryDelay: 1 * time.Millisecond,
+					},
+				},
+				lightClient: mockLC,
+				mutex:       &sync.Mutex{},
+				cdc:         MakeCodec(),
+			}
+
+			hash, err := client.waitAndGetAppHash(t.Context(), tt.height)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantHash, hash)
+			}
+
+			mockLC.AssertExpectations(t)
+		})
+	}
+}
+
+func TestGetStoreData(t *testing.T) {
+	// Helper to create a light block with a specific AppHash
+	makeLB := func(height int64, appHash []byte) *cmttypes.LightBlock {
+		return &cmttypes.LightBlock{
+			SignedHeader: &cmttypes.SignedHeader{
+				Header: &cmttypes.Header{
+					Height:  height,
+					AppHash: cmtbytes.HexBytes(appHash),
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name        string
+		cachedH     int64
+		setupRPC    func(*MockRPCClient)
+		setupLC     func(*MockLightClient)
+		storeKey    string
+		key         []byte
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "query failure propagates error",
+			cachedH: 100,
+			setupRPC: func(m *MockRPCClient) {
+				m.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(nil, errors.New("connection refused"))
+			},
+			setupLC:     func(m *MockLightClient) {},
+			storeKey:    StoreKey,
+			key:         []byte("key"),
+			wantErr:     true,
+			errContains: "ABCI query failed",
+		},
+		{
+			name:    "waitAndGetAppHash failure propagates error",
+			cachedH: 100,
+			setupRPC: func(m *MockRPCClient) {
+				result := makeValidABCIResult([]byte("key"), []byte("value"), 100)
+				m.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(result, nil)
+			},
+			setupLC: func(m *MockLightClient) {
+				// nextHeight = 101
+				m.On("VerifyLightBlockAtHeight", mock.Anything, int64(101), mock.Anything).
+					Return(nil, errors.New("block not available"))
+			},
+			storeKey:    StoreKey,
+			key:         []byte("key"),
+			wantErr:     true,
+			errContains: "failed to get AppHash for verification",
+		},
+		{
+			name:    "proof verification failure propagates error",
+			cachedH: 100,
+			setupRPC: func(m *MockRPCClient) {
+				result := makeValidABCIResult([]byte("key"), []byte("value"), 100)
+				m.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(result, nil)
+			},
+			setupLC: func(m *MockLightClient) {
+				// The AppHash won't match the mock proof, causing verification failure
+				lb := makeLB(101, []byte("mismatched_apphash"))
+				m.On("VerifyLightBlockAtHeight", mock.Anything, int64(101), mock.Anything).
+					Return(lb, nil)
+			},
+			storeKey:    StoreKey,
+			key:         []byte("key"),
+			wantErr:     true,
+			errContains: "proof verification failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRPC := new(MockRPCClient)
+			mockLC := new(MockLightClient)
+			tt.setupRPC(mockRPC)
+			tt.setupLC(mockLC)
+
+			client := &VerifiedQueryClient{
+				cfg: &config.Config{
+					LightClient: config.LightClientConfig{
+						MaxBlockWaitRetries: 1,
+						BlockWaitRetryDelay: 1 * time.Millisecond,
+					},
+				},
+				rpcClient:             mockRPC,
+				lightClient:           mockLC,
+				mutex:                 &sync.Mutex{},
+				cdc:                   MakeCodec(),
+				cachedLastBlockHeight: tt.cachedH,
+			}
+
+			data, err := client.getStoreData(t.Context(), tt.storeKey, tt.key)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				require.NoError(t, err)
+				assert.NotEmpty(t, data)
+			}
+
+			mockRPC.AssertExpectations(t)
+			mockLC.AssertExpectations(t)
+		})
+	}
+}
+
+func TestGetDKGNetwork_WithMockRPC(t *testing.T) {
+	cdc := MakeCodec()
+
+	// Helper to create a light block
+	makeLB := func(height int64, appHash []byte) *cmttypes.LightBlock {
+		return &cmttypes.LightBlock{
+			SignedHeader: &cmttypes.SignedHeader{
+				Header: &cmttypes.Header{
+					Height:  height,
+					AppHash: cmtbytes.HexBytes(appHash),
+				},
+			},
+		}
+	}
+
+	t.Run("rpc query error propagates", func(t *testing.T) {
+		mockRPC := new(MockRPCClient)
+		mockLC := new(MockLightClient)
+
+		mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, errors.New("connection refused"))
+
+		client := &VerifiedQueryClient{
+			cfg: &config.Config{
+				LightClient: config.LightClientConfig{
+					MaxBlockWaitRetries: 1,
+					BlockWaitRetryDelay: 1 * time.Millisecond,
+				},
+			},
+			rpcClient:             mockRPC,
+			lightClient:           mockLC,
+			mutex:                 &sync.Mutex{},
+			cdc:                   cdc,
+			cachedLastBlockHeight: 100,
+		}
+
+		_, err := client.GetDKGNetwork(t.Context(), "test_commitment", 1)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get DKG network")
+		mockRPC.AssertExpectations(t)
+	})
+
+	t.Run("empty response value returns error", func(t *testing.T) {
+		mockRPC := new(MockRPCClient)
+		mockLC := new(MockLightClient)
+
+		key := GetDKGNetworkKey("test_commitment", 1)
+		// Return a valid ABCI result with empty value
+		result := makeValidABCIResult(key, []byte{}, 100)
+		mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(result, nil)
+
+		// Light client returns a matching proof (won't actually verify, but getStoreData
+		// calls verifyProof which will fail — but the empty-value check happens first
+		// only if getStoreData returns successfully with empty data).
+		// Since verifyProof will fail first, we test this via the unmarshal error path.
+		lb := makeLB(101, []byte("apphash"))
+		mockLC.On("VerifyLightBlockAtHeight", mock.Anything, int64(101), mock.Anything).
+			Return(lb, nil)
+
+		client := &VerifiedQueryClient{
+			cfg: &config.Config{
+				LightClient: config.LightClientConfig{
+					MaxBlockWaitRetries: 1,
+					BlockWaitRetryDelay: 1 * time.Millisecond,
+				},
+			},
+			rpcClient:             mockRPC,
+			lightClient:           mockLC,
+			mutex:                 &sync.Mutex{},
+			cdc:                   cdc,
+			cachedLastBlockHeight: 100,
+		}
+
+		_, err := client.GetDKGNetwork(t.Context(), "test_commitment", 1)
+		require.Error(t, err)
+		// Error will come from either proof verification or empty data check
+		mockRPC.AssertExpectations(t)
+	})
+}
+
+func TestGetDKGRegistration_WithMockRPC(t *testing.T) {
+	t.Run("rpc query error propagates", func(t *testing.T) {
+		mockRPC := new(MockRPCClient)
+		mockLC := new(MockLightClient)
+
+		mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, errors.New("timeout"))
+
+		client := &VerifiedQueryClient{
+			cfg: &config.Config{
+				LightClient: config.LightClientConfig{
+					MaxBlockWaitRetries: 1,
+					BlockWaitRetryDelay: 1 * time.Millisecond,
+				},
+			},
+			rpcClient:             mockRPC,
+			lightClient:           mockLC,
+			mutex:                 &sync.Mutex{},
+			cdc:                   MakeCodec(),
+			cachedLastBlockHeight: 100,
+		}
+
+		_, err := client.getDKGRegistration(t.Context(), "cc", 1, "validator1")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get DKG registration")
+		mockRPC.AssertExpectations(t)
+	})
+}
+
+func TestGetLatestActiveDKGNetwork_WithMockRPC(t *testing.T) {
+	t.Run("rpc query error propagates", func(t *testing.T) {
+		mockRPC := new(MockRPCClient)
+		mockLC := new(MockLightClient)
+
+		mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, errors.New("connection refused"))
+
+		client := &VerifiedQueryClient{
+			cfg: &config.Config{
+				LightClient: config.LightClientConfig{
+					MaxBlockWaitRetries: 1,
+					BlockWaitRetryDelay: 1 * time.Millisecond,
+				},
+			},
+			rpcClient:             mockRPC,
+			lightClient:           mockLC,
+			mutex:                 &sync.Mutex{},
+			cdc:                   MakeCodec(),
+			cachedLastBlockHeight: 100,
+		}
+
+		_, err := client.GetLatestActiveDKGNetwork(t.Context())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get latest active round key")
+		mockRPC.AssertExpectations(t)
+	})
+}
+
+func TestGetAllParticipantDKGRegistrations_WithMockRPC(t *testing.T) {
+	t.Run("GetDKGNetwork failure propagates", func(t *testing.T) {
+		mockRPC := new(MockRPCClient)
+		mockLC := new(MockLightClient)
+
+		mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, errors.New("connection refused"))
+
+		client := &VerifiedQueryClient{
+			cfg: &config.Config{
+				LightClient: config.LightClientConfig{
+					MaxBlockWaitRetries: 1,
+					BlockWaitRetryDelay: 1 * time.Millisecond,
+				},
+			},
+			rpcClient:             mockRPC,
+			lightClient:           mockLC,
+			mutex:                 &sync.Mutex{},
+			cdc:                   MakeCodec(),
+			cachedLastBlockHeight: 100,
+		}
+
+		_, err := client.GetAllParticipantDKGRegistrations(t.Context(), "cc", 1)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get DKG network")
+		mockRPC.AssertExpectations(t)
+	})
+}
+
+func TestMockRPCClient_CompileTimeCheck(t *testing.T) {
+	// Verify that MockRPCClient satisfies the RPCClient interface at runtime
+	var rpc RPCClient = new(MockRPCClient)
+	assert.NotNil(t, rpc)
+}
+
+func TestWaitAndGetAppHash_ContextCancellation(t *testing.T) {
+	mockLC := new(MockLightClient)
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, int64(101), mock.Anything).
+		Return(nil, provider.ErrHeightTooHigh)
+
+	client := &VerifiedQueryClient{
+		cfg: &config.Config{
+			LightClient: config.LightClientConfig{
+				MaxBlockWaitRetries: 100,
+				BlockWaitRetryDelay: 100 * time.Millisecond,
+			},
+		},
+		lightClient: mockLC,
+		mutex:       &sync.Mutex{},
+		cdc:         MakeCodec(),
+	}
+
+	// Use a very short context so we can verify behavior with cancelled context
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := client.waitAndGetAppHash(ctx, 101)
+	// The error should be either timeout or height too high related
+	require.Error(t, err)
+}
+
+// =============================================================================
+// Verifiable Proof Helpers
+// =============================================================================
+
+// createVerifiableICS23Proof creates an IAVL proof that passes IavlSpec validation.
+// The [0,2,2] prefix encodes height=0, size=1, version=1 in IAVL varint format.
+func createVerifiableICS23Proof(key, value []byte) *ics23.CommitmentProof {
+	return &ics23.CommitmentProof{
+		Proof: &ics23.CommitmentProof_Exist{
+			Exist: &ics23.ExistenceProof{
+				Key:   key,
+				Value: value,
+				Leaf: &ics23.LeafOp{
+					Prefix:       []byte{0, 2, 2},
+					PrehashKey:   ics23.HashOp_NO_HASH,
+					Hash:         ics23.HashOp_SHA256,
+					PrehashValue: ics23.HashOp_SHA256,
+					Length:       ics23.LengthOp_VAR_PROTO,
+				},
+				Path: []*ics23.InnerOp{},
+			},
+		},
+	}
+}
+
+// createVerifiableSimpleProof creates a Tendermint simple proof.
+func createVerifiableSimpleProof(storeKey, moduleRoot []byte) *ics23.CommitmentProof {
+	return &ics23.CommitmentProof{
+		Proof: &ics23.CommitmentProof_Exist{
+			Exist: &ics23.ExistenceProof{
+				Key:   storeKey,
+				Value: moduleRoot,
+				Leaf: &ics23.LeafOp{
+					Prefix:       []byte{0},
+					PrehashKey:   ics23.HashOp_NO_HASH,
+					Hash:         ics23.HashOp_SHA256,
+					PrehashValue: ics23.HashOp_SHA256,
+					Length:       ics23.LengthOp_VAR_PROTO,
+				},
+				Path: []*ics23.InnerOp{},
+			},
+		},
+	}
+}
+
+// createVerifiableProofOps creates a full proof chain (IAVL + Simple) that passes
+// both module and multi-store verification. Returns the proof ops and the AppHash
+// that must be used for verification.
+func createVerifiableProofOps(key, value []byte, storeKey string) (*crypto.ProofOps, []byte) {
+	iavlProof := createVerifiableICS23Proof(key, value)
+	moduleRoot, _ := iavlProof.Calculate()
+
+	simpleProof := createVerifiableSimpleProof([]byte(storeKey), moduleRoot)
+	appHash, _ := simpleProof.Calculate()
+
+	iavlData, _ := iavlProof.Marshal()
+	simpleData, _ := simpleProof.Marshal()
+
+	proofOps := &crypto.ProofOps{
+		Ops: []crypto.ProofOp{
+			{Type: "ics23:iavl", Key: key, Data: iavlData},
+			{Type: "ics23:simple", Key: []byte(storeKey), Data: simpleData},
+		},
+	}
+
+	return proofOps, appHash
+}
+
+// makeVerifiedABCIResult builds a ResultABCIQuery with verifiable proof ops.
+// Returns the result and the AppHash needed for verification.
+func makeVerifiedABCIResult(key, value []byte, height int64, storeKey string) (*ctypes.ResultABCIQuery, []byte) {
+	proofOps, appHash := createVerifiableProofOps(key, value, storeKey)
+
+	return &ctypes.ResultABCIQuery{
+		Response: abcitypes.ResponseQuery{
+			Key:      key,
+			Value:    value,
+			Height:   height,
+			ProofOps: proofOps,
+		},
+	}, appHash
+}
+
+func TestWaitAndGetAppHash_WrappedHeightTooHigh(t *testing.T) {
+	// Verify that wrapped ErrHeightTooHigh is properly detected via errors.Is
+	mockLC := new(MockLightClient)
+	wrappedErr := fmt.Errorf("some wrapper: %w", provider.ErrHeightTooHigh)
+
+	lb := &cmttypes.LightBlock{
+		SignedHeader: &cmttypes.SignedHeader{
+			Header: &cmttypes.Header{
+				Height:  101,
+				AppHash: cmtbytes.HexBytes([]byte("apphash")),
+			},
+		},
+	}
+
+	// First call: wrapped ErrHeightTooHigh should trigger retry
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, int64(101), mock.Anything).
+		Return(nil, wrappedErr).Once()
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, int64(101), mock.Anything).
+		Return(lb, nil).Once()
+
+	client := &VerifiedQueryClient{
+		cfg: &config.Config{
+			LightClient: config.LightClientConfig{
+				MaxBlockWaitRetries: 3,
+				BlockWaitRetryDelay: 1 * time.Millisecond,
+			},
+		},
+		lightClient: mockLC,
+		mutex:       &sync.Mutex{},
+		cdc:         MakeCodec(),
+	}
+
+	hash, err := client.waitAndGetAppHash(t.Context(), 101)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("apphash"), hash)
+	mockLC.AssertExpectations(t)
+}
+
+// =============================================================================
+// End-to-End Tests with Verifiable Proofs
+// =============================================================================
+
+func TestGetStoreData_SuccessWithVerifiableProof(t *testing.T) {
+	key := []byte("test_key")
+	value := []byte("test_value")
+	queryHeight := int64(100)
+
+	// Create verifiable ABCI result and extract the matching AppHash
+	result, appHash := makeVerifiedABCIResult(key, value, queryHeight, StoreKey)
+
+	mockRPC := new(MockRPCClient)
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(result, nil)
+
+	mockLC := new(MockLightClient)
+	lb := &cmttypes.LightBlock{
+		SignedHeader: &cmttypes.SignedHeader{
+			Header: &cmttypes.Header{
+				Height:  queryHeight + 1,
+				AppHash: cmtbytes.HexBytes(appHash),
+			},
+		},
+	}
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).
+		Return(lb, nil)
+
+	client := &VerifiedQueryClient{
+		cfg: &config.Config{
+			LightClient: config.LightClientConfig{
+				MaxBlockWaitRetries: 1,
+				BlockWaitRetryDelay: 1 * time.Millisecond,
+			},
+		},
+		rpcClient:             mockRPC,
+		lightClient:           mockLC,
+		mutex:                 &sync.Mutex{},
+		cdc:                   MakeCodec(),
+		cachedLastBlockHeight: queryHeight,
+	}
+
+	data, err := client.getStoreData(t.Context(), StoreKey, key)
+	require.NoError(t, err)
+	assert.Equal(t, value, data)
+	mockRPC.AssertExpectations(t)
+	mockLC.AssertExpectations(t)
+}
+
+func TestGetDKGNetwork_SuccessWithVerifiableProof(t *testing.T) {
+	cdc := MakeCodec()
+	network := createTestDKGNetwork()
+	encodedNetwork, err := cdc.Marshal(network)
+	require.NoError(t, err)
+
+	queryHeight := int64(100)
+	key := GetDKGNetworkKey("test_commitment", 1)
+
+	result, appHash := makeVerifiedABCIResult(key, encodedNetwork, queryHeight, StoreKey)
+
+	mockRPC := new(MockRPCClient)
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(result, nil)
+
+	mockLC := new(MockLightClient)
+	lb := &cmttypes.LightBlock{
+		SignedHeader: &cmttypes.SignedHeader{
+			Header: &cmttypes.Header{
+				Height:  queryHeight + 1,
+				AppHash: cmtbytes.HexBytes(appHash),
+			},
+		},
+	}
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).
+		Return(lb, nil)
+
+	client := &VerifiedQueryClient{
+		cfg: &config.Config{
+			LightClient: config.LightClientConfig{
+				MaxBlockWaitRetries: 1,
+				BlockWaitRetryDelay: 1 * time.Millisecond,
+			},
+		},
+		rpcClient:             mockRPC,
+		lightClient:           mockLC,
+		mutex:                 &sync.Mutex{},
+		cdc:                   cdc,
+		cachedLastBlockHeight: queryHeight,
+	}
+
+	got, err := client.GetDKGNetwork(t.Context(), "test_commitment", 1)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, network.GetRound(), got.GetRound())
+	assert.Equal(t, network.GetTotal(), got.GetTotal())
+	assert.Equal(t, network.GetThreshold(), got.GetThreshold())
+	assert.Equal(t, network.GetActiveValSet(), got.GetActiveValSet())
+	mockRPC.AssertExpectations(t)
+	mockLC.AssertExpectations(t)
+}
+
+func TestGetDKGNetwork_UnmarshalError(t *testing.T) {
+	queryHeight := int64(100)
+	key := GetDKGNetworkKey("test_commitment", 1)
+
+	// Create verifiable result with invalid protobuf data
+	invalidProto := []byte("definitely not valid protobuf data!!!!")
+	result, appHash := makeVerifiedABCIResult(key, invalidProto, queryHeight, StoreKey)
+
+	mockRPC := new(MockRPCClient)
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(result, nil)
+
+	mockLC := new(MockLightClient)
+	lb := &cmttypes.LightBlock{
+		SignedHeader: &cmttypes.SignedHeader{
+			Header: &cmttypes.Header{
+				Height:  queryHeight + 1,
+				AppHash: cmtbytes.HexBytes(appHash),
+			},
+		},
+	}
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).
+		Return(lb, nil)
+
+	client := &VerifiedQueryClient{
+		cfg: &config.Config{
+			LightClient: config.LightClientConfig{
+				MaxBlockWaitRetries: 1,
+				BlockWaitRetryDelay: 1 * time.Millisecond,
+			},
+		},
+		rpcClient:             mockRPC,
+		lightClient:           mockLC,
+		mutex:                 &sync.Mutex{},
+		cdc:                   MakeCodec(),
+		cachedLastBlockHeight: queryHeight,
+	}
+
+	_, err := client.GetDKGNetwork(t.Context(), "test_commitment", 1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to unmarshal DKG network")
+	mockRPC.AssertExpectations(t)
+	mockLC.AssertExpectations(t)
+}
+
+func TestGetDKGRegistration_SuccessWithVerifiableProof(t *testing.T) {
+	cdc := MakeCodec()
+	reg := createTestDKGRegistration()
+	encodedReg, err := cdc.Marshal(reg)
+	require.NoError(t, err)
+
+	queryHeight := int64(100)
+	key := GetDKGRegistrationKey("test_commitment", 1, "validator1")
+
+	result, appHash := makeVerifiedABCIResult(key, encodedReg, queryHeight, StoreKey)
+
+	mockRPC := new(MockRPCClient)
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(result, nil)
+
+	mockLC := new(MockLightClient)
+	lb := &cmttypes.LightBlock{
+		SignedHeader: &cmttypes.SignedHeader{
+			Header: &cmttypes.Header{
+				Height:  queryHeight + 1,
+				AppHash: cmtbytes.HexBytes(appHash),
+			},
+		},
+	}
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).
+		Return(lb, nil)
+
+	client := &VerifiedQueryClient{
+		cfg: &config.Config{
+			LightClient: config.LightClientConfig{
+				MaxBlockWaitRetries: 1,
+				BlockWaitRetryDelay: 1 * time.Millisecond,
+			},
+		},
+		rpcClient:             mockRPC,
+		lightClient:           mockLC,
+		mutex:                 &sync.Mutex{},
+		cdc:                   cdc,
+		cachedLastBlockHeight: queryHeight,
+	}
+
+	got, err := client.getDKGRegistration(t.Context(), "test_commitment", 1, "validator1")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, reg.GetRound(), got.GetRound())
+	assert.Equal(t, reg.GetStatus(), got.GetStatus())
+	mockRPC.AssertExpectations(t)
+	mockLC.AssertExpectations(t)
+}
+
+func TestGetDKGRegistration_UnmarshalError(t *testing.T) {
+	queryHeight := int64(100)
+	key := GetDKGRegistrationKey("test_commitment", 1, "validator1")
+
+	invalidProto := []byte("not valid protobuf!!! garbage data here")
+	result, appHash := makeVerifiedABCIResult(key, invalidProto, queryHeight, StoreKey)
+
+	mockRPC := new(MockRPCClient)
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(result, nil)
+
+	mockLC := new(MockLightClient)
+	lb := &cmttypes.LightBlock{
+		SignedHeader: &cmttypes.SignedHeader{
+			Header: &cmttypes.Header{
+				Height:  queryHeight + 1,
+				AppHash: cmtbytes.HexBytes(appHash),
+			},
+		},
+	}
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).
+		Return(lb, nil)
+
+	client := &VerifiedQueryClient{
+		cfg: &config.Config{
+			LightClient: config.LightClientConfig{
+				MaxBlockWaitRetries: 1,
+				BlockWaitRetryDelay: 1 * time.Millisecond,
+			},
+		},
+		rpcClient:             mockRPC,
+		lightClient:           mockLC,
+		mutex:                 &sync.Mutex{},
+		cdc:                   MakeCodec(),
+		cachedLastBlockHeight: queryHeight,
+	}
+
+	_, err := client.getDKGRegistration(t.Context(), "test_commitment", 1, "validator1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to unmarshal DKG registration")
+	mockRPC.AssertExpectations(t)
+	mockLC.AssertExpectations(t)
+}
+
+func TestGetLatestActiveDKGNetwork_SuccessWithVerifiableProof(t *testing.T) {
+	cdc := MakeCodec()
+	queryHeight := int64(100)
+
+	// Step 1: Set up the latest active round key query
+	latestActiveKey := GetLatestActiveRoundKey()
+	networkKeyValue := []byte("1")
+
+	latestResult, latestAppHash := makeVerifiedABCIResult(latestActiveKey, networkKeyValue, queryHeight, StoreKey)
+
+	// Step 2: Set up the network query (GetLatestActiveDKGNetwork passes "" for codeCommitmentHex)
+	network := createTestDKGNetwork()
+	encodedNetwork, err := cdc.Marshal(network)
+	require.NoError(t, err)
+
+	networkKey := GetDKGNetworkKey("", 1)
+	networkResult, networkAppHash := makeVerifiedABCIResult(networkKey, encodedNetwork, queryHeight, StoreKey)
+
+	// Mock RPC: first call returns latest active key, second returns network
+	mockRPC := new(MockRPCClient)
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.MatchedBy(func(data cmtbytes.HexBytes) bool {
+		return bytes.Equal(data, cmtbytes.HexBytes(latestActiveKey))
+	}), mock.Anything).Return(latestResult, nil).Once()
+
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.MatchedBy(func(data cmtbytes.HexBytes) bool {
+		return bytes.Equal(data, cmtbytes.HexBytes(networkKey))
+	}), mock.Anything).Return(networkResult, nil).Once()
+
+	// Mock light client: both queries need verification at nextHeight
+	mockLC := new(MockLightClient)
+	latestLB := &cmttypes.LightBlock{
+		SignedHeader: &cmttypes.SignedHeader{
+			Header: &cmttypes.Header{Height: queryHeight + 1, AppHash: cmtbytes.HexBytes(latestAppHash)},
+		},
+	}
+	networkLB := &cmttypes.LightBlock{
+		SignedHeader: &cmttypes.SignedHeader{
+			Header: &cmttypes.Header{Height: queryHeight + 1, AppHash: cmtbytes.HexBytes(networkAppHash)},
+		},
+	}
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).
+		Return(latestLB, nil).Once()
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).
+		Return(networkLB, nil).Once()
+
+	client := &VerifiedQueryClient{
+		cfg: &config.Config{
+			LightClient: config.LightClientConfig{
+				MaxBlockWaitRetries: 1,
+				BlockWaitRetryDelay: 1 * time.Millisecond,
+			},
+		},
+		rpcClient:             mockRPC,
+		lightClient:           mockLC,
+		mutex:                 &sync.Mutex{},
+		cdc:                   cdc,
+		cachedLastBlockHeight: queryHeight,
+	}
+
+	got, err := client.GetLatestActiveDKGNetwork(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, network.GetRound(), got.GetRound())
+	assert.Equal(t, network.GetActiveValSet(), got.GetActiveValSet())
+	mockRPC.AssertExpectations(t)
+	mockLC.AssertExpectations(t)
+}
+
+func TestGetLatestActiveDKGNetwork_InvalidKeyFormat(t *testing.T) {
+	tests := []struct {
+		name        string
+		keyValue    string
+		errContains string
+	}{
+		{
+			name:        "no underscore",
+			keyValue:    "invalidformat",
+			errContains: "failed to parse round from latest active key",
+		},
+		{
+			name:        "trailing underscore",
+			keyValue:    "code_commitment_",
+			errContains: "failed to parse round from latest active key",
+		},
+		{
+			name:        "non-numeric round",
+			keyValue:    "abc",
+			errContains: "failed to parse round from latest active key",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			queryHeight := int64(100)
+			latestActiveKey := GetLatestActiveRoundKey()
+
+			result, appHash := makeVerifiedABCIResult(latestActiveKey, []byte(tt.keyValue), queryHeight, StoreKey)
+
+			mockRPC := new(MockRPCClient)
+			mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+				Return(result, nil)
+
+			mockLC := new(MockLightClient)
+			lb := &cmttypes.LightBlock{
+				SignedHeader: &cmttypes.SignedHeader{
+					Header: &cmttypes.Header{Height: queryHeight + 1, AppHash: cmtbytes.HexBytes(appHash)},
+				},
+			}
+			mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).
+				Return(lb, nil)
+
+			client := &VerifiedQueryClient{
+				cfg: &config.Config{
+					LightClient: config.LightClientConfig{
+						MaxBlockWaitRetries: 1,
+						BlockWaitRetryDelay: 1 * time.Millisecond,
+					},
+				},
+				rpcClient:             mockRPC,
+				lightClient:           mockLC,
+				mutex:                 &sync.Mutex{},
+				cdc:                   MakeCodec(),
+				cachedLastBlockHeight: queryHeight,
+			}
+
+			_, err := client.GetLatestActiveDKGNetwork(t.Context())
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errContains)
+			mockRPC.AssertExpectations(t)
+		})
+	}
+}
+
+func TestGetAllParticipantDKGRegistrations_SuccessWithVerifiableProof(t *testing.T) {
+	cdc := MakeCodec()
+	queryHeight := int64(100)
+
+	// Create network with active validators
+	network := &pb.DKGNetwork{
+		Round:          1,
+		ActiveValSet:   []string{"val1", "val2"},
+		Total:          2,
+		Threshold:      1,
+	}
+	encodedNetwork, err := cdc.Marshal(network)
+	require.NoError(t, err)
+
+	// Create registrations (val1 verified, val2 verified)
+	reg1 := &pb.DKGRegistration{Round: 1, DkgPubKey: []byte("pk1"), Status: pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED}
+	reg2 := &pb.DKGRegistration{Round: 1, DkgPubKey: []byte("pk2"), Status: pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED}
+	encodedReg1, _ := cdc.Marshal(reg1)
+	encodedReg2, _ := cdc.Marshal(reg2)
+
+	networkKey := GetDKGNetworkKey("test_cc", 1)
+	reg1Key := GetDKGRegistrationKey("test_cc", 1, "val1")
+	reg2Key := GetDKGRegistrationKey("test_cc", 1, "val2")
+
+	networkResult, networkAppHash := makeVerifiedABCIResult(networkKey, encodedNetwork, queryHeight, StoreKey)
+	reg1Result, reg1AppHash := makeVerifiedABCIResult(reg1Key, encodedReg1, queryHeight, StoreKey)
+	reg2Result, reg2AppHash := makeVerifiedABCIResult(reg2Key, encodedReg2, queryHeight, StoreKey)
+
+	mockRPC := new(MockRPCClient)
+	// Match by data (key bytes in the query)
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.MatchedBy(func(data cmtbytes.HexBytes) bool {
+		return bytes.Equal(data, cmtbytes.HexBytes(networkKey))
+	}), mock.Anything).Return(networkResult, nil).Once()
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.MatchedBy(func(data cmtbytes.HexBytes) bool {
+		return bytes.Equal(data, cmtbytes.HexBytes(reg1Key))
+	}), mock.Anything).Return(reg1Result, nil).Once()
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.MatchedBy(func(data cmtbytes.HexBytes) bool {
+		return bytes.Equal(data, cmtbytes.HexBytes(reg2Key))
+	}), mock.Anything).Return(reg2Result, nil).Once()
+
+	mockLC := new(MockLightClient)
+	networkLB := &cmttypes.LightBlock{SignedHeader: &cmttypes.SignedHeader{Header: &cmttypes.Header{Height: queryHeight + 1, AppHash: cmtbytes.HexBytes(networkAppHash)}}}
+	reg1LB := &cmttypes.LightBlock{SignedHeader: &cmttypes.SignedHeader{Header: &cmttypes.Header{Height: queryHeight + 1, AppHash: cmtbytes.HexBytes(reg1AppHash)}}}
+	reg2LB := &cmttypes.LightBlock{SignedHeader: &cmttypes.SignedHeader{Header: &cmttypes.Header{Height: queryHeight + 1, AppHash: cmtbytes.HexBytes(reg2AppHash)}}}
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).Return(networkLB, nil).Once()
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).Return(reg1LB, nil).Once()
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).Return(reg2LB, nil).Once()
+
+	client := &VerifiedQueryClient{
+		cfg: &config.Config{
+			LightClient: config.LightClientConfig{
+				MaxBlockWaitRetries: 1,
+				BlockWaitRetryDelay: 1 * time.Millisecond,
+			},
+		},
+		rpcClient:             mockRPC,
+		lightClient:           mockLC,
+		mutex:                 &sync.Mutex{},
+		cdc:                   cdc,
+		cachedLastBlockHeight: queryHeight,
+	}
+
+	regs, err := client.GetAllParticipantDKGRegistrations(t.Context(), "test_cc", 1)
+	require.NoError(t, err)
+	assert.Len(t, regs, 2)
+	mockRPC.AssertExpectations(t)
+	mockLC.AssertExpectations(t)
+}
+
+func TestGetAllParticipantDKGRegistrations_EmptyActiveValSet(t *testing.T) {
+	cdc := MakeCodec()
+	queryHeight := int64(100)
+
+	network := &pb.DKGNetwork{
+		Round:          1,
+		ActiveValSet:   []string{}, // empty
+		Total:          0,
+		Threshold:      0,
+	}
+	encodedNetwork, err := cdc.Marshal(network)
+	require.NoError(t, err)
+
+	networkKey := GetDKGNetworkKey("test_cc", 1)
+	result, appHash := makeVerifiedABCIResult(networkKey, encodedNetwork, queryHeight, StoreKey)
+
+	mockRPC := new(MockRPCClient)
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(result, nil)
+
+	mockLC := new(MockLightClient)
+	lb := &cmttypes.LightBlock{SignedHeader: &cmttypes.SignedHeader{Header: &cmttypes.Header{Height: queryHeight + 1, AppHash: cmtbytes.HexBytes(appHash)}}}
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).Return(lb, nil)
+
+	client := &VerifiedQueryClient{
+		cfg: &config.Config{
+			LightClient: config.LightClientConfig{
+				MaxBlockWaitRetries: 1,
+				BlockWaitRetryDelay: 1 * time.Millisecond,
+			},
+		},
+		rpcClient:             mockRPC,
+		lightClient:           mockLC,
+		mutex:                 &sync.Mutex{},
+		cdc:                   cdc,
+		cachedLastBlockHeight: queryHeight,
+	}
+
+	_, err = client.GetAllParticipantDKGRegistrations(t.Context(), "test_cc", 1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no active validators in network")
+	mockRPC.AssertExpectations(t)
+	mockLC.AssertExpectations(t)
+}
+
+func TestGetAllParticipantDKGRegistrations_NoVerifiedRegistrations(t *testing.T) {
+	cdc := MakeCodec()
+	queryHeight := int64(100)
+
+	network := &pb.DKGNetwork{
+		Round:          1,
+		ActiveValSet:   []string{"val1"},
+		Total:          1,
+		Threshold:      1,
+	}
+	encodedNetwork, err := cdc.Marshal(network)
+	require.NoError(t, err)
+
+	// Registration with non-verified status
+	reg := &pb.DKGRegistration{
+		Round:     1,
+		DkgPubKey: []byte("pk1"),
+		Status:    pb.DKGRegStatus_DKG_REG_STATUS_UNSPECIFIED,
+	}
+	encodedReg, _ := cdc.Marshal(reg)
+
+	networkKey := GetDKGNetworkKey("test_cc", 1)
+	regKey := GetDKGRegistrationKey("test_cc", 1, "val1")
+
+	networkResult, networkAppHash := makeVerifiedABCIResult(networkKey, encodedNetwork, queryHeight, StoreKey)
+	regResult, regAppHash := makeVerifiedABCIResult(regKey, encodedReg, queryHeight, StoreKey)
+
+	mockRPC := new(MockRPCClient)
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.MatchedBy(func(data cmtbytes.HexBytes) bool {
+		return bytes.Equal(data, cmtbytes.HexBytes(networkKey))
+	}), mock.Anything).Return(networkResult, nil).Once()
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.MatchedBy(func(data cmtbytes.HexBytes) bool {
+		return bytes.Equal(data, cmtbytes.HexBytes(regKey))
+	}), mock.Anything).Return(regResult, nil).Once()
+
+	mockLC := new(MockLightClient)
+	networkLB := &cmttypes.LightBlock{SignedHeader: &cmttypes.SignedHeader{Header: &cmttypes.Header{Height: queryHeight + 1, AppHash: cmtbytes.HexBytes(networkAppHash)}}}
+	regLB := &cmttypes.LightBlock{SignedHeader: &cmttypes.SignedHeader{Header: &cmttypes.Header{Height: queryHeight + 1, AppHash: cmtbytes.HexBytes(regAppHash)}}}
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).Return(networkLB, nil).Once()
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).Return(regLB, nil).Once()
+
+	client := &VerifiedQueryClient{
+		cfg: &config.Config{
+			LightClient: config.LightClientConfig{
+				MaxBlockWaitRetries: 1,
+				BlockWaitRetryDelay: 1 * time.Millisecond,
+			},
+		},
+		rpcClient:             mockRPC,
+		lightClient:           mockLC,
+		mutex:                 &sync.Mutex{},
+		cdc:                   cdc,
+		cachedLastBlockHeight: queryHeight,
+	}
+
+	_, err = client.GetAllParticipantDKGRegistrations(t.Context(), "test_cc", 1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no participant registrations found")
+	mockRPC.AssertExpectations(t)
+	mockLC.AssertExpectations(t)
+}
+
+func TestGetAllParticipantDKGRegistrations_RegistrationQueryFails(t *testing.T) {
+	cdc := MakeCodec()
+	queryHeight := int64(100)
+
+	network := &pb.DKGNetwork{
+		Round:          1,
+		ActiveValSet:   []string{"val1"},
+		Total:          1,
+		Threshold:      1,
+	}
+	encodedNetwork, err := cdc.Marshal(network)
+	require.NoError(t, err)
+
+	networkKey := GetDKGNetworkKey("test_cc", 1)
+	networkResult, networkAppHash := makeVerifiedABCIResult(networkKey, encodedNetwork, queryHeight, StoreKey)
+
+	mockRPC := new(MockRPCClient)
+	// First call (network) succeeds
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.MatchedBy(func(data cmtbytes.HexBytes) bool {
+		return bytes.Equal(data, cmtbytes.HexBytes(networkKey))
+	}), mock.Anything).Return(networkResult, nil).Once()
+	// Second call (registration) fails
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, errors.New("connection reset")).Once()
+
+	mockLC := new(MockLightClient)
+	networkLB := &cmttypes.LightBlock{SignedHeader: &cmttypes.SignedHeader{Header: &cmttypes.Header{Height: queryHeight + 1, AppHash: cmtbytes.HexBytes(networkAppHash)}}}
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).Return(networkLB, nil).Once()
+
+	client := &VerifiedQueryClient{
+		cfg: &config.Config{
+			LightClient: config.LightClientConfig{
+				MaxBlockWaitRetries: 1,
+				BlockWaitRetryDelay: 1 * time.Millisecond,
+			},
+		},
+		rpcClient:             mockRPC,
+		lightClient:           mockLC,
+		mutex:                 &sync.Mutex{},
+		cdc:                   cdc,
+		cachedLastBlockHeight: queryHeight,
+	}
+
+	_, err = client.GetAllParticipantDKGRegistrations(t.Context(), "test_cc", 1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to get registration for validator val1")
+	mockRPC.AssertExpectations(t)
+}
+
+func TestVerifyProof_SuccessWithVerifiableProof(t *testing.T) {
+	key := []byte("test_key")
+	value := []byte("test_value")
+
+	proofOps, appHash := createVerifiableProofOps(key, value, StoreKey)
+
+	client := &VerifiedQueryClient{cdc: MakeCodec()}
+	err := client.verifyProof(proofOps, key, value, appHash, 100, 101)
+	require.NoError(t, err)
+}
+
+func TestVerifyMultiStoreProof_Success(t *testing.T) {
+	key := []byte("test_key")
+	value := []byte("test_value")
+	storeKey := []byte(StoreKey)
+
+	iavlProof := createVerifiableICS23Proof(key, value)
+	moduleRoot, err := iavlProof.Calculate()
+	require.NoError(t, err)
+
+	simpleProof := createVerifiableSimpleProof(storeKey, moduleRoot)
+	appHash, err := simpleProof.Calculate()
+	require.NoError(t, err)
+
+	err = verifyMultiStoreProof(
+		iavlProof, simpleProof,
+		"ics23:iavl", "ics23:simple",
+		key, storeKey,
+		key, value, appHash,
+	)
+	require.NoError(t, err)
+}
+
+func TestVerifyModuleProof_Success(t *testing.T) {
+	key := []byte("test_key")
+	value := []byte("test_value")
+
+	proof := createVerifiableICS23Proof(key, value)
+	root, err := proof.Calculate()
+	require.NoError(t, err)
+
+	err = verifyModuleProof(proof, "ics23:iavl", key, key, value, root)
+	require.NoError(t, err)
+}
+
+func TestVerifySimpleProof_Success(t *testing.T) {
+	storeKey := []byte(StoreKey)
+	moduleRoot := []byte("some_module_root_hash_value_here")
+
+	proof := createVerifiableSimpleProof(storeKey, moduleRoot)
+	appHash, err := proof.Calculate()
+	require.NoError(t, err)
+
+	err = verifySimpleProof(proof, "ics23:simple", storeKey, moduleRoot, appHash)
+	require.NoError(t, err)
 }
