@@ -89,11 +89,11 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 
 	log.Info("Distributed key share has been generated", "code_commitment", codeCommitmentHex, "round", req.GetRound())
 
-	pubKeyShare, err := s.Suite.Point().Mul(priShare.V, nil).MarshalBinary()
+	pubKeyShare, err := marshalPubShare(priShare.V)
 	if err != nil {
-		log.Errorf("failed to marshal public key: %v", err)
+		log.Errorf("failed to marshal public key share: %v", err)
 
-		return nil, status.Errorf(codes.Internal, "failed to marshal public key")
+		return nil, status.Errorf(codes.Internal, "failed to marshal public key share")
 	}
 
 	// Seal and store the DistKeyShare
