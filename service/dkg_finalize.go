@@ -12,7 +12,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/piplabs/story-kernel/enclave"
-	"github.com/piplabs/story-kernel/store"
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
 
 	dkg "go.dedis.ch/kyber/v4/share/dkg/pedersen"
@@ -97,7 +96,7 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 	}
 
 	// Seal and store the DistKeyShare
-	if err := store.SealAndStoreDistKeyShare(distKeyShare, s.Cfg.GetDKGStateDir(), codeCommitmentHex, req.GetRound()); err != nil {
+	if err := s.DKGStore.SealAndStoreDistKeyShare(distKeyShare, codeCommitmentHex, req.GetRound()); err != nil {
 		log.Errorf("failed to seal distributed key share: %v", err)
 
 		return nil, status.Errorf(codes.Internal, "failed to seal distributed key")

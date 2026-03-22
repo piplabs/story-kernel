@@ -21,15 +21,14 @@ const (
 	PrivateCoeffsFile = "private_coeffs.sealed"
 )
 
-// Sealer abstracts file-level seal/unseal operations so that production code
-// uses SGX sealing (enclave.SealToFile/UnsealFromFile) while tests can inject
-// a plaintext implementation.
+// Sealer abstracts seal/unseal operations so tests can inject a plaintext
+// implementation that does not require SGX hardware.
 type Sealer interface {
 	SealToFile(data []byte, path string) error
 	UnsealFromFile(path string) ([]byte, error)
 }
 
-// enclaveSealer is the production sealer that uses SGX enclave sealing.
+// enclaveSealer delegates to the real SGX enclave seal/unseal functions.
 type enclaveSealer struct{}
 
 func (enclaveSealer) SealToFile(data []byte, path string) error {
@@ -48,6 +47,7 @@ type DKGStore struct {
 	stateDir string
 }
 
+// NewDKGStore creates a DKGStore that uses the real SGX enclave sealer.
 func NewDKGStore(keyDir, stateDir string, suite *edwards25519.SuiteEd25519) *DKGStore {
 	return &DKGStore{
 		suite:    suite,
@@ -57,7 +57,8 @@ func NewDKGStore(keyDir, stateDir string, suite *edwards25519.SuiteEd25519) *DKG
 	}
 }
 
-// NewDKGStoreWithSealer creates a DKGStore with a custom sealer (for testing).
+// NewDKGStoreWithSealer creates a DKGStore with a custom Sealer implementation.
+// This is intended for testing with a plaintext sealer that does not require SGX.
 func NewDKGStoreWithSealer(keyDir, stateDir string, suite *edwards25519.SuiteEd25519, sealer Sealer) *DKGStore {
 	return &DKGStore{
 		suite:    suite,
@@ -68,8 +69,8 @@ func NewDKGStoreWithSealer(keyDir, stateDir string, suite *edwards25519.SuiteEd2
 }
 
 // SealAndStoreDistKeyShare serializes and seals the DistKeyShare to a file.
-func SealAndStoreDistKeyShare(share *dkg.DistKeyShare, dir, codeCommitmentHex string, round uint32) error {
-	distKeyShareDir := filepath.Join(dir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex)
+func (s *DKGStore) SealAndStoreDistKeyShare(share *dkg.DistKeyShare, codeCommitmentHex string, round uint32) error {
+	distKeyShareDir := filepath.Join(s.stateDir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex)
 	if err := os.MkdirAll(distKeyShareDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create sealed DistKeyShare directory: %w", err)
 	}
@@ -80,7 +81,7 @@ func SealAndStoreDistKeyShare(share *dkg.DistKeyShare, dir, codeCommitmentHex st
 		return fmt.Errorf("failed to marshal the DistKeyShare: %w", err)
 	}
 
-	if err := enclave.SealToFile(shareBz, path); err != nil {
+	if err := s.sealer.SealToFile(shareBz, path); err != nil {
 		return fmt.Errorf("failed to seal and store DistKeyShare to file: %w", err)
 	}
 
@@ -88,15 +89,14 @@ func SealAndStoreDistKeyShare(share *dkg.DistKeyShare, dir, codeCommitmentHex st
 }
 
 // LoadDistKeyShare loads and unseals a DistKeyShare from a file.
-func LoadDistKeyShare(dir, codeCommitmentHex string, round uint32) (*dkg.DistKeyShare, error) {
-	suite := edwards25519.NewBlakeSHA256Ed25519()
-	path := filepath.Join(dir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex, config.DistKeyShareFile)
-	sealed, err := enclave.UnsealFromFile(path)
+func (s *DKGStore) LoadDistKeyShare(codeCommitmentHex string, round uint32) (*dkg.DistKeyShare, error) {
+	path := filepath.Join(s.stateDir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex, config.DistKeyShareFile)
+	sealed, err := s.sealer.UnsealFromFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unseal DistKeyShare: %w", err)
 	}
 
-	share, err := UnmarshalDistKeyShare(sealed, suite)
+	share, err := UnmarshalDistKeyShare(sealed, s.suite)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal the loaded DistKeyShare data: %w", err)
 	}
