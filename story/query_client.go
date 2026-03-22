@@ -62,10 +62,17 @@ type LightClient interface {
 	LastTrustedHeight() (int64, error)
 }
 
+// RPCClient abstracts the CometBFT RPC client methods used by
+// VerifiedQueryClient, enabling mock injection for unit testing.
+type RPCClient interface {
+	ABCIQueryWithOptions(ctx context.Context, path string, data cmtbytes.HexBytes,
+		opts client.ABCIQueryOptions) (*ctypes.ResultABCIQuery, error)
+}
+
 // VerifiedQueryClient is a query client that verifies all responses using light client and Merkle proofs.
 type VerifiedQueryClient struct {
 	cfg                   *config.Config
-	rpcClient             *rpchttp.HTTP
+	rpcClient             RPCClient
 	lightClient           LightClient
 	db                    cmtdb.DB
 	mutex                 *sync.Mutex
