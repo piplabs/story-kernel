@@ -33,6 +33,10 @@ func (m *mockQueryClientForPID) VerifyStartBlock(_ context.Context, _ int64, _ [
 	return nil
 }
 
+func (m *mockQueryClientForPID) HasDecryptRequest(_ context.Context, _ uint32, _ string, _ string, _ string) (bool, error) {
+	return false, nil
+}
+
 func (m *mockQueryClientForPID) Close() error {
 	return nil
 }
