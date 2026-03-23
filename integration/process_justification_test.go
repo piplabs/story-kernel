@@ -335,13 +335,20 @@ func TestProcessJustification_PersistenceAfterRestart(t *testing.T) {
 	}
 	require.NotEmpty(t, justifications)
 
-	// Victim processes justification (persists to disk)
-	_, err := cluster.Servers[victimIdx].ProcessJustification(ctx, &pb.ProcessJustificationRequest{
-		CodeCommitment: cluster.CodeCommitment,
-		Round:          cluster.Round,
-		Justifications: justifications,
-	})
-	require.NoError(t, err)
+	// All non-dealer nodes process justification (persists to disk).
+	// Node 2 also needs the justification so it can certify dealer 0's deal;
+	// without it, node 2's QUAL would exclude dealer 0, causing global_pub_key mismatch.
+	for i, srv := range cluster.Servers {
+		if i == dealerIdx {
+			continue
+		}
+		_, err := srv.ProcessJustification(ctx, &pb.ProcessJustificationRequest{
+			CodeCommitment: cluster.CodeCommitment,
+			Round:          cluster.Round,
+			Justifications: justifications,
+		})
+		require.NoError(t, err, "ProcessJustification failed for node %d", i)
+	}
 
 	// Phase 6: Simulate victim restart — clear all in-memory caches
 	// DKGStore is retained (disk state), but DKG caches are flushed.
