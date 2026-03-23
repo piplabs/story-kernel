@@ -4,6 +4,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.dedis.ch/kyber/v4"
@@ -361,4 +362,115 @@ func TestPIDCache_Concurrent(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestDKGCache_MaxSize(t *testing.T) {
+	t.Parallel()
+	c := NewDKGCache()
+	// Override maxSize for testing
+	c.maxSize = 3
+
+	// Fill cache to capacity
+	c.Set(1, nil)
+	c.Set(2, nil)
+	c.Set(3, nil)
+
+	_, ok := c.Get(1)
+	require.True(t, ok, "round 1 should still be present")
+
+	// Adding a 4th entry should evict the oldest (round 1)
+	c.Set(4, nil)
+
+	_, ok = c.Get(1)
+	assert.False(t, ok, "round 1 should have been evicted")
+
+	_, ok = c.Get(2)
+	assert.True(t, ok, "round 2 should still be present")
+
+	_, ok = c.Get(4)
+	assert.True(t, ok, "round 4 should be present")
+}
+
+func TestDKGCache_UpdateExistingDoesNotEvict(t *testing.T) {
+	t.Parallel()
+	c := NewDKGCache()
+	c.maxSize = 2
+
+	c.Set(1, nil)
+	c.Set(2, nil)
+
+	// Updating an existing key should not trigger eviction
+	c.Set(1, nil)
+
+	_, ok := c.Get(1)
+	assert.True(t, ok)
+	_, ok = c.Get(2)
+	assert.True(t, ok)
+}
+
+func TestResharingCache_MaxSize(t *testing.T) {
+	t.Parallel()
+	c := NewResharingDKGCache()
+	c.maxSize = 2
+
+	c.Set(1, 2, nil)
+	c.Set(2, 3, nil)
+
+	_, ok := c.Get(1, 2)
+	require.True(t, ok)
+
+	// Evicts (1,2)
+	c.Set(3, 4, nil)
+
+	_, ok = c.Get(1, 2)
+	assert.False(t, ok, "oldest entry should have been evicted")
+
+	_, ok = c.Get(3, 4)
+	assert.True(t, ok)
+}
+
+func TestDistKeyShareCache_MaxSize(t *testing.T) {
+	t.Parallel()
+	c := NewDistKeyShareCache()
+	c.maxSize = 2
+
+	c.Set(10, nil)
+	c.Set(20, nil)
+
+	_, ok := c.Get(10)
+	require.True(t, ok)
+
+	// Evicts round 10
+	c.Set(30, nil)
+
+	_, ok = c.Get(10)
+	assert.False(t, ok, "oldest entry should have been evicted")
+
+	_, ok = c.Get(20)
+	assert.True(t, ok)
+
+	_, ok = c.Get(30)
+	assert.True(t, ok)
+}
+
+func TestDistKeyShareCache_UpdateExistingDoesNotEvict(t *testing.T) {
+	t.Parallel()
+	c := NewDistKeyShareCache()
+	c.maxSize = 2
+
+	c.Set(1, nil)
+	c.Set(2, nil)
+
+	// Updating existing key should not trigger eviction
+	c.Set(2, nil)
+
+	_, ok := c.Get(1)
+	assert.True(t, ok)
+	_, ok = c.Get(2)
+	assert.True(t, ok)
+}
+
+func TestMaxCacheSize_Constant(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, 10, maxCacheSize)
 }

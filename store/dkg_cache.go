@@ -11,6 +11,11 @@ import (
 	dkg "go.dedis.ch/kyber/v4/share/dkg/pedersen"
 )
 
+// maxCacheSize is the maximum number of entries per DKG cache.
+// In practice at most 2 rounds are active concurrently; this limit
+// is a safety net against unbounded memory growth.
+const maxCacheSize = 10
+
 type RoundContext struct {
 	Round uint32
 
@@ -47,13 +52,16 @@ func (c *RoundContextCache) Set(round uint32, rc *RoundContext) {
 }
 
 type DKGCache struct {
-	mu    sync.RWMutex
-	cache map[string]*dkg.DistKeyGenerator
+	mu      sync.RWMutex
+	cache   map[string]*dkg.DistKeyGenerator
+	order   []string // insertion order for eviction
+	maxSize int
 }
 
 func NewDKGCache() *DKGCache {
 	return &DKGCache{
-		cache: make(map[string]*dkg.DistKeyGenerator),
+		cache:   make(map[string]*dkg.DistKeyGenerator),
+		maxSize: maxCacheSize,
 	}
 }
 
@@ -70,14 +78,35 @@ func (c *DKGCache) Set(round uint32, distKeyGen *dkg.DistKeyGenerator) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.cache[strconv.FormatUint(uint64(round), 10)] = distKeyGen
+	key := strconv.FormatUint(uint64(round), 10)
+	if _, exists := c.cache[key]; !exists {
+		c.evictIfFull()
+		c.order = append(c.order, key)
+	}
+	c.cache[key] = distKeyGen
 }
 
-type ResharingCache DKGCache
+// evictIfFull removes the oldest entry when the cache is at capacity.
+// Must be called while holding c.mu write lock.
+func (c *DKGCache) evictIfFull() {
+	if len(c.cache) >= c.maxSize && len(c.order) > 0 {
+		oldest := c.order[0]
+		c.order = c.order[1:]
+		delete(c.cache, oldest)
+	}
+}
+
+type ResharingCache struct {
+	mu      sync.RWMutex
+	cache   map[string]*dkg.DistKeyGenerator
+	order   []string // insertion order for eviction
+	maxSize int
+}
 
 func NewResharingDKGCache() *ResharingCache {
 	return &ResharingCache{
-		cache: make(map[string]*dkg.DistKeyGenerator),
+		cache:   make(map[string]*dkg.DistKeyGenerator),
+		maxSize: maxCacheSize,
 	}
 }
 
@@ -94,17 +123,35 @@ func (c *ResharingCache) Set(fromRound, toRound uint32, distKeyGen *dkg.DistKeyG
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.cache[fmt.Sprintf("%d_%d", fromRound, toRound)] = distKeyGen
+	key := fmt.Sprintf("%d_%d", fromRound, toRound)
+	if _, exists := c.cache[key]; !exists {
+		c.evictIfFull()
+		c.order = append(c.order, key)
+	}
+	c.cache[key] = distKeyGen
+}
+
+// evictIfFull removes the oldest entry when the cache is at capacity.
+// Must be called while holding c.mu write lock.
+func (c *ResharingCache) evictIfFull() {
+	if len(c.cache) >= c.maxSize && len(c.order) > 0 {
+		oldest := c.order[0]
+		c.order = c.order[1:]
+		delete(c.cache, oldest)
+	}
 }
 
 type DistKeyShareCache struct {
-	mu    sync.RWMutex
-	cache map[uint32]*dkg.DistKeyShare
+	mu      sync.RWMutex
+	cache   map[uint32]*dkg.DistKeyShare
+	order   []uint32 // insertion order for eviction
+	maxSize int
 }
 
 func NewDistKeyShareCache() *DistKeyShareCache {
 	return &DistKeyShareCache{
-		cache: make(map[uint32]*dkg.DistKeyShare),
+		cache:   make(map[uint32]*dkg.DistKeyShare),
+		maxSize: maxCacheSize,
 	}
 }
 
@@ -119,7 +166,22 @@ func (c *DistKeyShareCache) Get(round uint32) (*dkg.DistKeyShare, bool) {
 func (c *DistKeyShareCache) Set(round uint32, distKeyShare *dkg.DistKeyShare) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if _, exists := c.cache[round]; !exists {
+		c.evictIfFull()
+		c.order = append(c.order, round)
+	}
 	c.cache[round] = distKeyShare
+}
+
+// evictIfFull removes the oldest entry when the cache is at capacity.
+// Must be called while holding c.mu write lock.
+func (c *DistKeyShareCache) evictIfFull() {
+	if len(c.cache) >= c.maxSize && len(c.order) > 0 {
+		oldest := c.order[0]
+		c.order = c.order[1:]
+		delete(c.cache, oldest)
+	}
 }
 
 // PIDCache stores the 1-based PID for each round, derived during SetupDKGNetwork.
