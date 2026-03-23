@@ -452,3 +452,61 @@ func TestSetPrivateCoeffs_SeparateFromState(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loaded, 2)
 }
+
+// TestSaveStateAtomicWrite verifies that saveState writes atomically via
+// a temp file + rename, so no .tmp file remains after a successful write.
+func TestSaveStateAtomicWrite(t *testing.T) {
+	t.Parallel()
+	store := newTestDKGStore(t)
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+	codeCommitment := "atomictest1234"
+	round := uint32(1)
+
+	ensureStateDir(t, store, codeCommitment, round)
+
+	pub := suite.Point().Mul(suite.Scalar().Pick(suite.RandomStream()), nil)
+	require.NoError(t, store.SaveDKGState(&DKGState{
+		PubKeys:   []kyber.Point{pub},
+		Threshold: 2,
+	}, codeCommitment, round))
+
+	// Verify final state file exists and is readable
+	st, err := store.LoadDKGState(codeCommitment, round)
+	require.NoError(t, err)
+	require.Equal(t, uint32(2), st.Threshold)
+
+	// Verify no leftover .tmp file
+	tmpPath := store.statePath(codeCommitment, round) + ".tmp"
+	_, err = os.Stat(tmpPath)
+	require.True(t, os.IsNotExist(err), "temp file should not remain after successful atomic write")
+}
+
+// TestSaveStateOverwrite verifies that saveState overwrites an existing state
+// file atomically without leaving corrupt data.
+func TestSaveStateOverwrite(t *testing.T) {
+	t.Parallel()
+	store := newTestDKGStore(t)
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+	codeCommitment := "overwriteatomic"
+	round := uint32(1)
+
+	ensureStateDir(t, store, codeCommitment, round)
+
+	pub := suite.Point().Mul(suite.Scalar().Pick(suite.RandomStream()), nil)
+
+	// Write initial state
+	require.NoError(t, store.SaveDKGState(&DKGState{
+		PubKeys:   []kyber.Point{pub},
+		Threshold: 2,
+	}, codeCommitment, round))
+
+	// Overwrite with new threshold
+	require.NoError(t, store.SaveDKGState(&DKGState{
+		PubKeys:   []kyber.Point{pub},
+		Threshold: 5,
+	}, codeCommitment, round))
+
+	st, err := store.LoadDKGState(codeCommitment, round)
+	require.NoError(t, err)
+	require.Equal(t, uint32(5), st.Threshold, "overwritten state should have new threshold")
+}

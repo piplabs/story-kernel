@@ -105,7 +105,14 @@ func (s *DKGStore) saveState(st *DKGState, path string) error {
 		return err
 	}
 
-	return os.WriteFile(path, bz, 0o600)
+	// Write to a temporary file first, then atomically rename.
+	// os.Rename is atomic on POSIX, so a crash mid-write cannot corrupt the state file.
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, bz, 0o600); err != nil {
+		return err
+	}
+
+	return os.Rename(tmpPath, path)
 }
 
 func (s *DKGStore) updateState(codeCommitmentHex string, round uint32, update func(st *DKGState)) error {
