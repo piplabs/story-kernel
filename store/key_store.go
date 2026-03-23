@@ -12,7 +12,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/piplabs/story-kernel/crypto"
-	"github.com/piplabs/story-kernel/enclave"
 
 	"go.dedis.ch/kyber/v4"
 )
@@ -64,7 +63,7 @@ func (s *DKGStore) SealAndStoreEd25519Key(codeCommitmentHex string, round uint32
 		return fmt.Errorf("failed to create sealed key directory: %w", err)
 	}
 
-	if err := enclave.SealToFile(edPrivBz, s.ed25519Path(codeCommitmentHex, round)); err != nil {
+	if err := s.sealer.SealToFile(edPrivBz, s.ed25519Path(codeCommitmentHex, round)); err != nil {
 		return fmt.Errorf("failed to seal ed25519 key: %w", err)
 	}
 
@@ -72,7 +71,7 @@ func (s *DKGStore) SealAndStoreEd25519Key(codeCommitmentHex string, round uint32
 }
 
 func (s *DKGStore) LoadSealedEd25519Key(codeCommitmentHex string, round uint32) (kyber.Scalar, error) {
-	edPrivBz, err := enclave.UnsealFromFile(s.ed25519Path(codeCommitmentHex, round))
+	edPrivBz, err := s.sealer.UnsealFromFile(s.ed25519Path(codeCommitmentHex, round))
 	if err != nil {
 		return nil, fmt.Errorf("failed to unseal the ed25519 private key: %w", err)
 	}
@@ -120,15 +119,15 @@ func (s *DKGStore) SealAndStoreSecp256k1Key(codeCommitmentHex string, round uint
 		return fmt.Errorf("failed to create sealed key directory: %w", err)
 	}
 
-	if err := enclave.SealToFile(ecrypto.FromECDSA(secpPriv), s.secp256k1Path(codeCommitmentHex, round)); err != nil {
-		return fmt.Errorf("failed to seal ed25519 key: %w", err)
+	if err := s.sealer.SealToFile(ecrypto.FromECDSA(secpPriv), s.secp256k1Path(codeCommitmentHex, round)); err != nil {
+		return fmt.Errorf("failed to seal secp256k1 key: %w", err)
 	}
 
 	return nil
 }
 
 func (s *DKGStore) LoadSealedSecp256k1Key(codeCommitmentHex string, round uint32) (*ecdsa.PrivateKey, error) {
-	secpPrivBz, err := enclave.UnsealFromFile(s.secp256k1Path(codeCommitmentHex, round))
+	secpPrivBz, err := s.sealer.UnsealFromFile(s.secp256k1Path(codeCommitmentHex, round))
 	if err != nil {
 		return nil, fmt.Errorf("failed to unseal the secp256k1 private key: %w", err)
 	}

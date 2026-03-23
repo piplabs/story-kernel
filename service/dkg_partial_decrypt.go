@@ -20,7 +20,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/piplabs/story-kernel/enclave"
-	"github.com/piplabs/story-kernel/store"
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
 
 	"go.dedis.ch/kyber/v4"
@@ -88,7 +87,7 @@ func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecry
 	if share, ok := s.DistKeyShareCache.Get(req.GetRound()); ok {
 		distKeyShare = share
 	} else {
-		share, err := store.LoadDistKeyShare(s.Cfg.GetDKGStateDir(), codeCommitmentHex, req.GetRound())
+		share, err := s.DKGStore.LoadDistKeyShare(codeCommitmentHex, req.GetRound())
 		if err != nil {
 			log.Errorf("failed to load dist key share: %v", err)
 

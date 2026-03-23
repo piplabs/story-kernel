@@ -472,6 +472,321 @@ func TestConvertToJustification_IndexConventionEndToEnd(t *testing.T) {
 		"PubPoly.Check with wrong index %d should fail", wrongShare.I)
 }
 
+// =============================================================================
+// ConvertToDeal tests
+// =============================================================================
+
+// TestConvertToDeal_ValidDeal verifies that a fully populated pb.Deal is converted
+// correctly to a dkg.Deal with all fields preserved.
+func TestConvertToDeal_ValidDeal(t *testing.T) {
+	t.Parallel()
+
+	pbDeal := &pb.Deal{
+		Index: 3,
+		Deal: &pb.EncryptedDeal{
+			DhKey:     []byte("dh_key_data"),
+			Signature: []byte("deal_sig"),
+			Nonce:     []byte("nonce_data"),
+			Cipher:    []byte("cipher_data"),
+		},
+		Signature: []byte("outer_sig"),
+	}
+
+	dkgDeal := types.ConvertToDeal(pbDeal)
+	require.NotNil(t, dkgDeal)
+	require.Equal(t, uint32(3), dkgDeal.Index)
+	require.Equal(t, []byte("dh_key_data"), dkgDeal.Deal.DHKey)
+	require.Equal(t, []byte("deal_sig"), dkgDeal.Deal.Signature)
+	require.Equal(t, []byte("nonce_data"), dkgDeal.Deal.Nonce)
+	require.Equal(t, []byte("cipher_data"), dkgDeal.Deal.Cipher)
+	require.Equal(t, []byte("outer_sig"), dkgDeal.Signature)
+}
+
+// TestConvertToDeal_NilEncryptedDeal verifies that a Deal with nil inner deal
+// produces a dkg.Deal with nil fields (no panic).
+func TestConvertToDeal_NilEncryptedDeal(t *testing.T) {
+	t.Parallel()
+
+	pbDeal := &pb.Deal{
+		Index:     0,
+		Deal:      nil,
+		Signature: []byte("sig"),
+	}
+
+	dkgDeal := types.ConvertToDeal(pbDeal)
+	require.NotNil(t, dkgDeal)
+	require.Equal(t, uint32(0), dkgDeal.Index)
+	// When Deal is nil, GetDeal() returns nil, so inner fields should be nil
+	require.Nil(t, dkgDeal.Deal.DHKey)
+	require.Nil(t, dkgDeal.Deal.Signature)
+	require.Nil(t, dkgDeal.Deal.Nonce)
+	require.Nil(t, dkgDeal.Deal.Cipher)
+}
+
+// TestConvertToDeal_ZeroIndex verifies that zero index is preserved.
+func TestConvertToDeal_ZeroIndex(t *testing.T) {
+	t.Parallel()
+
+	pbDeal := &pb.Deal{
+		Index: 0,
+		Deal: &pb.EncryptedDeal{
+			DhKey: []byte("key"),
+		},
+		Signature: []byte("sig"),
+	}
+
+	dkgDeal := types.ConvertToDeal(pbDeal)
+	require.Equal(t, uint32(0), dkgDeal.Index)
+}
+
+// =============================================================================
+// ConvertToRespProto tests
+// =============================================================================
+
+// TestConvertToRespProto_ValidResponse verifies that a fully populated dkg.Response
+// is converted correctly to a pb.Response with all fields preserved.
+func TestConvertToRespProto_ValidResponse(t *testing.T) {
+	t.Parallel()
+
+	dkgResp := &dkg.Response{
+		Index: 5,
+		Response: &vss.Response{
+			SessionID: []byte("session-123"),
+			Index:     2,
+			Status:    true,
+			Signature: []byte("resp-sig"),
+		},
+	}
+
+	pbResp := types.ConvertToRespProto(dkgResp)
+	require.NotNil(t, pbResp)
+	require.Equal(t, uint32(5), pbResp.GetIndex())
+	require.Equal(t, []byte("session-123"), pbResp.GetVssResponse().GetSessionId())
+	require.Equal(t, uint32(2), pbResp.GetVssResponse().GetIndex())
+	require.True(t, pbResp.GetVssResponse().GetStatus())
+	require.Equal(t, []byte("resp-sig"), pbResp.GetVssResponse().GetSignature())
+}
+
+// TestConvertToRespProto_ZeroIndex verifies that zero indices are preserved.
+func TestConvertToRespProto_ZeroIndex(t *testing.T) {
+	t.Parallel()
+
+	dkgResp := &dkg.Response{
+		Index: 0,
+		Response: &vss.Response{
+			SessionID: []byte("s"),
+			Index:     0,
+			Status:    false,
+			Signature: []byte("sig"),
+		},
+	}
+
+	pbResp := types.ConvertToRespProto(dkgResp)
+	require.Equal(t, uint32(0), pbResp.GetIndex())
+	require.Equal(t, uint32(0), pbResp.GetVssResponse().GetIndex())
+	require.False(t, pbResp.GetVssResponse().GetStatus())
+}
+
+// TestConvertToRespProto_EmptySessionID verifies empty session ID is preserved.
+func TestConvertToRespProto_EmptySessionID(t *testing.T) {
+	t.Parallel()
+
+	dkgResp := &dkg.Response{
+		Index: 1,
+		Response: &vss.Response{
+			SessionID: []byte{},
+			Index:     0,
+			Status:    true,
+			Signature: nil,
+		},
+	}
+
+	pbResp := types.ConvertToRespProto(dkgResp)
+	require.Empty(t, pbResp.GetVssResponse().GetSessionId())
+}
+
+// =============================================================================
+// ConvertToVSSResp tests
+// =============================================================================
+
+// TestConvertToVSSResp_ValidResponse verifies that a fully populated pb.Response
+// is converted correctly to a dkg.Response with all fields preserved.
+func TestConvertToVSSResp_ValidResponse(t *testing.T) {
+	t.Parallel()
+
+	pbResp := &pb.Response{
+		Index: 7,
+		VssResponse: &pb.VSSResponse{
+			SessionId: []byte("vss-session"),
+			Index:     3,
+			Status:    true,
+			Signature: []byte("vss-sig"),
+		},
+	}
+
+	dkgResp := types.ConvertToVSSResp(pbResp)
+	require.NotNil(t, dkgResp)
+	require.Equal(t, uint32(7), dkgResp.Index)
+	require.Equal(t, []byte("vss-session"), dkgResp.Response.SessionID)
+	require.Equal(t, uint32(3), dkgResp.Response.Index)
+	require.True(t, dkgResp.Response.Status)
+	require.Equal(t, []byte("vss-sig"), dkgResp.Response.Signature)
+}
+
+// TestConvertToVSSResp_NilVssResponse verifies that a Response with nil VSSResponse
+// produces a dkg.Response with nil/zero inner fields (no panic).
+func TestConvertToVSSResp_NilVssResponse(t *testing.T) {
+	t.Parallel()
+
+	pbResp := &pb.Response{
+		Index:       0,
+		VssResponse: nil,
+	}
+
+	dkgResp := types.ConvertToVSSResp(pbResp)
+	require.NotNil(t, dkgResp)
+	require.Equal(t, uint32(0), dkgResp.Index)
+	// When VssResponse is nil, GetVssResponse() returns nil, so inner fields are zero/nil
+	require.Nil(t, dkgResp.Response.SessionID)
+	require.Equal(t, uint32(0), dkgResp.Response.Index)
+	require.False(t, dkgResp.Response.Status)
+	require.Nil(t, dkgResp.Response.Signature)
+}
+
+// TestConvertToVSSResp_ZeroFields verifies that zero values are preserved.
+func TestConvertToVSSResp_ZeroFields(t *testing.T) {
+	t.Parallel()
+
+	pbResp := &pb.Response{
+		Index: 0,
+		VssResponse: &pb.VSSResponse{
+			SessionId: nil,
+			Index:     0,
+			Status:    false,
+			Signature: nil,
+		},
+	}
+
+	dkgResp := types.ConvertToVSSResp(pbResp)
+	require.Equal(t, uint32(0), dkgResp.Index)
+	require.Equal(t, uint32(0), dkgResp.Response.Index)
+	require.False(t, dkgResp.Response.Status)
+}
+
+// =============================================================================
+// ConvertToRespProto → ConvertToVSSResp round-trip test
+// =============================================================================
+
+// TestConvertRespProto_RoundTrip verifies that converting a dkg.Response to proto
+// and back produces an equivalent result.
+func TestConvertRespProto_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	original := &dkg.Response{
+		Index: 4,
+		Response: &vss.Response{
+			SessionID: []byte("round-trip-session"),
+			Index:     2,
+			Status:    true,
+			Signature: []byte("round-trip-sig"),
+		},
+	}
+
+	// Convert kyber → proto
+	pbResp := types.ConvertToRespProto(original)
+
+	// Convert proto → kyber
+	recovered := types.ConvertToVSSResp(pbResp)
+
+	require.Equal(t, original.Index, recovered.Index)
+	require.Equal(t, original.Response.SessionID, recovered.Response.SessionID)
+	require.Equal(t, original.Response.Index, recovered.Response.Index)
+	require.Equal(t, original.Response.Status, recovered.Response.Status)
+	require.Equal(t, original.Response.Signature, recovered.Response.Signature)
+}
+
+// TestConvertToDeal_RoundTrip_FieldsPreserved verifies that all fields
+// of a Deal survive the proto→dkg conversion.
+func TestConvertToDeal_RoundTrip_FieldsPreserved(t *testing.T) {
+	t.Parallel()
+
+	pbDeal := &pb.Deal{
+		Index: 10,
+		Deal: &pb.EncryptedDeal{
+			DhKey:     []byte{0x01, 0x02, 0x03},
+			Signature: []byte{0x04, 0x05},
+			Nonce:     []byte{0x06, 0x07, 0x08, 0x09},
+			Cipher:    []byte{0x0A, 0x0B, 0x0C},
+		},
+		Signature: []byte{0x0D, 0x0E},
+	}
+
+	dkgDeal := types.ConvertToDeal(pbDeal)
+
+	// Verify all byte slices are independent copies or identical content
+	require.Equal(t, pbDeal.GetIndex(), dkgDeal.Index)
+	require.Equal(t, pbDeal.GetDeal().GetDhKey(), dkgDeal.Deal.DHKey)
+	require.Equal(t, pbDeal.GetDeal().GetSignature(), dkgDeal.Deal.Signature)
+	require.Equal(t, pbDeal.GetDeal().GetNonce(), dkgDeal.Deal.Nonce)
+	require.Equal(t, pbDeal.GetDeal().GetCipher(), dkgDeal.Deal.Cipher)
+	require.Equal(t, pbDeal.GetSignature(), dkgDeal.Signature)
+}
+
+// TestConvertToJustification_NilSecShareScalarValue verifies that a SecShare
+// with nil V (scalar value) returns an error.
+func TestConvertToJustification_NilSecShareScalarValue(t *testing.T) {
+	t.Parallel()
+
+	j := &pb.Justification{
+		Index: 1,
+		VssJustification: &pb.VSSJustification{
+			SessionId: []byte("session"),
+			Index:     1,
+			PlainDeal: &pb.PlainDeal{
+				SessionId: []byte("pd-session"),
+				SecShare: &pb.SecShare{
+					I: 1,
+					V: nil, // nil scalar
+				},
+				Threshold: 2,
+			},
+		},
+	}
+
+	result, err := types.ConvertToJustification(j)
+	require.Error(t, err, "nil scalar value should return an error")
+	require.Contains(t, err.Error(), "nil SecShare")
+	require.Nil(t, result)
+}
+
+// TestConvertToJustification_EmptyScalarData verifies that empty scalar data
+// (not nil SecShare, but empty Data in the Scalar) still triggers an error
+// from the kyber unmarshal.
+func TestConvertToJustification_EmptyScalarData(t *testing.T) {
+	t.Parallel()
+
+	j := &pb.Justification{
+		Index: 1,
+		VssJustification: &pb.VSSJustification{
+			SessionId: []byte("session"),
+			Index:     1,
+			PlainDeal: &pb.PlainDeal{
+				SessionId: []byte("pd-session"),
+				SecShare: &pb.SecShare{
+					I: 1,
+					V: &pb.Scalar{Data: []byte{}},
+				},
+				Threshold: 2,
+			},
+		},
+	}
+
+	result, err := types.ConvertToJustification(j)
+	require.Error(t, err, "empty scalar data should return an error")
+	require.Contains(t, err.Error(), "failed to unmarshal secret share scalar")
+	require.Nil(t, result)
+}
+
 // TestConvertToJustification_EmptyCommitments verifies that zero commitments
 // are handled without error (edge case: threshold=1, only the constant term).
 func TestConvertToJustification_EmptyCommitments(t *testing.T) {
