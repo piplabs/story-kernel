@@ -6,12 +6,22 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/common"
 	ecrypto "github.com/ethereum/go-ethereum/crypto"
 )
 
 // calculateReportData computes the TEE attestation report data for DKG registration.
-func calculateReportData(validatorAddr string, round uint32, edPubBz, secpPubBz []byte, startBlockHeight int64, startBlockHash []byte) ([]byte, error) {
+// It produces keccak256(abi.encode(EnclaveInstanceData)) matching the Solidity struct:
+//
+//	struct EnclaveInstanceData {
+//	    uint32 round;
+//	    address validatorAddr;
+//	    bytes32 enclaveType;
+//	    bytes enclaveCommKey;
+//	    bytes dkgPubKey;
+//	}
+func calculateReportData(round uint32, validatorAddr string, enclaveType [32]byte, enclaveCommKey, dkgPubKey []byte) ([]byte, error) {
 	addr := strings.TrimPrefix(validatorAddr, "0x")
 
 	addrBytes, err := hex.DecodeString(addr)
@@ -19,12 +29,23 @@ func calculateReportData(validatorAddr string, round uint32, edPubBz, secpPubBz 
 		return nil, fmt.Errorf("invalid address (%s): %w", addr, err)
 	}
 
-	encoded := append([]byte{}, addrBytes...)
-	encoded = append(encoded, uint32ToBytes(round)...)
-	encoded = append(encoded, int64ToBytes(startBlockHeight)...)
-	encoded = append(encoded, startBlockHash...)
-	encoded = append(encoded, edPubBz...)
-	encoded = append(encoded, secpPubBz...)
+	uint32Ty, _ := abi.NewType("uint32", "", nil)
+	addressTy, _ := abi.NewType("address", "", nil)
+	bytes32Ty, _ := abi.NewType("bytes32", "", nil)
+	bytesTy, _ := abi.NewType("bytes", "", nil)
+
+	args := abi.Arguments{
+		{Type: uint32Ty},
+		{Type: addressTy},
+		{Type: bytes32Ty},
+		{Type: bytesTy},
+		{Type: bytesTy},
+	}
+
+	encoded, err := args.Pack(round, common.HexToAddress(validatorAddr), enclaveType, enclaveCommKey, dkgPubKey)
+	if err != nil {
+		return nil, fmt.Errorf("abi.encode failed: %w", err)
+	}
 
 	return ecrypto.Keccak256(encoded), nil
 }
@@ -48,7 +69,7 @@ func toEthSignedMessageHash(msgHash []byte) []byte {
 	prefix := "\x19Ethereum Signed Message:\n32"
 	data := append([]byte(prefix), msgHash...)
 
-	return crypto.Keccak256(data)
+	return ecrypto.Keccak256(data)
 }
 
 // uint32ToBytes converts a uint32 to a 4-byte big-endian representation.

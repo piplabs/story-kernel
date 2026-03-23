@@ -87,25 +87,27 @@ func (s *DKGServer) GenerateAndSealKey(_ context.Context, req *pb.GenerateAndSea
 			network.StartBlockHeight, err)
 	}
 
-	// Generate a quote with start block information included in report data.
-	// report data := hash(validatorAddress, round, edPub, secpPub, startBlockHeight, startBlockHash)
-	// This anchors the attestation to a specific blockchain state that will be verified on-chain.
+	// Generate a quote with report data = keccak256(abi.encode(EnclaveInstanceData)).
+	// This matches the Solidity struct: (round, validatorAddr, enclaveType, enclaveCommKey, dkgPubKey).
+	var enclaveType [32]byte
+	if len(req.GetEnclaveType()) == 32 {
+		copy(enclaveType[:], req.GetEnclaveType())
+	}
+
 	reportData, err := calculateReportData(
-		req.Address,
 		req.Round,
-		edPubBz,
-		ecrypto.FromECDSAPub(secpPub)[1:],
-		network.StartBlockHeight,
-		network.StartBlockHash,
+		req.Address,
+		enclaveType,
+		ecrypto.FromECDSAPub(secpPub)[1:], // enclaveCommKey
+		edPubBz,                           // dkgPubKey
 	)
 	if err != nil {
 		log.WithFields(log.Fields{
-			"address":            req.Address,
-			"round":              req.Round,
-			"ed25519_pub_key":    hex.EncodeToString(edPubBz),
-			"secp256k1_pub_key":  hex.EncodeToString(ecrypto.FromECDSAPub(secpPub)),
-			"start_block_height": network.StartBlockHeight,
-			"start_block_hash":   hex.EncodeToString(network.StartBlockHash),
+			"address":           req.Address,
+			"round":             req.Round,
+			"enclave_type":      hex.EncodeToString(enclaveType[:]),
+			"ed25519_pub_key":   hex.EncodeToString(edPubBz),
+			"secp256k1_pub_key": hex.EncodeToString(ecrypto.FromECDSAPub(secpPub)),
 		}).Errorf("failed to calculate report data: %v", err)
 
 		return nil, status.Errorf(codes.Internal, "failed to calculate report data")
@@ -143,6 +145,10 @@ func validateGenerateAndSealKeyRequest(req *pb.GenerateAndSealKeyRequest) error 
 
 	if len(req.GetCodeCommitment()) == 0 {
 		return errors.New("code commitment is required but missing")
+	}
+
+	if len(req.GetEnclaveType()) != 32 {
+		return errors.New("enclave type must be exactly 32 bytes")
 	}
 
 	return nil
