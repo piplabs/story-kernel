@@ -38,7 +38,6 @@ const (
 )
 
 // PartialDecryptTDH2 performs TDH2 partial decryption using the sealed Kyber private share.
-// and round match to prevent any leakage of data by off-chain collusion.
 func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecryptTDH2Request) (*pb.PartialDecryptTDH2Response, error) {
 	if err := s.validatePartialDecryptTDH2Request(ctx, req); err != nil {
 		log.WithFields(log.Fields{
