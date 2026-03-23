@@ -14,21 +14,7 @@ import (
 	vss "go.dedis.ch/kyber/v4/share/vss/pedersen"
 )
 
-// plaintextSealer is a test-only sealer that writes/reads data as plaintext
-// (no SGX sealing). This allows testing the encode/decode logic without an
-// SGX enclave.
-type plaintextSealer struct{}
-
-func (plaintextSealer) SealToFile(data []byte, path string) error {
-	return os.WriteFile(path, data, 0o600)
-}
-
-func (plaintextSealer) UnsealFromFile(path string) ([]byte, error) {
-	return os.ReadFile(path)
-}
-
-// newTestDKGStore creates a DKGStore backed by a temporary directory with
-// a plaintext sealer (no SGX required).
+// newTestDKGStore creates a DKGStore backed by a temporary directory.
 func newTestDKGStore(t *testing.T) *DKGStore {
 	t.Helper()
 	suite := edwards25519.NewBlakeSHA256Ed25519()
@@ -38,7 +24,7 @@ func newTestDKGStore(t *testing.T) *DKGStore {
 	require.NoError(t, os.MkdirAll(keyDir, 0o755))
 	require.NoError(t, os.MkdirAll(stateDir, 0o755))
 
-	return NewDKGStoreWithSealer(keyDir, stateDir, suite, plaintextSealer{})
+	return NewDKGStore(keyDir, stateDir, suite)
 }
 
 // ensureStateDir creates the lock/state directory so flock can acquire locks.
@@ -320,135 +306,4 @@ func TestBackwardCompatibility(t *testing.T) {
 	st, err := store.LoadDKGState(codeCommitment, round)
 	require.NoError(t, err)
 	require.Empty(t, st.Justifications)
-}
-
-// TestSetPrivateCoeffs_RoundTrip verifies that polynomial coefficients survive
-// the full seal → persist → load → unseal cycle.
-func TestSetPrivateCoeffs_RoundTrip(t *testing.T) {
-	t.Parallel()
-	store := newTestDKGStore(t)
-	cc := "coefftest1234"
-	round := uint32(3)
-
-	coeffs := [][]byte{
-		{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08},
-		{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18},
-	}
-
-	require.NoError(t, store.SetPrivateCoeffs(cc, round, coeffs))
-
-	loaded, err := store.LoadPrivateCoeffs(cc, round)
-	require.NoError(t, err)
-	require.Len(t, loaded, 2)
-	require.Equal(t, coeffs[0], loaded[0])
-	require.Equal(t, coeffs[1], loaded[1])
-}
-
-// TestLoadPrivateCoeffs_FileNotExists returns nil when no coefficients have
-// been persisted yet (e.g., GenerateDeals not called).
-func TestLoadPrivateCoeffs_FileNotExists(t *testing.T) {
-	t.Parallel()
-	store := newTestDKGStore(t)
-
-	loaded, err := store.LoadPrivateCoeffs("nonexistent", 99)
-	require.NoError(t, err)
-	require.Nil(t, loaded)
-}
-
-// TestSetPrivateCoeffs_Overwrite verifies that writing coefficients twice
-// overwrites the previous value correctly.
-func TestSetPrivateCoeffs_Overwrite(t *testing.T) {
-	t.Parallel()
-	store := newTestDKGStore(t)
-	cc := "overwritetest"
-	round := uint32(1)
-
-	first := [][]byte{{0xaa, 0xbb}}
-	require.NoError(t, store.SetPrivateCoeffs(cc, round, first))
-
-	second := [][]byte{{0xcc, 0xdd}, {0xee, 0xff}}
-	require.NoError(t, store.SetPrivateCoeffs(cc, round, second))
-
-	loaded, err := store.LoadPrivateCoeffs(cc, round)
-	require.NoError(t, err)
-	require.Len(t, loaded, 2)
-	require.Equal(t, second[0], loaded[0])
-	require.Equal(t, second[1], loaded[1])
-}
-
-// TestSetPrivateCoeffs_RealScalars verifies round-trip with actual Edwards25519
-// scalar values (same format used in production).
-func TestSetPrivateCoeffs_RealScalars(t *testing.T) {
-	t.Parallel()
-	store := newTestDKGStore(t)
-	suite := edwards25519.NewBlakeSHA256Ed25519()
-	cc := "realscalar"
-	round := uint32(5)
-
-	// Generate real scalars like kyber does internally
-	s1 := suite.Scalar().Pick(suite.RandomStream())
-	s2 := suite.Scalar().Pick(suite.RandomStream())
-	s3 := suite.Scalar().Pick(suite.RandomStream())
-
-	b1, err := s1.MarshalBinary()
-	require.NoError(t, err)
-	b2, err := s2.MarshalBinary()
-	require.NoError(t, err)
-	b3, err := s3.MarshalBinary()
-	require.NoError(t, err)
-
-	coeffs := [][]byte{b1, b2, b3}
-	require.NoError(t, store.SetPrivateCoeffs(cc, round, coeffs))
-
-	loaded, err := store.LoadPrivateCoeffs(cc, round)
-	require.NoError(t, err)
-	require.Len(t, loaded, 3)
-
-	// Verify scalars can be deserialized back
-	for i, bz := range loaded {
-		restored := suite.Scalar()
-		require.NoError(t, restored.UnmarshalBinary(bz))
-		require.Equal(t, coeffs[i], bz, "coefficient %d mismatch", i)
-	}
-}
-
-// TestSetPrivateCoeffs_SeparateFromState verifies that private coefficients
-// are stored in a separate sealed file, NOT in the JSON state file.
-func TestSetPrivateCoeffs_SeparateFromState(t *testing.T) {
-	t.Parallel()
-	store := newTestDKGStore(t)
-	suite := edwards25519.NewBlakeSHA256Ed25519()
-	cc := "separatetest"
-	round := uint32(1)
-
-	// Create DKG state (JSON)
-	pub := suite.Point().Mul(suite.Scalar().Pick(suite.RandomStream()), nil)
-	ensureStateDir(t, store, cc, round)
-	require.NoError(t, store.SaveDKGState(&DKGState{
-		PubKeys:   []kyber.Point{pub},
-		Threshold: 2,
-	}, cc, round))
-
-	// Set private coefficients (sealed file)
-	coeffs := [][]byte{{0x01}, {0x02}}
-	require.NoError(t, store.SetPrivateCoeffs(cc, round, coeffs))
-
-	// Verify state.json does NOT contain private_coeffs
-	stateBytes, err := os.ReadFile(store.statePath(cc, round))
-	require.NoError(t, err)
-	require.NotContains(t, string(stateBytes), "private_coeffs",
-		"private coefficients must NOT appear in plaintext state.json")
-
-	// Verify sealed file exists separately
-	_, err = os.Stat(store.privateCoeffsPath(cc, round))
-	require.NoError(t, err, "sealed coefficients file must exist")
-
-	// Verify both can be loaded independently
-	st, err := store.LoadDKGState(cc, round)
-	require.NoError(t, err)
-	require.Equal(t, uint32(2), st.Threshold)
-
-	loaded, err := store.LoadPrivateCoeffs(cc, round)
-	require.NoError(t, err)
-	require.Len(t, loaded, 2)
 }

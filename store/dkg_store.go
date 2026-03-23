@@ -1,6 +1,8 @@
 package store
 
 import (
+	"bytes"
+	"encoding/gob"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,32 +19,11 @@ const (
 	KeyEd25519File   = "ed25519_priv.sealed"
 	KeySecp256k1File = "secp256k1_priv.sealed"
 
-	DKGStateFile      = "state.json"
-	PrivateCoeffsFile = "private_coeffs.sealed"
+	DKGStateFile = "state.json"
 )
 
-// Sealer abstracts file-level seal/unseal operations so that production code
-// uses SGX sealing (enclave.SealToFile/UnsealFromFile) while tests can inject
-// a plaintext implementation.
-type Sealer interface {
-	SealToFile(data []byte, path string) error
-	UnsealFromFile(path string) ([]byte, error)
-}
-
-// enclaveSealer is the production sealer that uses SGX enclave sealing.
-type enclaveSealer struct{}
-
-func (enclaveSealer) SealToFile(data []byte, path string) error {
-	return enclave.SealToFile(data, path)
-}
-
-func (enclaveSealer) UnsealFromFile(path string) ([]byte, error) {
-	return enclave.UnsealFromFile(path)
-}
-
 type DKGStore struct {
-	suite  *edwards25519.SuiteEd25519
-	sealer Sealer
+	suite *edwards25519.SuiteEd25519
 
 	keyDir   string
 	stateDir string
@@ -51,20 +32,26 @@ type DKGStore struct {
 func NewDKGStore(keyDir, stateDir string, suite *edwards25519.SuiteEd25519) *DKGStore {
 	return &DKGStore{
 		suite:    suite,
-		sealer:   enclaveSealer{},
 		keyDir:   keyDir,
 		stateDir: stateDir,
 	}
 }
 
-// NewDKGStoreWithSealer creates a DKGStore with a custom sealer (for testing).
-func NewDKGStoreWithSealer(keyDir, stateDir string, suite *edwards25519.SuiteEd25519, sealer Sealer) *DKGStore {
-	return &DKGStore{
-		suite:    suite,
-		sealer:   sealer,
-		keyDir:   keyDir,
-		stateDir: stateDir,
+func SealAndStoreDKGState(dkg *dkg.DistKeyGenerator, dir, codeCommitmentHex string, round uint32) error {
+	path := filepath.Join(dir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex, config.DKGFile)
+
+	buf := new(bytes.Buffer)
+	enc := gob.NewEncoder(buf)
+
+	if err := enc.Encode(dkg); err != nil {
+		return fmt.Errorf("failed to encode DKG state: %w", err)
 	}
+
+	if err := enclave.SealToFile(buf.Bytes(), path); err != nil {
+		return fmt.Errorf("failed to seal DKG state: %w", err)
+	}
+
+	return nil
 }
 
 // SealAndStoreDistKeyShare serializes and seals the DistKeyShare to a file.
