@@ -43,6 +43,7 @@ type QueryClient interface {
 	GetDKGNetwork(ctx context.Context, codeCommitmentHex string, round uint32) (*pb.DKGNetwork, error)
 	GetAllParticipantDKGRegistrations(ctx context.Context, codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error)
 	GetLatestActiveDKGNetwork(ctx context.Context) (*pb.DKGNetwork, error)
+	HasDecryptRequest(ctx context.Context, round uint32, requesterPubKeyHex string, labelHex string, ciphertextHex string) (bool, error)
 	VerifyStartBlock(ctx context.Context, startBlockHeight int64, startBlockHash []byte) error
 	Close() error
 }
@@ -322,6 +323,35 @@ func (q *VerifiedQueryClient) GetLatestActiveDKGNetwork(ctx context.Context) (*p
 	}
 
 	return q.GetDKGNetwork(ctx, "", round)
+}
+
+// HasDecryptRequest checks if a decrypt request registry entry exists for the given inputs.
+func (q *VerifiedQueryClient) HasDecryptRequest(ctx context.Context, round uint32, requesterPubKeyHex string, labelHex string, ciphertextHex string) (bool, error) {
+	requesterPubKeyHex = strings.TrimPrefix(requesterPubKeyHex, "0x")
+	requesterPubKey, err := hex.DecodeString(requesterPubKeyHex)
+	if err != nil {
+		return false, fmt.Errorf("invalid requester pub key hex: %w", err)
+	}
+
+	labelHex = strings.TrimPrefix(labelHex, "0x")
+	label, err := hex.DecodeString(labelHex)
+	if err != nil {
+		return false, fmt.Errorf("invalid label hex: %w", err)
+	}
+
+	ciphertextHex = strings.TrimPrefix(ciphertextHex, "0x")
+	ciphertext, err := hex.DecodeString(ciphertextHex)
+	if err != nil {
+		return false, fmt.Errorf("invalid ciphertext hex: %w", err)
+	}
+
+	key := GetDecryptRequestRegistryKey(requesterPubKey, label, round, ciphertext)
+	bz, err := q.getStoreData(ctx, StoreKey, key)
+	if err != nil {
+		return false, fmt.Errorf("failed to query decrypt request registry: %w", err)
+	}
+
+	return len(bz) > 0, nil
 }
 
 // getStoreData retrieves and verifies data from the store using Merkle proofs.

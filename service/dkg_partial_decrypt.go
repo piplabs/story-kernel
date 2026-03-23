@@ -38,10 +38,9 @@ const (
 )
 
 // PartialDecryptTDH2 performs TDH2 partial decryption using the sealed Kyber private share.
-// TODO: TEE should verify if the request transaction was indeed submitted to the canonical chain and the unique ID
 // and round match to prevent any leakage of data by off-chain collusion.
 func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecryptTDH2Request) (*pb.PartialDecryptTDH2Response, error) {
-	if err := validatePartialDecryptTDH2Request(req); err != nil {
+	if err := s.validatePartialDecryptTDH2Request(ctx, req); err != nil {
 		log.WithFields(log.Fields{
 			"round":           req.GetRound(),
 			"code_commitment": hex.EncodeToString(req.GetCodeCommitment()),
@@ -161,7 +160,7 @@ func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecry
 	}, nil
 }
 
-func validatePartialDecryptTDH2Request(req *pb.PartialDecryptTDH2Request) error {
+func (s *DKGServer) validatePartialDecryptTDH2Request(ctx context.Context, req *pb.PartialDecryptTDH2Request) error {
 	if req.GetRound() == 0 {
 		return errors.New("round should be greater than 0")
 	}
@@ -184,6 +183,17 @@ func validatePartialDecryptTDH2Request(req *pb.PartialDecryptTDH2Request) error 
 
 	if len(req.GetRequesterPubKey()) == 0 {
 		return errors.New("requester public key is required but missing")
+	}
+
+	requesterPubKeyHex := hex.EncodeToString(req.GetRequesterPubKey())
+	labelHex := hex.EncodeToString(req.GetLabel())
+	ciphertextHex := hex.EncodeToString(req.GetCiphertext())
+	requestExists, err := s.QueryClient.HasDecryptRequest(ctx, req.GetRound(), requesterPubKeyHex, labelHex, ciphertextHex)
+	if err != nil {
+		return fmt.Errorf("verify decrypt request existence: %w", err)
+	}
+	if !requestExists {
+		return errors.New("decrypt request does not exist")
 	}
 
 	return nil
