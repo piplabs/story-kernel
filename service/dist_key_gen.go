@@ -105,6 +105,12 @@ func (s *DKGServer) buildInitDKG(
 }
 
 // rebuildInitDKG reconstructs the initial DKG from persisted state.
+//
+// When persisted PrivateCoeffs are available, the dealer's polynomial is
+// restored to the original one that was used to generate deals. This is
+// critical because NewDistKeyGenerator generates a new random polynomial,
+// which would cause session ID and commitment mismatches with peers who
+// already received deals generated from the original polynomial.
 func (s *DKGServer) rebuildInitDKG(
 	codeCommitmentHex string,
 	round uint32,
@@ -127,6 +133,21 @@ func (s *DKGServer) rebuildInitDKG(
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	// Restore the original dealer polynomial from sealed storage before replaying
+	// messages. This must happen before replayMessages because response verification
+	// in dealer.ProcessResponse checks session ID, which depends on the polynomial's
+	// public commitments.
+	coeffs, loadErr := s.DKGStore.LoadPrivateCoeffs(codeCommitmentHex, round)
+	if loadErr != nil {
+		log.Errorf("failed to load sealed private coeffs (round=%d): %v — DKG may produce mismatched results", round, loadErr)
+	} else if len(coeffs) > 0 {
+		if err := restoreDealerPoly(s.Suite, dkgInst, coeffs); err != nil {
+			log.Errorf("failed to restore dealer polynomial (round=%d): %v — DKG may produce mismatched results", round, err)
+		} else {
+			log.WithField("round", round).Info("restored dealer polynomial from sealed coefficients")
+		}
 	}
 
 	replayMessages(dkgInst, st)
