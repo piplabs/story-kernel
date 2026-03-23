@@ -18,7 +18,7 @@ PROTO_DIR=proto
 PROTOBUF_DIR=types
 PROTO_OUT_DIR=./
 
-.PHONY: build build-with-cpp clean proto-gen test run setup-deps \
+.PHONY: build build-with-cpp clean proto-gen test integration-test run setup-deps \
         gramine-manifest gramine-sign gramine-enclave-info all-gramine \
         setup-cbmpc lint
 
@@ -89,6 +89,9 @@ proto-gen:
 
 test: setup-cbmpc
 	CGO_LDFLAGS_ALLOW=".*" ./scripts/go_with_cpp.sh $(CBMPC_PATH) go test -v ./...
+
+integration-test: setup-cbmpc
+	CGO_LDFLAGS_ALLOW=".*" ./scripts/go_with_cpp.sh $(CBMPC_PATH) go test -v -count=1 ./integration/...
 
 # Install dependencies for Ubuntu (run with sudo)
 setup-deps:
