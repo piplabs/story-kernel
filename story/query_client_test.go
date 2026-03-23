@@ -527,7 +527,8 @@ func TestClose(t *testing.T) {
 }
 
 func TestGetCachedLastBlockHeight(t *testing.T) {
-	client := &VerifiedQueryClient{cachedLastBlockHeight: 12345}
+	client := &VerifiedQueryClient{}
+	client.cachedLastBlockHeight.Store(12345)
 	height := client.GetCachedLastBlockHeight()
 	assert.Equal(t, int64(12345), height)
 }
@@ -544,7 +545,8 @@ func TestGetQueryBlockHeight(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := &VerifiedQueryClient{cachedLastBlockHeight: tt.cachedHeight}
+			client := &VerifiedQueryClient{}
+			client.cachedLastBlockHeight.Store(tt.cachedHeight)
 			height := client.getQueryBlockHeight()
 			assert.Equal(t, tt.expected, height)
 		})
@@ -592,15 +594,27 @@ func TestGetLatestActiveDKGNetwork_ParseError(t *testing.T) {
 }
 
 func TestMutexConcurrency(t *testing.T) {
-	client := &VerifiedQueryClient{mutex: &sync.Mutex{}, cachedLastBlockHeight: 1000}
-	done := make(chan bool, 100)
+	client := &VerifiedQueryClient{mutex: &sync.Mutex{}}
+	client.cachedLastBlockHeight.Store(1000)
+	done := make(chan bool, 200)
+
+	// Concurrent readers
 	for range 100 {
 		go func() {
 			_ = client.GetCachedLastBlockHeight()
 			done <- true
 		}()
 	}
-	for range 100 {
+
+	// Concurrent writers (simulates background caching goroutine)
+	for i := range 100 {
+		go func(v int64) {
+			client.cachedLastBlockHeight.Store(v)
+			done <- true
+		}(int64(i))
+	}
+
+	for range 200 {
 		<-done
 	}
 	assert.True(t, true)
@@ -996,7 +1010,7 @@ func TestLastBlockCaching_Error(t *testing.T) {
 	mockLC.On("Update", mock.Anything, mock.Anything).Return(nil, errors.New("sync failed"))
 
 	client := newTestVerifiedQueryClient(mockLC)
-	client.cachedLastBlockHeight = 50
+	client.cachedLastBlockHeight.Store(50)
 
 	err := client.lastBlockCaching(t.Context())
 	require.Error(t, err)
@@ -1681,12 +1695,12 @@ func TestGetStoreData(t *testing.T) {
 						BlockWaitRetryDelay: 1 * time.Millisecond,
 					},
 				},
-				rpcClient:             mockRPC,
-				lightClient:           mockLC,
-				mutex:                 &sync.Mutex{},
-				cdc:                   MakeCodec(),
-				cachedLastBlockHeight: tt.cachedH,
+				rpcClient:   mockRPC,
+				lightClient: mockLC,
+				mutex:       &sync.Mutex{},
+				cdc:         MakeCodec(),
 			}
+			client.cachedLastBlockHeight.Store(tt.cachedH)
 
 			data, err := client.getStoreData(t.Context(), tt.storeKey, tt.key)
 
@@ -1733,12 +1747,12 @@ func TestGetDKGNetwork_WithMockRPC(t *testing.T) {
 					BlockWaitRetryDelay: 1 * time.Millisecond,
 				},
 			},
-			rpcClient:             mockRPC,
-			lightClient:           mockLC,
-			mutex:                 &sync.Mutex{},
-			cdc:                   cdc,
-			cachedLastBlockHeight: 100,
+			rpcClient:   mockRPC,
+			lightClient: mockLC,
+			mutex:       &sync.Mutex{},
+			cdc:         cdc,
 		}
+		client.cachedLastBlockHeight.Store(100)
 
 		_, err := client.GetDKGNetwork(t.Context(), "test_commitment", 1)
 		require.Error(t, err)
@@ -1771,12 +1785,12 @@ func TestGetDKGNetwork_WithMockRPC(t *testing.T) {
 					BlockWaitRetryDelay: 1 * time.Millisecond,
 				},
 			},
-			rpcClient:             mockRPC,
-			lightClient:           mockLC,
-			mutex:                 &sync.Mutex{},
-			cdc:                   cdc,
-			cachedLastBlockHeight: 100,
+			rpcClient:   mockRPC,
+			lightClient: mockLC,
+			mutex:       &sync.Mutex{},
+			cdc:         cdc,
 		}
+		client.cachedLastBlockHeight.Store(100)
 
 		_, err := client.GetDKGNetwork(t.Context(), "test_commitment", 1)
 		require.Error(t, err)
@@ -1800,12 +1814,12 @@ func TestGetDKGRegistration_WithMockRPC(t *testing.T) {
 					BlockWaitRetryDelay: 1 * time.Millisecond,
 				},
 			},
-			rpcClient:             mockRPC,
-			lightClient:           mockLC,
-			mutex:                 &sync.Mutex{},
-			cdc:                   MakeCodec(),
-			cachedLastBlockHeight: 100,
+			rpcClient:   mockRPC,
+			lightClient: mockLC,
+			mutex:       &sync.Mutex{},
+			cdc:         MakeCodec(),
 		}
+		client.cachedLastBlockHeight.Store(100)
 
 		_, err := client.getDKGRegistration(t.Context(), "cc", 1, "validator1")
 		require.Error(t, err)
@@ -1829,12 +1843,12 @@ func TestGetLatestActiveDKGNetwork_WithMockRPC(t *testing.T) {
 					BlockWaitRetryDelay: 1 * time.Millisecond,
 				},
 			},
-			rpcClient:             mockRPC,
-			lightClient:           mockLC,
-			mutex:                 &sync.Mutex{},
-			cdc:                   MakeCodec(),
-			cachedLastBlockHeight: 100,
+			rpcClient:   mockRPC,
+			lightClient: mockLC,
+			mutex:       &sync.Mutex{},
+			cdc:         MakeCodec(),
 		}
+		client.cachedLastBlockHeight.Store(100)
 
 		_, err := client.GetLatestActiveDKGNetwork(t.Context())
 		require.Error(t, err)
@@ -1858,12 +1872,12 @@ func TestGetAllParticipantDKGRegistrations_WithMockRPC(t *testing.T) {
 					BlockWaitRetryDelay: 1 * time.Millisecond,
 				},
 			},
-			rpcClient:             mockRPC,
-			lightClient:           mockLC,
-			mutex:                 &sync.Mutex{},
-			cdc:                   MakeCodec(),
-			cachedLastBlockHeight: 100,
+			rpcClient:   mockRPC,
+			lightClient: mockLC,
+			mutex:       &sync.Mutex{},
+			cdc:         MakeCodec(),
 		}
+		client.cachedLastBlockHeight.Store(100)
 
 		_, err := client.GetAllParticipantDKGRegistrations(t.Context(), "cc", 1)
 		require.Error(t, err)
@@ -2060,12 +2074,12 @@ func TestGetStoreData_SuccessWithVerifiableProof(t *testing.T) {
 				BlockWaitRetryDelay: 1 * time.Millisecond,
 			},
 		},
-		rpcClient:             mockRPC,
-		lightClient:           mockLC,
-		mutex:                 &sync.Mutex{},
-		cdc:                   MakeCodec(),
-		cachedLastBlockHeight: queryHeight,
+		rpcClient:   mockRPC,
+		lightClient: mockLC,
+		mutex:       &sync.Mutex{},
+		cdc:         MakeCodec(),
 	}
+	client.cachedLastBlockHeight.Store(queryHeight)
 
 	data, err := client.getStoreData(t.Context(), StoreKey, key)
 	require.NoError(t, err)
@@ -2108,12 +2122,12 @@ func TestGetDKGNetwork_SuccessWithVerifiableProof(t *testing.T) {
 				BlockWaitRetryDelay: 1 * time.Millisecond,
 			},
 		},
-		rpcClient:             mockRPC,
-		lightClient:           mockLC,
-		mutex:                 &sync.Mutex{},
-		cdc:                   cdc,
-		cachedLastBlockHeight: queryHeight,
+		rpcClient:   mockRPC,
+		lightClient: mockLC,
+		mutex:       &sync.Mutex{},
+		cdc:         cdc,
 	}
+	client.cachedLastBlockHeight.Store(queryHeight)
 
 	got, err := client.GetDKGNetwork(t.Context(), "test_commitment", 1)
 	require.NoError(t, err)
@@ -2157,12 +2171,12 @@ func TestGetDKGNetwork_UnmarshalError(t *testing.T) {
 				BlockWaitRetryDelay: 1 * time.Millisecond,
 			},
 		},
-		rpcClient:             mockRPC,
-		lightClient:           mockLC,
-		mutex:                 &sync.Mutex{},
-		cdc:                   MakeCodec(),
-		cachedLastBlockHeight: queryHeight,
+		rpcClient:   mockRPC,
+		lightClient: mockLC,
+		mutex:       &sync.Mutex{},
+		cdc:         MakeCodec(),
 	}
+	client.cachedLastBlockHeight.Store(queryHeight)
 
 	_, err := client.GetDKGNetwork(t.Context(), "test_commitment", 1)
 	require.Error(t, err)
@@ -2205,12 +2219,12 @@ func TestGetDKGRegistration_SuccessWithVerifiableProof(t *testing.T) {
 				BlockWaitRetryDelay: 1 * time.Millisecond,
 			},
 		},
-		rpcClient:             mockRPC,
-		lightClient:           mockLC,
-		mutex:                 &sync.Mutex{},
-		cdc:                   cdc,
-		cachedLastBlockHeight: queryHeight,
+		rpcClient:   mockRPC,
+		lightClient: mockLC,
+		mutex:       &sync.Mutex{},
+		cdc:         cdc,
 	}
+	client.cachedLastBlockHeight.Store(queryHeight)
 
 	got, err := client.getDKGRegistration(t.Context(), "test_commitment", 1, "validator1")
 	require.NoError(t, err)
@@ -2251,12 +2265,12 @@ func TestGetDKGRegistration_UnmarshalError(t *testing.T) {
 				BlockWaitRetryDelay: 1 * time.Millisecond,
 			},
 		},
-		rpcClient:             mockRPC,
-		lightClient:           mockLC,
-		mutex:                 &sync.Mutex{},
-		cdc:                   MakeCodec(),
-		cachedLastBlockHeight: queryHeight,
+		rpcClient:   mockRPC,
+		lightClient: mockLC,
+		mutex:       &sync.Mutex{},
+		cdc:         MakeCodec(),
 	}
+	client.cachedLastBlockHeight.Store(queryHeight)
 
 	_, err := client.getDKGRegistration(t.Context(), "test_commitment", 1, "validator1")
 	require.Error(t, err)
@@ -2317,12 +2331,12 @@ func TestGetLatestActiveDKGNetwork_SuccessWithVerifiableProof(t *testing.T) {
 				BlockWaitRetryDelay: 1 * time.Millisecond,
 			},
 		},
-		rpcClient:             mockRPC,
-		lightClient:           mockLC,
-		mutex:                 &sync.Mutex{},
-		cdc:                   cdc,
-		cachedLastBlockHeight: queryHeight,
+		rpcClient:   mockRPC,
+		lightClient: mockLC,
+		mutex:       &sync.Mutex{},
+		cdc:         cdc,
 	}
+	client.cachedLastBlockHeight.Store(queryHeight)
 
 	got, err := client.GetLatestActiveDKGNetwork(t.Context())
 	require.NoError(t, err)
@@ -2383,12 +2397,12 @@ func TestGetLatestActiveDKGNetwork_InvalidKeyFormat(t *testing.T) {
 						BlockWaitRetryDelay: 1 * time.Millisecond,
 					},
 				},
-				rpcClient:             mockRPC,
-				lightClient:           mockLC,
-				mutex:                 &sync.Mutex{},
-				cdc:                   MakeCodec(),
-				cachedLastBlockHeight: queryHeight,
+				rpcClient:   mockRPC,
+				lightClient: mockLC,
+				mutex:       &sync.Mutex{},
+				cdc:         MakeCodec(),
 			}
+			client.cachedLastBlockHeight.Store(queryHeight)
 
 			_, err := client.GetLatestActiveDKGNetwork(t.Context())
 			require.Error(t, err)
@@ -2453,12 +2467,12 @@ func TestGetAllParticipantDKGRegistrations_SuccessWithVerifiableProof(t *testing
 				BlockWaitRetryDelay: 1 * time.Millisecond,
 			},
 		},
-		rpcClient:             mockRPC,
-		lightClient:           mockLC,
-		mutex:                 &sync.Mutex{},
-		cdc:                   cdc,
-		cachedLastBlockHeight: queryHeight,
+		rpcClient:   mockRPC,
+		lightClient: mockLC,
+		mutex:       &sync.Mutex{},
+		cdc:         cdc,
 	}
+	client.cachedLastBlockHeight.Store(queryHeight)
 
 	regs, err := client.GetAllParticipantDKGRegistrations(t.Context(), "test_cc", 1)
 	require.NoError(t, err)
@@ -2498,12 +2512,12 @@ func TestGetAllParticipantDKGRegistrations_EmptyActiveValSet(t *testing.T) {
 				BlockWaitRetryDelay: 1 * time.Millisecond,
 			},
 		},
-		rpcClient:             mockRPC,
-		lightClient:           mockLC,
-		mutex:                 &sync.Mutex{},
-		cdc:                   cdc,
-		cachedLastBlockHeight: queryHeight,
+		rpcClient:   mockRPC,
+		lightClient: mockLC,
+		mutex:       &sync.Mutex{},
+		cdc:         cdc,
 	}
+	client.cachedLastBlockHeight.Store(queryHeight)
 
 	_, err = client.GetAllParticipantDKGRegistrations(t.Context(), "test_cc", 1)
 	require.Error(t, err)
@@ -2560,12 +2574,12 @@ func TestGetAllParticipantDKGRegistrations_NoVerifiedRegistrations(t *testing.T)
 				BlockWaitRetryDelay: 1 * time.Millisecond,
 			},
 		},
-		rpcClient:             mockRPC,
-		lightClient:           mockLC,
-		mutex:                 &sync.Mutex{},
-		cdc:                   cdc,
-		cachedLastBlockHeight: queryHeight,
+		rpcClient:   mockRPC,
+		lightClient: mockLC,
+		mutex:       &sync.Mutex{},
+		cdc:         cdc,
 	}
+	client.cachedLastBlockHeight.Store(queryHeight)
 
 	_, err = client.GetAllParticipantDKGRegistrations(t.Context(), "test_cc", 1)
 	require.Error(t, err)
@@ -2610,12 +2624,12 @@ func TestGetAllParticipantDKGRegistrations_RegistrationQueryFails(t *testing.T) 
 				BlockWaitRetryDelay: 1 * time.Millisecond,
 			},
 		},
-		rpcClient:             mockRPC,
-		lightClient:           mockLC,
-		mutex:                 &sync.Mutex{},
-		cdc:                   cdc,
-		cachedLastBlockHeight: queryHeight,
+		rpcClient:   mockRPC,
+		lightClient: mockLC,
+		mutex:       &sync.Mutex{},
+		cdc:         cdc,
 	}
+	client.cachedLastBlockHeight.Store(queryHeight)
 
 	_, err = client.GetAllParticipantDKGRegistrations(t.Context(), "test_cc", 1)
 	require.Error(t, err)
