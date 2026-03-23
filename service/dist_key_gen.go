@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -11,6 +13,7 @@ import (
 
 	"go.dedis.ch/kyber/v4"
 	dkg "go.dedis.ch/kyber/v4/share/dkg/pedersen"
+	vss "go.dedis.ch/kyber/v4/share/vss/pedersen"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -147,15 +150,23 @@ func (s *DKGServer) rebuildInitDKG(
 			log.Errorf("failed to restore dealer polynomial (round=%d): %v — DKG may produce mismatched results", round, err)
 		} else {
 			log.WithField("round", round).Info("restored dealer polynomial from sealed coefficients")
+
+			// [DEBUG] Log verifier state BEFORE Deals()
+			log.Infof("[DEBUG-REBUILD] before Deals(): verifier count=%d", len(dkgInst.Verifiers()))
+			for idx, v := range dkgInst.Verifiers() {
+				log.Infof("[DEBUG-REBUILD] before Deals(): verifiers[%d] hasDeal=%v responses=%d",
+					idx, v.Deal() != nil, len(v.Responses()))
+			}
+
 			// Process the self-deal into verifiers[self] before replaying messages.
-			// Deals() auto-processes the self-deal (setting verifiers[self].Aggregator's
-			// deal, sessionID, and commits) and marks d.processed=true.
-			// Without this, replayMessages would fail to restore responses for our own
-			// deal because verifiers[self].Aggregator.deal is nil.
-			// The returned encrypted deals for other nodes are discarded — they were
-			// already sent before the restart.
 			if _, err := dkgInst.Deals(); err != nil {
 				log.Errorf("failed to process self-deal after polynomial restore (round=%d): %v", round, err)
+			}
+
+			// [DEBUG] Log verifier state AFTER Deals()
+			for idx, v := range dkgInst.Verifiers() {
+				log.Infof("[DEBUG-REBUILD] after Deals(): verifiers[%d] hasDeal=%v responses=%d certified=%v",
+					idx, v.Deal() != nil, len(v.Responses()), v.DealCertified())
 			}
 		}
 	}
@@ -587,15 +598,73 @@ func replayMessages(
 	dkgInst *dkg.DistKeyGenerator,
 	st *store.DKGState,
 ) {
-	for _, d := range st.Deals {
-		_, _ = dkgInst.ProcessDeal(&d)
+	log.Infof("[DEBUG-REPLAY] starting replayMessages: deals=%d responses=%d justifications=%d",
+		len(st.Deals), len(st.Responses), len(st.Justifications))
+
+	for i, d := range st.Deals {
+		resp, err := dkgInst.ProcessDeal(&d)
+		if err != nil {
+			log.Errorf("[DEBUG-REPLAY] ProcessDeal[%d] dealer=%d FAILED: %v", i, d.Index, err)
+		} else {
+			status := "approval"
+			if resp != nil && resp.Response != nil && !resp.Response.Status {
+				status = "complaint"
+			}
+			log.Infof("[DEBUG-REPLAY] ProcessDeal[%d] dealer=%d → %s", i, d.Index, status)
+		}
 	}
-	for _, r := range st.Responses {
-		_, _ = dkgInst.ProcessResponse(&r)
+
+	for i, r := range st.Responses {
+		j, err := dkgInst.ProcessResponse(&r)
+		if err != nil {
+			log.Errorf("[DEBUG-REPLAY] ProcessResponse[%d] dealer=%d responder=%d status=%v FAILED: %v",
+				i, r.Index, r.Response.Index, r.Response.Status, err)
+		} else {
+			hasJust := j != nil
+			log.Infof("[DEBUG-REPLAY] ProcessResponse[%d] dealer=%d responder=%d status=%v justification=%v",
+				i, r.Index, r.Response.Index, r.Response.Status, hasJust)
+		}
 	}
-	for _, j := range st.Justifications {
-		_ = dkgInst.ProcessJustification(&j)
+
+	for i, j := range st.Justifications {
+		err := dkgInst.ProcessJustification(&j)
+		if err != nil {
+			log.Errorf("[DEBUG-REPLAY] ProcessJustification[%d] dealer=%d complainer=%d FAILED: %v",
+				i, j.Index, j.Justification.Index, err)
+		} else {
+			log.Infof("[DEBUG-REPLAY] ProcessJustification[%d] dealer=%d complainer=%d → OK",
+				i, j.Index, j.Justification.Index)
+		}
 	}
+
+	// Log final verifier state
+	verifiers := dkgInst.Verifiers()
+	for idx, v := range verifiers {
+		responses := v.Responses()
+		certified := v.DealCertified()
+		hasDeal := v.Deal() != nil
+		log.Infof("[DEBUG-REPLAY] verifiers[%d]: hasDeal=%v responses=%d certified=%v responseMap=%v",
+			idx, hasDeal, len(responses), certified, formatResponses(responses))
+	}
+
+	qual := dkgInst.QUAL()
+	log.Infof("[DEBUG-REPLAY] QUAL=%v ThresholdCertified=%v", qual, dkgInst.ThresholdCertified())
+}
+
+// formatResponses returns a human-readable summary of an aggregator's response map.
+func formatResponses(responses map[uint32]*vss.Response) string {
+	if len(responses) == 0 {
+		return "{}"
+	}
+	parts := make([]string, 0, len(responses))
+	for idx, r := range responses {
+		status := "approval"
+		if !r.Status {
+			status = "complaint"
+		}
+		parts = append(parts, fmt.Sprintf("%d:%s", idx, status))
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
 }
 
 func (s *DKGServer) fetchLatestPubKeysAndCoeffs(

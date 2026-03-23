@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -65,6 +66,41 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 			log.Errorf("failed to load or rebuild the distributed key generator for resharing: %v", err)
 
 			return nil, status.Errorf(codes.Internal, "failed to load or rebuild the distributed key generator for resharing")
+		}
+	}
+
+	// [DEBUG] Log DKG state before computing DistKeyShare
+	{
+		verifiers := distKeyGen.Verifiers()
+		qual := distKeyGen.QUAL()
+		log.Infof("[DEBUG-FINALIZE] round=%d node_pubkeys=%d QUAL=%v ThresholdCertified=%v",
+			req.GetRound(), len(rc.SortedPubKeys), qual, distKeyGen.ThresholdCertified())
+		for idx, v := range verifiers {
+			responses := v.Responses()
+			certified := v.DealCertified()
+			hasDeal := v.Deal() != nil
+			respSummary := make([]string, 0, len(responses))
+			for rIdx, r := range responses {
+				status := "approval"
+				if !r.Status {
+					status = "complaint"
+				}
+				respSummary = append(respSummary, fmt.Sprintf("%d:%s", rIdx, status))
+			}
+			log.Infof("[DEBUG-FINALIZE] verifiers[%d]: hasDeal=%v certified=%v responses={%s}",
+				idx, hasDeal, certified, strings.Join(respSummary, ", "))
+
+			// Log deal commitments hash for each certified verifier
+			if hasDeal {
+				deal := v.Deal()
+				commitHash := ""
+				if len(deal.Commitments) > 0 {
+					bz, _ := deal.Commitments[0].MarshalBinary()
+					commitHash = fmt.Sprintf("%x", bz[:8])
+				}
+				log.Infof("[DEBUG-FINALIZE] verifiers[%d].deal: sessionID=%x commitments[0]=%s shareIdx=%d",
+					idx, deal.SessionID[:8], commitHash, deal.SecShare.I)
+			}
 		}
 	}
 
