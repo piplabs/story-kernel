@@ -2404,10 +2404,10 @@ func TestGetAllParticipantDKGRegistrations_SuccessWithVerifiableProof(t *testing
 
 	// Create network with active validators
 	network := &pb.DKGNetwork{
-		Round:          1,
-		ActiveValSet:   []string{"val1", "val2"},
-		Total:          2,
-		Threshold:      1,
+		Round:        1,
+		ActiveValSet: []string{"val1", "val2"},
+		Total:        2,
+		Threshold:    1,
 	}
 	encodedNetwork, err := cdc.Marshal(network)
 	require.NoError(t, err)
@@ -2472,10 +2472,10 @@ func TestGetAllParticipantDKGRegistrations_EmptyActiveValSet(t *testing.T) {
 	queryHeight := int64(100)
 
 	network := &pb.DKGNetwork{
-		Round:          1,
-		ActiveValSet:   []string{}, // empty
-		Total:          0,
-		Threshold:      0,
+		Round:        1,
+		ActiveValSet: []string{}, // empty
+		Total:        0,
+		Threshold:    0,
 	}
 	encodedNetwork, err := cdc.Marshal(network)
 	require.NoError(t, err)
@@ -2517,10 +2517,10 @@ func TestGetAllParticipantDKGRegistrations_NoVerifiedRegistrations(t *testing.T)
 	queryHeight := int64(100)
 
 	network := &pb.DKGNetwork{
-		Round:          1,
-		ActiveValSet:   []string{"val1"},
-		Total:          1,
-		Threshold:      1,
+		Round:        1,
+		ActiveValSet: []string{"val1"},
+		Total:        1,
+		Threshold:    1,
 	}
 	encodedNetwork, err := cdc.Marshal(network)
 	require.NoError(t, err)
@@ -2579,10 +2579,10 @@ func TestGetAllParticipantDKGRegistrations_RegistrationQueryFails(t *testing.T) 
 	queryHeight := int64(100)
 
 	network := &pb.DKGNetwork{
-		Round:          1,
-		ActiveValSet:   []string{"val1"},
-		Total:          1,
-		Threshold:      1,
+		Round:        1,
+		ActiveValSet: []string{"val1"},
+		Total:        1,
+		Threshold:    1,
 	}
 	encodedNetwork, err := cdc.Marshal(network)
 	require.NoError(t, err)
