@@ -627,3 +627,231 @@ func TestRestoreDealerPoly_SelfVerifierResponses(t *testing.T) {
 			"node %d global_pub_key should match node 0", i)
 	}
 }
+
+// runFullDKG executes a complete DKG protocol for n nodes and returns the
+// DistKeyShares. This is a helper for resharing tests that need an initial
+// round's shares.
+func runFullDKG(t *testing.T, suite *edwards25519.SuiteEd25519, n, threshold int, privKeys []kyber.Scalar, pubKeys []kyber.Point) []*dkg.DistKeyShare {
+	t.Helper()
+
+	dkgs := make([]*dkg.DistKeyGenerator, n)
+	for i := 0; i < n; i++ {
+		d, err := dkg.NewDistKeyGenerator(suite, privKeys[i], pubKeys, threshold)
+		require.NoError(t, err)
+		dkgs[i] = d
+	}
+
+	// Generate and distribute deals
+	allDeals := make([]map[int]*dkg.Deal, n)
+	for i := 0; i < n; i++ {
+		deals, err := dkgs[i].Deals()
+		require.NoError(t, err)
+		allDeals[i] = deals
+	}
+
+	// Process deals and collect responses
+	allResps := make([]*dkg.Response, 0)
+	for dealerIdx := 0; dealerIdx < n; dealerIdx++ {
+		for recipientIdx, deal := range allDeals[dealerIdx] {
+			resp, err := dkgs[recipientIdx].ProcessDeal(deal)
+			require.NoError(t, err)
+			allResps = append(allResps, resp)
+		}
+	}
+
+	// Process responses
+	for i := 0; i < n; i++ {
+		for _, resp := range allResps {
+			dkgs[i].ProcessResponse(resp)
+		}
+	}
+
+	// Extract shares
+	for i := 0; i < n; i++ {
+		dkgs[i].SetTimeout()
+	}
+	shares := make([]*dkg.DistKeyShare, n)
+	for i := 0; i < n; i++ {
+		require.True(t, dkgs[i].ThresholdCertified(), "node %d not certified in initial DKG", i)
+		s, err := dkgs[i].DistKeyShare()
+		require.NoError(t, err)
+		shares[i] = s
+	}
+
+	return shares
+}
+
+// TestRestoreDealerPoly_ResharingPrevDKG verifies that the polynomial restore
+// + Deals() fix works for resharing prev DKG when a node is in both old and
+// new committee lists.
+//
+// In resharing, NewDistKeyHandler creates a dealer using Share.V as the secret
+// coefficient but generates random remaining coefficients. After restart, the
+// rebuilt DKG has a different polynomial (different commitments, session ID),
+// causing the same response verification failures as initial DKG.
+//
+// This test:
+// 1. Runs a full initial DKG (3 nodes, threshold 2)
+// 2. Starts resharing with the same 3 nodes (all in both old and new lists)
+// 3. Node 0 generates resharing deals, then "restarts"
+// 4. Restores polynomial + calls Deals() to process self-deal
+// 5. Replays deals from peers and responses for our deal
+// 6. Verifies all nodes produce consistent global_pub_key after resharing
+func TestRestoreDealerPoly_ResharingPrevDKG(t *testing.T) {
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+	n := 3
+	threshold := 2
+
+	// Generate keys
+	privKeys := make([]kyber.Scalar, n)
+	pubKeys := make([]kyber.Point, n)
+	for i := 0; i < n; i++ {
+		privKeys[i] = suite.Scalar().Pick(suite.RandomStream())
+		pubKeys[i] = suite.Point().Mul(privKeys[i], nil)
+	}
+
+	// Phase 1: Complete initial DKG
+	initialShares := runFullDKG(t, suite, n, threshold, privKeys, pubKeys)
+
+	// Verify initial DKG produced consistent keys
+	for i := 1; i < n; i++ {
+		require.True(t, initialShares[0].Public().Equal(initialShares[i].Public()),
+			"initial DKG: node %d public key mismatch", i)
+	}
+
+	// Phase 2: Build resharing prev DKG handlers (old committee dealing to new committee)
+	// All nodes are in both old and new lists (self-resharing).
+	prevDKGs := make([]*dkg.DistKeyGenerator, n)
+	for i := 0; i < n; i++ {
+		d, err := dkg.NewDistKeyHandler(&dkg.Config{
+			Suite:        suite,
+			Longterm:     privKeys[i],
+			OldNodes:     pubKeys,
+			NewNodes:     pubKeys,
+			Share:        initialShares[i],
+			Threshold:    threshold,
+			OldThreshold: threshold,
+		})
+		require.NoError(t, err, "NewDistKeyHandler for resharing prev node %d", i)
+		prevDKGs[i] = d
+	}
+
+	// Phase 3: All old nodes generate resharing deals
+	allDeals := make([]map[int]*dkg.Deal, n)
+	for i := 0; i < n; i++ {
+		deals, err := prevDKGs[i].Deals()
+		require.NoError(t, err, "Deals() for resharing prev node %d", i)
+		allDeals[i] = deals
+	}
+
+	// Extract polynomial from node 0 before "restart"
+	origCoeffs, err := ExtractDealerPolyCoeffs(prevDKGs[0], suite)
+	require.NoError(t, err)
+	require.NotEmpty(t, origCoeffs)
+
+	// Phase 4: Non-restarting nodes process deals; save deals for node 0
+	dealsForNode0 := make([]*dkg.Deal, 0)
+	responsesForDealer0 := make([]*dkg.Response, 0)
+	otherResponses := make([]*dkg.Response, 0)
+
+	for dealerIdx := 0; dealerIdx < n; dealerIdx++ {
+		for recipientIdx, deal := range allDeals[dealerIdx] {
+			if recipientIdx == 0 {
+				dealsForNode0 = append(dealsForNode0, deal)
+				continue
+			}
+			resp, err := prevDKGs[recipientIdx].ProcessDeal(deal)
+			require.NoError(t, err)
+			if dealerIdx == 0 {
+				responsesForDealer0 = append(responsesForDealer0, resp)
+			} else {
+				otherResponses = append(otherResponses, resp)
+			}
+		}
+	}
+
+	// Phase 5: Simulate node 0 restart — create fresh resharing prev DKG
+	restoredPrev, err := dkg.NewDistKeyHandler(&dkg.Config{
+		Suite:        suite,
+		Longterm:     privKeys[0],
+		OldNodes:     pubKeys,
+		NewNodes:     pubKeys,
+		Share:        initialShares[0],
+		Threshold:    threshold,
+		OldThreshold: threshold,
+	})
+	require.NoError(t, err)
+
+	// Verify the fresh DKG has a DIFFERENT session ID (different random polynomial)
+	origDealer, err := getDealerViaReflect(prevDKGs[0])
+	require.NoError(t, err)
+	freshDealer, err := getDealerViaReflect(restoredPrev)
+	require.NoError(t, err)
+	require.False(t, bytes.Equal(origDealer.SessionID(), freshDealer.SessionID()),
+		"fresh resharing DKG should have different session ID")
+
+	// Restore polynomial and process self-deal
+	err = RestoreDealerPoly(suite, restoredPrev, origCoeffs)
+	require.NoError(t, err)
+
+	// Verify session ID is now restored
+	restoredDealer, err := getDealerViaReflect(restoredPrev)
+	require.NoError(t, err)
+	require.True(t, bytes.Equal(origDealer.SessionID(), restoredDealer.SessionID()),
+		"restored resharing DKG should have same session ID as original")
+
+	// Process self-deal via Deals()
+	_, err = restoredPrev.Deals()
+	require.NoError(t, err, "Deals() after resharing polynomial restore")
+
+	// Phase 6: Replay incoming deals from peers on restored node
+	for _, deal := range dealsForNode0 {
+		resp, err := restoredPrev.ProcessDeal(deal)
+		require.NoError(t, err)
+		otherResponses = append(otherResponses, resp)
+	}
+
+	// Phase 7: THE CRITICAL TEST — replay responses for our deal
+	for _, resp := range responsesForDealer0 {
+		just, err := restoredPrev.ProcessResponse(resp)
+		require.NoError(t, err, "resharing: ProcessResponse for our deal must succeed after restore")
+		require.Nil(t, just, "no justification expected for approval responses")
+	}
+
+	// Phase 8: Process remaining responses on all nodes
+	prevDKGs[0] = restoredPrev
+	for i := 0; i < n; i++ {
+		for _, resp := range otherResponses {
+			prevDKGs[i].ProcessResponse(resp)
+		}
+		if i != 0 {
+			for _, resp := range responsesForDealer0 {
+				prevDKGs[i].ProcessResponse(resp)
+			}
+		}
+	}
+
+	// Phase 9: Verify all nodes produce consistent DistKeyShare
+	for i := 0; i < n; i++ {
+		prevDKGs[i].SetTimeout()
+	}
+
+	resharingShares := make([]*dkg.DistKeyShare, n)
+	for i := 0; i < n; i++ {
+		require.True(t, prevDKGs[i].ThresholdCertified(),
+			"resharing: node %d should be certified (QUAL=%v)", i, prevDKGs[i].QUAL())
+		s, err := prevDKGs[i].DistKeyShare()
+		require.NoError(t, err, "resharing: DistKeyShare() for node %d", i)
+		resharingShares[i] = s
+	}
+
+	// All nodes MUST agree on the global public key
+	for i := 1; i < n; i++ {
+		require.True(t, resharingShares[0].Public().Equal(resharingShares[i].Public()),
+			"resharing: node %d global_pub_key should match node 0", i)
+	}
+
+	// The reshared public key must equal the original (resharing preserves the key)
+	require.True(t, initialShares[0].Public().Equal(resharingShares[0].Public()),
+		"reshared global_pub_key must equal original")
+}

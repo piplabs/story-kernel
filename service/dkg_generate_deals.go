@@ -98,15 +98,16 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 
 	// Persist dealer polynomial coefficients for restart recovery.
 	// If GenerateDeals succeeds but the kernel restarts before FinalizeDKG,
-	// rebuildInitDKG needs the original polynomial to restore the dealer
-	// state (session ID, commitments) correctly. Without this, a new random
-	// polynomial would be generated, causing DKG failures.
+	// the rebuild functions (rebuildInitDKG, rebuildResharingPrevDKG) need the
+	// original polynomial to restore the dealer state (session ID, commitments)
+	// correctly. Without this, a new random polynomial would be generated,
+	// causing session ID mismatches with peers who already received the original
+	// deals.
 	//
-	// NOTE: This currently only covers initial (non-resharing) rounds via
-	// rebuildInitDKG. Resharing rounds (GetResharingPrevDKG) use the previous
-	// round's DistKeyShare as the secret coefficient, so the polynomial is
-	// deterministic and does not need separate persistence. If resharing
-	// polynomial behavior changes in the future, this may need to be extended.
+	// This covers both initial and resharing rounds. In resharing, only the
+	// secret coefficient (Share.V) is deterministic — the remaining t-1
+	// polynomial coefficients are still random, producing different commitments
+	// and session ID on each NewDistKeyHandler call.
 	coeffs, extractErr := extractDealerPolyCoeffs(distKeyGen, s.Suite)
 	if extractErr == nil && len(coeffs) > 0 {
 		if persistErr := s.DKGStore.SetPrivateCoeffs(codeCommitmentHex, req.GetRound(), coeffs); persistErr != nil {

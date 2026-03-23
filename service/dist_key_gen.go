@@ -385,6 +385,33 @@ func (s *DKGServer) rebuildResharingPrevDKG(
 		return nil, err
 	}
 
+	// Restore the dealer polynomial for resharing prev DKG.
+	// Same issue as rebuildInitDKG: NewDistKeyHandler generates a new random
+	// polynomial (only Share.V is reused as the secret coefficient, but the
+	// remaining t-1 coefficients are random), producing different commitments
+	// and session ID. Peers' responses reference the original session ID, so
+	// the dealer must be restored to the original polynomial.
+	//
+	// The coefficients are persisted under toRound because GenerateDeals
+	// stores them with req.GetRound() (which equals toRound for resharing).
+	coeffs, loadErr := s.DKGStore.LoadPrivateCoeffs(codeCommitmentHex, toRound)
+	if loadErr != nil {
+		log.Errorf("failed to load sealed private coeffs for resharing prev DKG (toRound=%d): %v", toRound, loadErr)
+	} else if len(coeffs) > 0 {
+		if err := restoreDealerPoly(s.Suite, dkgInst, coeffs); err != nil {
+			log.Errorf("failed to restore dealer polynomial for resharing prev DKG (toRound=%d): %v", toRound, err)
+		} else {
+			log.WithField("toRound", toRound).Info("restored dealer polynomial for resharing prev DKG")
+			// Process the self-deal into verifiers[self] when the node is in
+			// both old and new lists (newPresent=true). Deals() is safe to call
+			// even when newPresent=false — it simply returns deals without
+			// self-processing.
+			if _, err := dkgInst.Deals(); err != nil {
+				log.Errorf("failed to process self-deal after polynomial restore for resharing prev DKG (toRound=%d): %v", toRound, err)
+			}
+		}
+	}
+
 	for _, r := range nextState.Responses {
 		_, _ = dkgInst.ProcessResponse(&r)
 	}
