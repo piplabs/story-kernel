@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -11,6 +13,7 @@ import (
 
 	"go.dedis.ch/kyber/v4"
 	dkg "go.dedis.ch/kyber/v4/share/dkg/pedersen"
+	vss "go.dedis.ch/kyber/v4/share/vss/pedersen"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -105,6 +108,12 @@ func (s *DKGServer) buildInitDKG(
 }
 
 // rebuildInitDKG reconstructs the initial DKG from persisted state.
+//
+// When persisted PrivateCoeffs are available, the dealer's polynomial is
+// restored to the original one that was used to generate deals. This is
+// critical because NewDistKeyGenerator generates a new random polynomial,
+// which would cause session ID and commitment mismatches with peers who
+// already received deals generated from the original polynomial.
 func (s *DKGServer) rebuildInitDKG(
 	codeCommitmentHex string,
 	round uint32,
@@ -127,6 +136,39 @@ func (s *DKGServer) rebuildInitDKG(
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	// Restore the original dealer polynomial from sealed storage before replaying
+	// messages. This must happen before replayMessages because response verification
+	// in dealer.ProcessResponse checks session ID, which depends on the polynomial's
+	// public commitments.
+	coeffs, loadErr := s.DKGStore.LoadPrivateCoeffs(codeCommitmentHex, round)
+	if loadErr != nil {
+		log.Errorf("failed to load sealed private coeffs (round=%d): %v — DKG may produce mismatched results", round, loadErr)
+	} else if len(coeffs) > 0 {
+		if err := restoreDealerPoly(s.Suite, dkgInst, coeffs); err != nil {
+			log.Errorf("failed to restore dealer polynomial (round=%d): %v — DKG may produce mismatched results", round, err)
+		} else {
+			log.WithField("round", round).Info("restored dealer polynomial from sealed coefficients")
+
+			// [DEBUG] Log verifier state BEFORE Deals()
+			log.Infof("[DEBUG-REBUILD] before Deals(): verifier count=%d", len(dkgInst.Verifiers()))
+			for idx, v := range dkgInst.Verifiers() {
+				log.Infof("[DEBUG-REBUILD] before Deals(): verifiers[%d] hasDeal=%v responses=%d",
+					idx, v.Deal() != nil, len(v.Responses()))
+			}
+
+			// Process the self-deal into verifiers[self] before replaying messages.
+			if _, err := dkgInst.Deals(); err != nil {
+				log.Errorf("failed to process self-deal after polynomial restore (round=%d): %v", round, err)
+			}
+
+			// [DEBUG] Log verifier state AFTER Deals()
+			for idx, v := range dkgInst.Verifiers() {
+				log.Infof("[DEBUG-REBUILD] after Deals(): verifiers[%d] hasDeal=%v responses=%d certified=%v",
+					idx, v.Deal() != nil, len(v.Responses()), v.DealCertified())
+			}
+		}
 	}
 
 	replayMessages(dkgInst, st)
@@ -354,6 +396,33 @@ func (s *DKGServer) rebuildResharingPrevDKG(
 		return nil, err
 	}
 
+	// Restore the dealer polynomial for resharing prev DKG.
+	// Same issue as rebuildInitDKG: NewDistKeyHandler generates a new random
+	// polynomial (only Share.V is reused as the secret coefficient, but the
+	// remaining t-1 coefficients are random), producing different commitments
+	// and session ID. Peers' responses reference the original session ID, so
+	// the dealer must be restored to the original polynomial.
+	//
+	// The coefficients are persisted under toRound because GenerateDeals
+	// stores them with req.GetRound() (which equals toRound for resharing).
+	coeffs, loadErr := s.DKGStore.LoadPrivateCoeffs(codeCommitmentHex, toRound)
+	if loadErr != nil {
+		log.Errorf("failed to load sealed private coeffs for resharing prev DKG (toRound=%d): %v", toRound, loadErr)
+	} else if len(coeffs) > 0 {
+		if err := restoreDealerPoly(s.Suite, dkgInst, coeffs); err != nil {
+			log.Errorf("failed to restore dealer polynomial for resharing prev DKG (toRound=%d): %v", toRound, err)
+		} else {
+			log.WithField("toRound", toRound).Info("restored dealer polynomial for resharing prev DKG")
+			// Process the self-deal into verifiers[self] when the node is in
+			// both old and new lists (newPresent=true). Deals() is safe to call
+			// even when newPresent=false — it simply returns deals without
+			// self-processing.
+			if _, err := dkgInst.Deals(); err != nil {
+				log.Errorf("failed to process self-deal after polynomial restore for resharing prev DKG (toRound=%d): %v", toRound, err)
+			}
+		}
+	}
+
 	for _, r := range nextState.Responses {
 		_, _ = dkgInst.ProcessResponse(&r)
 	}
@@ -529,15 +598,73 @@ func replayMessages(
 	dkgInst *dkg.DistKeyGenerator,
 	st *store.DKGState,
 ) {
-	for _, d := range st.Deals {
-		_, _ = dkgInst.ProcessDeal(&d)
+	log.Infof("[DEBUG-REPLAY] starting replayMessages: deals=%d responses=%d justifications=%d",
+		len(st.Deals), len(st.Responses), len(st.Justifications))
+
+	for i, d := range st.Deals {
+		resp, err := dkgInst.ProcessDeal(&d)
+		if err != nil {
+			log.Errorf("[DEBUG-REPLAY] ProcessDeal[%d] dealer=%d FAILED: %v", i, d.Index, err)
+		} else {
+			status := "approval"
+			if resp != nil && resp.Response != nil && !resp.Response.Status {
+				status = "complaint"
+			}
+			log.Infof("[DEBUG-REPLAY] ProcessDeal[%d] dealer=%d → %s", i, d.Index, status)
+		}
 	}
-	for _, r := range st.Responses {
-		_, _ = dkgInst.ProcessResponse(&r)
+
+	for i, r := range st.Responses {
+		j, err := dkgInst.ProcessResponse(&r)
+		if err != nil {
+			log.Errorf("[DEBUG-REPLAY] ProcessResponse[%d] dealer=%d responder=%d status=%v FAILED: %v",
+				i, r.Index, r.Response.Index, r.Response.Status, err)
+		} else {
+			hasJust := j != nil
+			log.Infof("[DEBUG-REPLAY] ProcessResponse[%d] dealer=%d responder=%d status=%v justification=%v",
+				i, r.Index, r.Response.Index, r.Response.Status, hasJust)
+		}
 	}
-	for _, j := range st.Justifications {
-		_ = dkgInst.ProcessJustification(&j)
+
+	for i, j := range st.Justifications {
+		err := dkgInst.ProcessJustification(&j)
+		if err != nil {
+			log.Errorf("[DEBUG-REPLAY] ProcessJustification[%d] dealer=%d complainer=%d FAILED: %v",
+				i, j.Index, j.Justification.Index, err)
+		} else {
+			log.Infof("[DEBUG-REPLAY] ProcessJustification[%d] dealer=%d complainer=%d → OK",
+				i, j.Index, j.Justification.Index)
+		}
 	}
+
+	// Log final verifier state
+	verifiers := dkgInst.Verifiers()
+	for idx, v := range verifiers {
+		responses := v.Responses()
+		certified := v.DealCertified()
+		hasDeal := v.Deal() != nil
+		log.Infof("[DEBUG-REPLAY] verifiers[%d]: hasDeal=%v responses=%d certified=%v responseMap=%v",
+			idx, hasDeal, len(responses), certified, formatResponses(responses))
+	}
+
+	qual := dkgInst.QUAL()
+	log.Infof("[DEBUG-REPLAY] QUAL=%v ThresholdCertified=%v", qual, dkgInst.ThresholdCertified())
+}
+
+// formatResponses returns a human-readable summary of an aggregator's response map.
+func formatResponses(responses map[uint32]*vss.Response) string {
+	if len(responses) == 0 {
+		return "{}"
+	}
+	parts := make([]string, 0, len(responses))
+	for idx, r := range responses {
+		status := "approval"
+		if !r.Status {
+			status = "complaint"
+		}
+		parts = append(parts, fmt.Sprintf("%d:%s", idx, status))
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
 }
 
 func (s *DKGServer) fetchLatestPubKeysAndCoeffs(
