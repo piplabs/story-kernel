@@ -1,5 +1,9 @@
 # Story Kernel
 
+[![Website](https://img.shields.io/badge/story.foundation-4B3263?style=flat&logo=google-chrome&logoColor=white)](https://www.story.foundation)
+[![X](https://img.shields.io/badge/@StoryProtocol-000000?style=flat&logo=x&logoColor=white)](https://x.com/StoryProtocol)
+[![codecov](https://codecov.io/gh/piplabs/story-kernel/branch/main/graph/badge.svg)](https://codecov.io/gh/piplabs/story-kernel)
+
 > ⚠️ **WARNING**: This software has not been audited and is not production-ready. Use at your own risk.
 
 Story Kernel is a Trusted Execution Environment (TEE) client for Story Protocol's Distributed Key Generation (DKG)

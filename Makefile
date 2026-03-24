@@ -90,6 +90,9 @@ proto-gen:
 test: setup-cbmpc
 	CGO_LDFLAGS_ALLOW=".*" ./scripts/go_with_cpp.sh $(CBMPC_PATH) go test -v ./...
 
+test-cover: setup-cbmpc
+	CGO_LDFLAGS_ALLOW=".*" ./scripts/go_with_cpp.sh $(CBMPC_PATH) go test -coverprofile=coverage.txt -timeout=5m -race ./...
+
 # Install dependencies for Ubuntu (run with sudo)
 setup-deps:
 	@echo "Installing build dependencies..."
