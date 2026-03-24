@@ -5,6 +5,9 @@ on:
     branches:
       - main
   workflow_call:
+    secrets:
+      CODECOV_TOKEN:
+        required: false
 
 jobs:
   unit_tests:
@@ -44,5 +47,15 @@ jobs:
       - name: Verify OpenSSL installation
         run: ls -la /usr/local/lib64/libcrypto.a
 
-      - name: Run tests (includes cb-mpc setup)
-        run: make test
+      - name: Run tests with coverage
+        run: make test-cover
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.txt
+          flags: unittests
+          name: go-tests
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
