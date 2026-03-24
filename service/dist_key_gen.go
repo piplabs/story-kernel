@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -160,7 +161,9 @@ func (s *DKGServer) rebuildInitDKG(
 		}
 	}
 
-	replayMessages(dkgInst, st)
+	if err := replayMessages(dkgInst, st); err != nil {
+		return nil, errors.Wrapf(err, "rebuildInitDKG: replay failed (round=%d)", round)
+	}
 
 	return dkgInst, nil
 }
@@ -412,8 +415,29 @@ func (s *DKGServer) rebuildResharingPrevDKG(
 		}
 	}
 
-	for _, r := range nextState.Responses {
-		_, _ = dkgInst.ProcessResponse(&r)
+	// Replay responses from the next state for the resharing prev DKG.
+	// Only responses are relevant here (deals come via the prev committee).
+	var criticalErr bool
+	for i, r := range nextState.Responses {
+		if _, err := dkgInst.ProcessResponse(&r); err != nil {
+			if isDuplicateReplayError(err) {
+				log.WithFields(log.Fields{
+					"response_index":  i,
+					"responder_index": r.Response.Index,
+					"error":           err,
+				}).Debug("skipped duplicate response during resharing prev DKG replay")
+			} else {
+				log.WithFields(log.Fields{
+					"response_index":  i,
+					"responder_index": r.Response.Index,
+					"error":           err,
+				}).Warn("failed to replay response in resharing prev DKG")
+				criticalErr = true
+			}
+		}
+	}
+	if criticalErr {
+		return nil, errors.Errorf("rebuildResharingPrevDKG: critical errors during response replay (fromRound=%d, toRound=%d)", fromRound, toRound)
 	}
 
 	return dkgInst, nil
@@ -572,7 +596,9 @@ func (s *DKGServer) rebuildResharingNextDKG(
 		return nil, err
 	}
 
-	replayMessages(dkgInst, nextState)
+	if err := replayMessages(dkgInst, nextState); err != nil {
+		return nil, errors.Wrapf(err, "rebuildResharingNextDKG: replay failed (toRound=%d)", toRound)
+	}
 
 	return dkgInst, nil
 }
@@ -581,21 +607,69 @@ func (s *DKGServer) rebuildResharingNextDKG(
 // Helpers
 ////////////////////////////////////////////////////////////////////////////////
 
+// isDuplicateReplayError returns true if the error is an expected duplicate
+// during replay (e.g., a response already processed from the same origin).
+// These are non-critical because replay re-feeds all persisted messages,
+// including ones that were already applied before the restart.
+func isDuplicateReplayError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "already existing response from same origin")
+}
+
 // replayMessages replays persisted DKG deals, responses, and justifications
 // into a DKG instance to restore its state after a restart.
+// Returns an error if any non-duplicate message processing fails.
 func replayMessages(
 	dkgInst *dkg.DistKeyGenerator,
 	st *store.DKGState,
-) {
-	for _, d := range st.Deals {
-		_, _ = dkgInst.ProcessDeal(&d)
+) error {
+	var criticalErr bool
+
+	for i, d := range st.Deals {
+		if _, err := dkgInst.ProcessDeal(&d); err != nil {
+			log.WithFields(log.Fields{
+				"deal_index":   i,
+				"dealer_index": d.Index,
+				"error":        err,
+			}).Warn("failed to replay deal")
+			criticalErr = true
+		}
 	}
-	for _, r := range st.Responses {
-		_, _ = dkgInst.ProcessResponse(&r)
+
+	for i, r := range st.Responses {
+		if _, err := dkgInst.ProcessResponse(&r); err != nil {
+			if isDuplicateReplayError(err) {
+				log.WithFields(log.Fields{
+					"response_index":  i,
+					"responder_index": r.Response.Index,
+					"error":           err,
+				}).Debug("skipped duplicate response during replay")
+			} else {
+				log.WithFields(log.Fields{
+					"response_index":  i,
+					"responder_index": r.Response.Index,
+					"error":           err,
+				}).Warn("failed to replay response")
+				criticalErr = true
+			}
+		}
 	}
-	for _, j := range st.Justifications {
-		_ = dkgInst.ProcessJustification(&j)
+
+	for i, j := range st.Justifications {
+		if err := dkgInst.ProcessJustification(&j); err != nil {
+			log.WithFields(log.Fields{
+				"justification_index": i,
+				"dealer_index":        j.Index,
+				"error":               err,
+			}).Warn("failed to replay justification")
+			criticalErr = true
+		}
 	}
+
+	if criticalErr {
+		return errors.New("one or more critical errors occurred during DKG message replay")
+	}
+
+	return nil
 }
 
 func (s *DKGServer) fetchLatestPubKeysAndCoeffs(

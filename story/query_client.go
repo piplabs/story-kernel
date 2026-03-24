@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	cmtdb "github.com/cometbft/cometbft-db"
@@ -77,7 +78,7 @@ type VerifiedQueryClient struct {
 	db                    cmtdb.DB
 	mutex                 *sync.Mutex
 	cdc                   *codec.ProtoCodec
-	cachedLastBlockHeight int64
+	cachedLastBlockHeight atomic.Int64
 	cancelFunc            context.CancelFunc
 }
 
@@ -691,8 +692,9 @@ func (q *VerifiedQueryClient) getQueryBlockHeight() int64 {
 }
 
 // GetCachedLastBlockHeight returns the cached last block height.
+// Safe for concurrent use — reads via atomic.Int64.
 func (q *VerifiedQueryClient) GetCachedLastBlockHeight() int64 {
-	return q.cachedLastBlockHeight
+	return q.cachedLastBlockHeight.Load()
 }
 
 // lastBlockCaching caches the last block height.
@@ -703,7 +705,7 @@ func (q *VerifiedQueryClient) lastBlockCaching(ctx context.Context) error {
 	}
 
 	log.Debugf("Refreshed last block height: %d", lastHeight)
-	q.cachedLastBlockHeight = lastHeight
+	q.cachedLastBlockHeight.Store(lastHeight)
 
 	return nil
 }

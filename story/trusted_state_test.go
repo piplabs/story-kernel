@@ -162,7 +162,8 @@ func TestVerifyStartBlock_NilHash(t *testing.T) {
 func TestGetQueryBlockHeight_ZeroCache(t *testing.T) {
 	t.Parallel()
 
-	q := &VerifiedQueryClient{cachedLastBlockHeight: 0}
+	q := &VerifiedQueryClient{}
+	q.cachedLastBlockHeight.Store(0)
 	require.Equal(t, int64(1), q.getQueryBlockHeight())
 }
 
@@ -170,7 +171,8 @@ func TestGetQueryBlockHeight_ZeroCache(t *testing.T) {
 func TestGetQueryBlockHeight_NegativeCache(t *testing.T) {
 	t.Parallel()
 
-	q := &VerifiedQueryClient{cachedLastBlockHeight: -5}
+	q := &VerifiedQueryClient{}
+	q.cachedLastBlockHeight.Store(-5)
 	require.Equal(t, int64(1), q.getQueryBlockHeight())
 }
 
@@ -178,7 +180,8 @@ func TestGetQueryBlockHeight_NegativeCache(t *testing.T) {
 func TestGetQueryBlockHeight_PositiveCache(t *testing.T) {
 	t.Parallel()
 
-	q := &VerifiedQueryClient{cachedLastBlockHeight: 42}
+	q := &VerifiedQueryClient{}
+	q.cachedLastBlockHeight.Store(42)
 	require.Equal(t, int64(42), q.getQueryBlockHeight())
 }
 
@@ -192,10 +195,10 @@ func TestStartSchedulingLastBlockCaching_CancelStop(t *testing.T) {
 	t.Parallel()
 
 	q := &VerifiedQueryClient{
-		cachedLastBlockHeight: 1,
 		// rpcClient is nil; the goroutine only exits on ctx.Done() in this test
 		// because the ticker fires much less frequently than the cancel below.
 	}
+	q.cachedLastBlockHeight.Store(1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
