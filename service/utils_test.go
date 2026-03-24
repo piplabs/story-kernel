@@ -12,73 +12,94 @@ import (
 )
 
 func TestCalculateReportData(t *testing.T) {
+	validStartBlockHash := make([]byte, 32)
+	validStartBlockHash[0] = 0xab
+
 	tests := []struct {
-		name           string
-		round          uint32
-		validatorAddr  string
-		enclaveType    [32]byte
-		enclaveCommKey []byte
-		dkgPubKey      []byte
-		wantErr        bool
-		errContains    string
+		name             string
+		validatorAddr    string
+		round            uint32
+		startBlockHeight uint64
+		startBlockHash   []byte
+		dkgPubKey        []byte
+		enclaveCommKey   []byte
+		wantErr          bool
+		errContains      string
 	}{
 		{
-			name:           "valid input",
-			round:          1,
-			validatorAddr:  "0x1234567890123456789012345678901234567890",
-			enclaveType:    [32]byte{0x01},
-			enclaveCommKey: []byte{0x04, 0x05, 0x06},
-			dkgPubKey:      []byte{0x01, 0x02, 0x03},
-			wantErr:        false,
+			name:             "valid input",
+			validatorAddr:    "0x1234567890123456789012345678901234567890",
+			round:            1,
+			startBlockHeight: 100,
+			startBlockHash:   validStartBlockHash,
+			dkgPubKey:        []byte{0x01, 0x02, 0x03},
+			enclaveCommKey:   []byte{0x04, 0x05, 0x06},
+			wantErr:          false,
 		},
 		{
-			name:           "valid input without 0x prefix",
-			round:          100,
-			validatorAddr:  "1234567890123456789012345678901234567890",
-			enclaveType:    [32]byte{0xaa, 0xbb},
-			enclaveCommKey: []byte{0xbb},
-			dkgPubKey:      []byte{0xaa},
-			wantErr:        false,
+			name:             "valid input without 0x prefix",
+			validatorAddr:    "1234567890123456789012345678901234567890",
+			round:            100,
+			startBlockHeight: 200,
+			startBlockHash:   validStartBlockHash,
+			dkgPubKey:        []byte{0xaa},
+			enclaveCommKey:   []byte{0xbb},
+			wantErr:          false,
 		},
 		{
-			name:           "invalid address - too short",
-			round:          1,
-			validatorAddr:  "0x1234",
-			enclaveType:    [32]byte{0x01},
-			enclaveCommKey: []byte{0x02},
-			dkgPubKey:      []byte{0x01},
-			wantErr:        true,
-			errContains:    "invalid address",
+			name:             "invalid address - too short",
+			validatorAddr:    "0x1234",
+			round:            1,
+			startBlockHeight: 100,
+			startBlockHash:   validStartBlockHash,
+			dkgPubKey:        []byte{0x01},
+			enclaveCommKey:   []byte{0x02},
+			wantErr:          true,
+			errContains:      "invalid address",
 		},
 		{
-			name:           "invalid address - not hex",
-			round:          1,
-			validatorAddr:  "0xZZZZ567890123456789012345678901234567890",
-			enclaveType:    [32]byte{0x01},
-			enclaveCommKey: []byte{0x02},
-			dkgPubKey:      []byte{0x01},
-			wantErr:        true,
-			errContains:    "invalid address",
+			name:             "invalid address - not hex",
+			validatorAddr:    "0xZZZZ567890123456789012345678901234567890",
+			round:            1,
+			startBlockHeight: 100,
+			startBlockHash:   validStartBlockHash,
+			dkgPubKey:        []byte{0x01},
+			enclaveCommKey:   []byte{0x02},
+			wantErr:          true,
+			errContains:      "invalid address",
 		},
 		{
-			name:           "large round number",
-			round:          4294967295, // max uint32
-			validatorAddr:  "0x1234567890123456789012345678901234567890",
-			enclaveType:    [32]byte{0xff},
-			enclaveCommKey: []byte{0x02},
-			dkgPubKey:      []byte{0x01},
-			wantErr:        false,
+			name:             "invalid startBlockHash - too short",
+			validatorAddr:    "0x1234567890123456789012345678901234567890",
+			round:            1,
+			startBlockHeight: 100,
+			startBlockHash:   []byte{0x01, 0x02},
+			dkgPubKey:        []byte{0x01},
+			enclaveCommKey:   []byte{0x02},
+			wantErr:          true,
+			errContains:      "startBlockHash must be 32 bytes",
+		},
+		{
+			name:             "large round number",
+			validatorAddr:    "0x1234567890123456789012345678901234567890",
+			round:            4294967295,
+			startBlockHeight: 1000000,
+			startBlockHash:   validStartBlockHash,
+			dkgPubKey:        []byte{0x01},
+			enclaveCommKey:   []byte{0x02},
+			wantErr:          false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := calculateReportData(
-				tt.round,
 				tt.validatorAddr,
-				tt.enclaveType,
-				tt.enclaveCommKey,
+				tt.round,
+				tt.startBlockHeight,
+				tt.startBlockHash,
 				tt.dkgPubKey,
+				tt.enclaveCommKey,
 			)
 
 			if tt.wantErr {
@@ -97,95 +118,86 @@ func TestCalculateReportData(t *testing.T) {
 }
 
 func TestCalculateReportDataDeterministic(t *testing.T) {
-	round := uint32(42)
 	validatorAddr := "0x1234567890123456789012345678901234567890"
-	enclaveType := [32]byte{0x01, 0x02}
-	enclaveCommKey := []byte{0xdd, 0xee, 0xff}
+	round := uint32(42)
+	startBlockHeight := uint64(1000)
+	startBlockHash := make([]byte, 32)
+	startBlockHash[0] = 0xab
 	dkgPubKey := []byte{0xaa, 0xbb, 0xcc}
+	enclaveCommKey := []byte{0xdd, 0xee, 0xff}
 
-	result1, err1 := calculateReportData(round, validatorAddr, enclaveType, enclaveCommKey, dkgPubKey)
+	result1, err1 := calculateReportData(validatorAddr, round, startBlockHeight, startBlockHash, dkgPubKey, enclaveCommKey)
 	require.NoError(t, err1)
 
-	result2, err2 := calculateReportData(round, validatorAddr, enclaveType, enclaveCommKey, dkgPubKey)
+	result2, err2 := calculateReportData(validatorAddr, round, startBlockHeight, startBlockHash, dkgPubKey, enclaveCommKey)
 	require.NoError(t, err2)
 
 	assert.Equal(t, result1, result2, "Same inputs should produce same reportData")
 }
 
-func TestCalculateReportDataMatchesSolidityABIEncode(t *testing.T) {
-	// This test verifies the encoding matches Solidity's abi.encode(EnclaveInstanceData)
-	// CRITICAL: This format must match the DKG contract's keccak256(abi.encode(enclaveInstanceData))
-
-	round := uint32(1)
+func TestCalculateReportDataMatchesSolidityABIEncodePacked(t *testing.T) {
 	validatorAddr := "0x1234567890123456789012345678901234567890"
-	enclaveType := [32]byte{0xaa}
-	enclaveCommKey := []byte{0xcc, 0xdd}
+	round := uint32(1)
+	startBlockHeight := uint64(1000)
+	startBlockHash := make([]byte, 32)
+	startBlockHash[0] = 0xab
 	dkgPubKey := []byte{0xaa, 0xbb}
+	enclaveCommKey := []byte{0xcc, 0xdd}
 
-	reportData, err := calculateReportData(round, validatorAddr, enclaveType, enclaveCommKey, dkgPubKey)
+	reportData, err := calculateReportData(validatorAddr, round, startBlockHeight, startBlockHash, dkgPubKey, enclaveCommKey)
 	require.NoError(t, err)
 
-	// Manually compute using go-ethereum ABI to verify
-	uint32Ty, _ := abi.NewType("uint32", "", nil)
-	addressTy, _ := abi.NewType("address", "", nil)
-	bytes32Ty, _ := abi.NewType("bytes32", "", nil)
-	bytesTy, _ := abi.NewType("bytes", "", nil)
+	addrBytes := common.HexToAddress(validatorAddr).Bytes()
+	roundBytes := uint32ToBytes(round)
+	heightBytes := int64ToBytes(int64(startBlockHeight))
 
-	args := abi.Arguments{
-		{Type: uint32Ty},
-		{Type: addressTy},
-		{Type: bytes32Ty},
-		{Type: bytesTy},
-		{Type: bytesTy},
-	}
+	expected := make([]byte, 0)
+	expected = append(expected, addrBytes...)
+	expected = append(expected, roundBytes...)
+	expected = append(expected, heightBytes...)
+	expected = append(expected, startBlockHash...)
+	expected = append(expected, dkgPubKey...)
+	expected = append(expected, enclaveCommKey...)
 
-	encoded, err := args.Pack(
-		round,
-		common.HexToAddress(validatorAddr),
-		enclaveType,
-		enclaveCommKey,
-		dkgPubKey,
-	)
-	require.NoError(t, err)
-
-	expectedHash := ecrypto.Keccak256(encoded)
+	expectedHash := ecrypto.Keccak256(expected)
 	assert.Equal(t, expectedHash, reportData,
-		"reportData must match keccak256(abi.encode(EnclaveInstanceData))")
+		"reportData must match keccak256(abi.encodePacked(validatorAddr, round, startBlockHeight, startBlockHash, dkgPubKey, enclaveCommKey))")
 
-	// Verify ABI encoding has expected structure:
-	// 5 head slots (5*32=160) + 2 dynamic data sections
-	assert.True(t, len(encoded) >= 160, "encoded data must have at least 5 head slots")
+	assert.Equal(t, 20+4+8+32+len(dkgPubKey)+len(enclaveCommKey), len(expected),
+		"encodePacked should concatenate without padding")
 }
 
 func TestCalculateReportDataInputVariation(t *testing.T) {
-	baseRound := uint32(1)
 	baseAddr := "0x1234567890123456789012345678901234567890"
-	baseEnclaveType := [32]byte{0x01}
-	baseCommKey := []byte{0xbb}
+	baseRound := uint32(1)
+	baseHeight := uint64(1000)
+	baseHash := make([]byte, 32)
+	baseHash[0] = 0x01
 	baseDkgPub := []byte{0xaa}
+	baseCommKey := []byte{0xbb}
 
-	baseResult, err := calculateReportData(baseRound, baseAddr, baseEnclaveType, baseCommKey, baseDkgPub)
+	baseResult, err := calculateReportData(baseAddr, baseRound, baseHeight, baseHash, baseDkgPub, baseCommKey)
 	require.NoError(t, err)
 
-	// Change round
-	result1, _ := calculateReportData(999, baseAddr, baseEnclaveType, baseCommKey, baseDkgPub)
-	assert.NotEqual(t, baseResult, result1, "changing round should change reportData")
+	result1, _ := calculateReportData("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF", baseRound, baseHeight, baseHash, baseDkgPub, baseCommKey)
+	assert.NotEqual(t, baseResult, result1, "changing validator address should change reportData")
 
-	// Change validator address
-	result2, _ := calculateReportData(baseRound, "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF", baseEnclaveType, baseCommKey, baseDkgPub)
-	assert.NotEqual(t, baseResult, result2, "changing validator address should change reportData")
+	result2, _ := calculateReportData(baseAddr, 999, baseHeight, baseHash, baseDkgPub, baseCommKey)
+	assert.NotEqual(t, baseResult, result2, "changing round should change reportData")
 
-	// Change enclave type
-	result3, _ := calculateReportData(baseRound, baseAddr, [32]byte{0xff}, baseCommKey, baseDkgPub)
-	assert.NotEqual(t, baseResult, result3, "changing enclaveType should change reportData")
+	result3, _ := calculateReportData(baseAddr, baseRound, 9999, baseHash, baseDkgPub, baseCommKey)
+	assert.NotEqual(t, baseResult, result3, "changing startBlockHeight should change reportData")
 
-	// Change enclaveCommKey
-	result4, _ := calculateReportData(baseRound, baseAddr, baseEnclaveType, []byte{0xff}, baseDkgPub)
-	assert.NotEqual(t, baseResult, result4, "changing enclaveCommKey should change reportData")
+	altHash := make([]byte, 32)
+	altHash[0] = 0xff
+	result4, _ := calculateReportData(baseAddr, baseRound, baseHeight, altHash, baseDkgPub, baseCommKey)
+	assert.NotEqual(t, baseResult, result4, "changing startBlockHash should change reportData")
 
-	// Change dkgPubKey
-	result5, _ := calculateReportData(baseRound, baseAddr, baseEnclaveType, baseCommKey, []byte{0xff})
+	result5, _ := calculateReportData(baseAddr, baseRound, baseHeight, baseHash, []byte{0xff}, baseCommKey)
 	assert.NotEqual(t, baseResult, result5, "changing dkgPubKey should change reportData")
+
+	result6, _ := calculateReportData(baseAddr, baseRound, baseHeight, baseHash, baseDkgPub, []byte{0xff})
+	assert.NotEqual(t, baseResult, result6, "changing enclaveCommKey should change reportData")
 }
 
 func TestInt64ToBytes(t *testing.T) {
@@ -333,14 +345,15 @@ func TestReverseBytesDoesNotMutateInput(t *testing.T) {
 var _ = hex.EncodeToString
 
 func BenchmarkCalculateReportData(b *testing.B) {
-	round := uint32(1)
 	validatorAddr := "0x1234567890123456789012345678901234567890"
-	enclaveType := [32]byte{0x01}
-	enclaveCommKey := make([]byte, 64)
+	round := uint32(1)
+	startBlockHeight := uint64(1000)
+	startBlockHash := make([]byte, 32)
 	dkgPubKey := make([]byte, 32)
+	enclaveCommKey := make([]byte, 64)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = calculateReportData(round, validatorAddr, enclaveType, enclaveCommKey, dkgPubKey)
+		_, _ = calculateReportData(validatorAddr, round, startBlockHeight, startBlockHash, dkgPubKey, enclaveCommKey)
 	}
 }

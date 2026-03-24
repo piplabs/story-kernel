@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/common"
 	ecrypto "github.com/ethereum/go-ethereum/crypto"
 )
 
@@ -21,7 +19,7 @@ import (
 //	    bytes enclaveCommKey;
 //	    bytes dkgPubKey;
 //	}
-func calculateReportData(round uint32, validatorAddr string, enclaveType [32]byte, enclaveCommKey, dkgPubKey []byte) ([]byte, error) {
+func calculateReportData(validatorAddr string, round uint32, startBlockHeight uint64, startBlockHash []byte, dkgPubKey, enclaveCommKey []byte) ([]byte, error) {
 	addr := strings.TrimPrefix(validatorAddr, "0x")
 
 	addrBytes, err := hex.DecodeString(addr)
@@ -29,23 +27,17 @@ func calculateReportData(round uint32, validatorAddr string, enclaveType [32]byt
 		return nil, fmt.Errorf("invalid address (%s): %w", addr, err)
 	}
 
-	uint32Ty, _ := abi.NewType("uint32", "", nil)
-	addressTy, _ := abi.NewType("address", "", nil)
-	bytes32Ty, _ := abi.NewType("bytes32", "", nil)
-	bytesTy, _ := abi.NewType("bytes", "", nil)
-
-	args := abi.Arguments{
-		{Type: uint32Ty},
-		{Type: addressTy},
-		{Type: bytes32Ty},
-		{Type: bytesTy},
-		{Type: bytesTy},
+	if len(startBlockHash) != 32 {
+		return nil, fmt.Errorf("startBlockHash must be 32 bytes, got %d", len(startBlockHash))
 	}
 
-	encoded, err := args.Pack(round, common.HexToAddress(validatorAddr), enclaveType, enclaveCommKey, dkgPubKey)
-	if err != nil {
-		return nil, fmt.Errorf("abi.encode failed: %w", err)
-	}
+	encoded := make([]byte, 0, 20+4+8+32+len(dkgPubKey)+len(enclaveCommKey))
+	encoded = append(encoded, addrBytes...)
+	encoded = append(encoded, uint32ToBytes(round)...)
+	encoded = append(encoded, int64ToBytes(int64(startBlockHeight))...)
+	encoded = append(encoded, startBlockHash...)
+	encoded = append(encoded, dkgPubKey...)
+	encoded = append(encoded, enclaveCommKey...)
 
 	return ecrypto.Keccak256(encoded), nil
 }
