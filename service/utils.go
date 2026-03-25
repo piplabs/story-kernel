@@ -9,6 +9,13 @@ import (
 	ecrypto "github.com/ethereum/go-ethereum/crypto"
 )
 
+const (
+	ethereumAddressSize = 20
+	uint32Size          = 4
+	uint64Size          = 8
+	blockHashSize       = 32
+)
+
 // calculateReportData computes the TEE attestation report data for DKG registration.
 // It produces keccak256(abi.encode(EnclaveInstanceData)) matching the Solidity struct:
 //
@@ -23,15 +30,16 @@ func calculateReportData(validatorAddr string, round uint32, startBlockHeight ui
 	addr := strings.TrimPrefix(validatorAddr, "0x")
 
 	addrBytes, err := hex.DecodeString(addr)
-	if err != nil || len(addrBytes) != 20 {
+	if err != nil || len(addrBytes) != ethereumAddressSize {
 		return nil, fmt.Errorf("invalid address (%s): %w", addr, err)
 	}
 
-	if len(startBlockHash) != 32 {
-		return nil, fmt.Errorf("startBlockHash must be 32 bytes, got %d", len(startBlockHash))
+	if len(startBlockHash) != blockHashSize {
+		return nil, fmt.Errorf("startBlockHash must be %d bytes, got %d", blockHashSize, len(startBlockHash))
 	}
 
-	encoded := make([]byte, 0, 20+4+8+32+len(dkgPubKey)+len(enclaveCommKey))
+	// Pre-allocate buffer for: validatorAddr(20) + round(4) + startBlockHeight(8) + startBlockHash(32) + variable keys
+	encoded := make([]byte, 0, ethereumAddressSize+uint32Size+uint64Size+blockHashSize+len(enclaveCommKey)+len(dkgPubKey))
 	encoded = append(encoded, addrBytes...)
 	encoded = append(encoded, uint32ToBytes(round)...)
 	encoded = append(encoded, int64ToBytes(int64(startBlockHeight))...)
