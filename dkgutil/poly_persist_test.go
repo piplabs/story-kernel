@@ -407,35 +407,140 @@ func TestGetDealerPublicInfo(t *testing.T) {
 	assert.Equal(t, threshold, tVal)
 }
 
+// TestExtractDealerPolyCoeffs_ZerosCoefficientsAfterUse verifies that
+// ExtractDealerPolyCoeffs zeros the in-memory scalar coefficients after
+// marshaling them. This is a defense-in-depth measure to prevent secret
+// polynomial leakage via heap residue.
+func TestExtractDealerPolyCoeffs_ZerosCoefficientsAfterUse(t *testing.T) {
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+	dkgs, _, _ := setupTestDKG(t, 3, 2)
+
+	// Get a reference to the dealer's polynomial BEFORE extraction
+	dealer, err := getDealerViaReflect(dkgs[0])
+	require.NoError(t, err)
+	poly := dealer.PrivatePoly()
+	require.NotNil(t, poly)
+
+	// Grab the coefficient slice — these are the same kyber.Scalar objects
+	// that ExtractDealerPolyCoeffs will zero via defer.
+	coeffsBefore := poly.Coefficients()
+	require.NotEmpty(t, coeffsBefore)
+
+	// Verify coefficients are non-zero before extraction
+	zeroScalar := suite.Scalar().Zero()
+	for i, c := range coeffsBefore {
+		require.False(t, c.Equal(zeroScalar),
+			"coefficient[%d] should be non-zero before extraction", i)
+	}
+
+	// Extract — this should marshal first, then zero the coefficients via defer
+	coeffBytes, err := ExtractDealerPolyCoeffs(dkgs[0], suite)
+	require.NoError(t, err)
+	require.NotEmpty(t, coeffBytes)
+
+	// Verify: the returned byte slices are valid (non-zero, can be unmarshaled)
+	for i, bz := range coeffBytes {
+		s := suite.Scalar()
+		err := s.UnmarshalBinary(bz)
+		require.NoError(t, err, "returned coefficient[%d] bytes should be valid", i)
+		require.False(t, s.Equal(zeroScalar),
+			"returned coefficient[%d] should represent a non-zero scalar", i)
+	}
+
+	// Verify: the original in-memory scalars have been zeroed.
+	// Since Coefficients() returns a copy of the slice but the kyber.Scalar
+	// values are pointers to the same underlying data, Zero() on those
+	// scalars mutates the actual objects. Re-fetch to confirm.
+	coeffsAfter := poly.Coefficients()
+	for i, c := range coeffsAfter {
+		assert.True(t, c.Equal(zeroScalar),
+			"coefficient[%d] should be zeroed after ExtractDealerPolyCoeffs", i)
+	}
+}
+
+// TestExtractAndRestore_RoundTrip_WithZeroing verifies that the full
+// Extract -> Restore round-trip works correctly even after the zeroing
+// fix. The returned byte slices must remain valid for restoration.
+func TestExtractAndRestore_RoundTrip_WithZeroing(t *testing.T) {
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+	n := 3
+	threshold := 2
+
+	dkgs, privKeys, pubKeys := setupTestDKG(t, n, threshold)
+
+	// Get the original session ID for comparison
+	origDealer, err := getDealerViaReflect(dkgs[0])
+	require.NoError(t, err)
+	origSessionID := origDealer.SessionID()
+	origCommits := origDealer.Commits()
+
+	// Extract coefficients (this will zero the originals)
+	coeffBytes, err := ExtractDealerPolyCoeffs(dkgs[0], suite)
+	require.NoError(t, err)
+
+	// Restore into a fresh DKG instance — the byte slices must still be valid
+	freshDKG, err := dkg.NewDistKeyGenerator(suite, privKeys[0], pubKeys, threshold)
+	require.NoError(t, err)
+
+	err = RestoreDealerPoly(suite, freshDKG, coeffBytes)
+	require.NoError(t, err)
+
+	// Verify session ID and commitments match the original
+	restoredDealer, err := getDealerViaReflect(freshDKG)
+	require.NoError(t, err)
+
+	assert.True(t, bytes.Equal(origSessionID, restoredDealer.SessionID()),
+		"restored session ID should match original")
+
+	restoredCommits := restoredDealer.Commits()
+	require.Len(t, restoredCommits, len(origCommits))
+	for i := range origCommits {
+		assert.True(t, origCommits[i].Equal(restoredCommits[i]),
+			"commitment[%d] should match after restore", i)
+	}
+}
+
 // TestExtractAndRestoreCoefficients_CoefficientsPreserved verifies that
-// extracted and restored coefficients are byte-identical.
+// extracted coefficient bytes faithfully represent the original polynomial.
+// Note: after extraction, the in-memory scalars are zeroed (defense-in-depth),
+// so we capture the original bytes BEFORE calling ExtractDealerPolyCoeffs.
 func TestExtractAndRestoreCoefficients_CoefficientsPreserved(t *testing.T) {
 	suite := edwards25519.NewBlakeSHA256Ed25519()
 	dkgs, _, _ := setupTestDKG(t, 3, 2)
 
-	// Extract coefficients
-	coeffBytes, err := ExtractDealerPolyCoeffs(dkgs[0], suite)
-	require.NoError(t, err)
-
-	// Get original scalars for comparison
+	// Capture original coefficient bytes BEFORE extraction (which zeros them)
 	origDealer, err := getDealerViaReflect(dkgs[0])
 	require.NoError(t, err)
 	origCoeffs := origDealer.PrivatePoly().Coefficients()
 
-	// Verify byte representation matches
+	origCoeffBytes := make([][]byte, len(origCoeffs))
 	for i, c := range origCoeffs {
-		expected, err := c.MarshalBinary()
+		bz, err := c.MarshalBinary()
 		require.NoError(t, err)
-		assert.True(t, bytes.Equal(expected, coeffBytes[i]),
-			"coefficient[%d] bytes should match", i)
+		origCoeffBytes[i] = bz
 	}
 
-	// Unmarshal and verify scalar equality
+	// Extract coefficients (this will zero the in-memory scalars)
+	coeffBytes, err := ExtractDealerPolyCoeffs(dkgs[0], suite)
+	require.NoError(t, err)
+
+	// Verify byte representation matches the pre-extraction snapshot
+	for i := range origCoeffBytes {
+		assert.True(t, bytes.Equal(origCoeffBytes[i], coeffBytes[i]),
+			"coefficient[%d] bytes should match pre-extraction snapshot", i)
+	}
+
+	// Verify round-trip: unmarshal extracted bytes and compare with snapshot
 	for i, bz := range coeffBytes {
 		s := suite.Scalar()
 		err := s.UnmarshalBinary(bz)
 		require.NoError(t, err)
-		assert.True(t, s.Equal(origCoeffs[i]),
+
+		orig := suite.Scalar()
+		err = orig.UnmarshalBinary(origCoeffBytes[i])
+		require.NoError(t, err)
+
+		assert.True(t, s.Equal(orig),
 			"unmarshaled coefficient[%d] should equal original", i)
 	}
 }
