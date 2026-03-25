@@ -16,6 +16,7 @@ import (
 	mpc "github.com/coinbase/cb-mpc/demos-go/cb-mpc-go/api/mpc"
 	ecrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/ecies"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
@@ -212,13 +213,30 @@ func (s *DKGServer) verifyRoundMatchesLatestNetwork(ctx context.Context, round u
 	return latest, nil
 }
 
+// partialDecryptSignatureMaterial holds the fields committed to by the validator
+// signature on a partial decryption response. RLP encoding gives each field an
+// unambiguous length prefix, preventing boundary-shift collisions that arise
+// from raw concatenation of variable-length byte slices.
+type partialDecryptSignatureMaterial struct {
+	Round            uint32
+	Ciphertext       []byte
+	EncryptedPartial []byte
+	EphemeralPubKey  []byte
+	PubShare         []byte
+}
+
 func (s *DKGServer) signPartialDecryptResponse(codeCommitmentHex string, round uint32, ciphertext []byte, encryptedPartial []byte, ephPubKey []byte, pubShareBz []byte) ([]byte, error) {
-	encoded := make([]byte, 0, 4+len(ciphertext)+len(encryptedPartial)+len(ephPubKey)+len(pubShareBz))
-	encoded = append(encoded, uint32ToBytes(round)...)
-	encoded = append(encoded, ciphertext...)
-	encoded = append(encoded, encryptedPartial...)
-	encoded = append(encoded, ephPubKey...)
-	encoded = append(encoded, pubShareBz...)
+	material := partialDecryptSignatureMaterial{
+		Round:            round,
+		Ciphertext:       ciphertext,
+		EncryptedPartial: encryptedPartial,
+		EphemeralPubKey:  ephPubKey,
+		PubShare:         pubShareBz,
+	}
+	encoded, err := rlp.EncodeToBytes(material)
+	if err != nil {
+		return nil, fmt.Errorf("failed to RLP encode signature material: %w", err)
+	}
 	respHash := ecrypto.Keccak256(encoded)
 
 	priv, err := s.DKGStore.LoadSealedSecp256k1Key(codeCommitmentHex, round)
