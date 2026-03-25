@@ -140,9 +140,5 @@ func validateGenerateAndSealKeyRequest(req *pb.GenerateAndSealKeyRequest) error 
 		return errors.New("code commitment is required but missing")
 	}
 
-	if len(req.GetEnclaveType()) != 32 {
-		return errors.New("enclave type must be exactly 32 bytes")
-	}
-
 	return nil
 }
