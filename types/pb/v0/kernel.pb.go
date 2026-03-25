@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.10
 // 	protoc        (unknown)
-// source: tee.proto
+// source: kernel.proto
 
 package v0
 
@@ -63,11 +63,11 @@ func (x DKGStage) String() string {
 }
 
 func (DKGStage) Descriptor() protoreflect.EnumDescriptor {
-	return file_tee_proto_enumTypes[0].Descriptor()
+	return file_kernel_proto_enumTypes[0].Descriptor()
 }
 
 func (DKGStage) Type() protoreflect.EnumType {
-	return &file_tee_proto_enumTypes[0]
+	return &file_kernel_proto_enumTypes[0]
 }
 
 func (x DKGStage) Number() protoreflect.EnumNumber {
@@ -76,7 +76,7 @@ func (x DKGStage) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use DKGStage.Descriptor instead.
 func (DKGStage) EnumDescriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{0}
+	return file_kernel_proto_rawDescGZIP(), []int{0}
 }
 
 type DKGRegStatus int32
@@ -115,11 +115,11 @@ func (x DKGRegStatus) String() string {
 }
 
 func (DKGRegStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_tee_proto_enumTypes[1].Descriptor()
+	return file_kernel_proto_enumTypes[1].Descriptor()
 }
 
 func (DKGRegStatus) Type() protoreflect.EnumType {
-	return &file_tee_proto_enumTypes[1]
+	return &file_kernel_proto_enumTypes[1]
 }
 
 func (x DKGRegStatus) Number() protoreflect.EnumNumber {
@@ -128,7 +128,7 @@ func (x DKGRegStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use DKGRegStatus.Descriptor instead.
 func (DKGRegStatus) EnumDescriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{1}
+	return file_kernel_proto_rawDescGZIP(), []int{1}
 }
 
 type GetCodeCommitmentRequest struct {
@@ -139,7 +139,7 @@ type GetCodeCommitmentRequest struct {
 
 func (x *GetCodeCommitmentRequest) Reset() {
 	*x = GetCodeCommitmentRequest{}
-	mi := &file_tee_proto_msgTypes[0]
+	mi := &file_kernel_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -151,7 +151,7 @@ func (x *GetCodeCommitmentRequest) String() string {
 func (*GetCodeCommitmentRequest) ProtoMessage() {}
 
 func (x *GetCodeCommitmentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[0]
+	mi := &file_kernel_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -164,7 +164,7 @@ func (x *GetCodeCommitmentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCodeCommitmentRequest.ProtoReflect.Descriptor instead.
 func (*GetCodeCommitmentRequest) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{0}
+	return file_kernel_proto_rawDescGZIP(), []int{0}
 }
 
 type GetCodeCommitmentResponse struct {
@@ -176,7 +176,7 @@ type GetCodeCommitmentResponse struct {
 
 func (x *GetCodeCommitmentResponse) Reset() {
 	*x = GetCodeCommitmentResponse{}
-	mi := &file_tee_proto_msgTypes[1]
+	mi := &file_kernel_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -188,7 +188,7 @@ func (x *GetCodeCommitmentResponse) String() string {
 func (*GetCodeCommitmentResponse) ProtoMessage() {}
 
 func (x *GetCodeCommitmentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[1]
+	mi := &file_kernel_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -201,7 +201,7 @@ func (x *GetCodeCommitmentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCodeCommitmentResponse.ProtoReflect.Descriptor instead.
 func (*GetCodeCommitmentResponse) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{1}
+	return file_kernel_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *GetCodeCommitmentResponse) GetCodeCommitment() []byte {
@@ -222,7 +222,7 @@ type GenerateAndSealKeyRequest struct {
 
 func (x *GenerateAndSealKeyRequest) Reset() {
 	*x = GenerateAndSealKeyRequest{}
-	mi := &file_tee_proto_msgTypes[2]
+	mi := &file_kernel_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -234,7 +234,7 @@ func (x *GenerateAndSealKeyRequest) String() string {
 func (*GenerateAndSealKeyRequest) ProtoMessage() {}
 
 func (x *GenerateAndSealKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[2]
+	mi := &file_kernel_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -247,7 +247,7 @@ func (x *GenerateAndSealKeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateAndSealKeyRequest.ProtoReflect.Descriptor instead.
 func (*GenerateAndSealKeyRequest) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{2}
+	return file_kernel_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GenerateAndSealKeyRequest) GetCodeCommitment() []byte {
@@ -286,7 +286,7 @@ type GenerateAndSealKeyResponse struct {
 
 func (x *GenerateAndSealKeyResponse) Reset() {
 	*x = GenerateAndSealKeyResponse{}
-	mi := &file_tee_proto_msgTypes[3]
+	mi := &file_kernel_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -298,7 +298,7 @@ func (x *GenerateAndSealKeyResponse) String() string {
 func (*GenerateAndSealKeyResponse) ProtoMessage() {}
 
 func (x *GenerateAndSealKeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[3]
+	mi := &file_kernel_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -311,7 +311,7 @@ func (x *GenerateAndSealKeyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateAndSealKeyResponse.ProtoReflect.Descriptor instead.
 func (*GenerateAndSealKeyResponse) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{3}
+	return file_kernel_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *GenerateAndSealKeyResponse) GetCodeCommitment() []byte {
@@ -381,7 +381,7 @@ type DKGRegistration struct {
 
 func (x *DKGRegistration) Reset() {
 	*x = DKGRegistration{}
-	mi := &file_tee_proto_msgTypes[4]
+	mi := &file_kernel_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -393,7 +393,7 @@ func (x *DKGRegistration) String() string {
 func (*DKGRegistration) ProtoMessage() {}
 
 func (x *DKGRegistration) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[4]
+	mi := &file_kernel_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -406,7 +406,7 @@ func (x *DKGRegistration) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DKGRegistration.ProtoReflect.Descriptor instead.
 func (*DKGRegistration) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{4}
+	return file_kernel_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *DKGRegistration) GetRound() uint32 {
@@ -498,7 +498,7 @@ type DKGNetwork struct {
 
 func (x *DKGNetwork) Reset() {
 	*x = DKGNetwork{}
-	mi := &file_tee_proto_msgTypes[5]
+	mi := &file_kernel_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -510,7 +510,7 @@ func (x *DKGNetwork) String() string {
 func (*DKGNetwork) ProtoMessage() {}
 
 func (x *DKGNetwork) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[5]
+	mi := &file_kernel_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -523,7 +523,7 @@ func (x *DKGNetwork) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DKGNetwork.ProtoReflect.Descriptor instead.
 func (*DKGNetwork) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{5}
+	return file_kernel_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DKGNetwork) GetRound() uint32 {
@@ -614,7 +614,7 @@ type GenerateDealsRequest struct {
 
 func (x *GenerateDealsRequest) Reset() {
 	*x = GenerateDealsRequest{}
-	mi := &file_tee_proto_msgTypes[6]
+	mi := &file_kernel_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -626,7 +626,7 @@ func (x *GenerateDealsRequest) String() string {
 func (*GenerateDealsRequest) ProtoMessage() {}
 
 func (x *GenerateDealsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[6]
+	mi := &file_kernel_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -639,7 +639,7 @@ func (x *GenerateDealsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateDealsRequest.ProtoReflect.Descriptor instead.
 func (*GenerateDealsRequest) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{6}
+	return file_kernel_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *GenerateDealsRequest) GetCodeCommitment() []byte {
@@ -674,7 +674,7 @@ type GenerateDealsResponse struct {
 
 func (x *GenerateDealsResponse) Reset() {
 	*x = GenerateDealsResponse{}
-	mi := &file_tee_proto_msgTypes[7]
+	mi := &file_kernel_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -686,7 +686,7 @@ func (x *GenerateDealsResponse) String() string {
 func (*GenerateDealsResponse) ProtoMessage() {}
 
 func (x *GenerateDealsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[7]
+	mi := &file_kernel_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -699,7 +699,7 @@ func (x *GenerateDealsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateDealsResponse.ProtoReflect.Descriptor instead.
 func (*GenerateDealsResponse) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{7}
+	return file_kernel_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GenerateDealsResponse) GetCodeCommitment() []byte {
@@ -735,7 +735,7 @@ type ProcessDealsRequest struct {
 
 func (x *ProcessDealsRequest) Reset() {
 	*x = ProcessDealsRequest{}
-	mi := &file_tee_proto_msgTypes[8]
+	mi := &file_kernel_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -747,7 +747,7 @@ func (x *ProcessDealsRequest) String() string {
 func (*ProcessDealsRequest) ProtoMessage() {}
 
 func (x *ProcessDealsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[8]
+	mi := &file_kernel_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -760,7 +760,7 @@ func (x *ProcessDealsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessDealsRequest.ProtoReflect.Descriptor instead.
 func (*ProcessDealsRequest) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{8}
+	return file_kernel_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ProcessDealsRequest) GetCodeCommitment() []byte {
@@ -802,7 +802,7 @@ type ProcessDealsResponse struct {
 
 func (x *ProcessDealsResponse) Reset() {
 	*x = ProcessDealsResponse{}
-	mi := &file_tee_proto_msgTypes[9]
+	mi := &file_kernel_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -814,7 +814,7 @@ func (x *ProcessDealsResponse) String() string {
 func (*ProcessDealsResponse) ProtoMessage() {}
 
 func (x *ProcessDealsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[9]
+	mi := &file_kernel_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -827,7 +827,7 @@ func (x *ProcessDealsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessDealsResponse.ProtoReflect.Descriptor instead.
 func (*ProcessDealsResponse) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{9}
+	return file_kernel_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ProcessDealsResponse) GetCodeCommitment() []byte {
@@ -863,7 +863,7 @@ type ProcessResponsesRequest struct {
 
 func (x *ProcessResponsesRequest) Reset() {
 	*x = ProcessResponsesRequest{}
-	mi := &file_tee_proto_msgTypes[10]
+	mi := &file_kernel_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -875,7 +875,7 @@ func (x *ProcessResponsesRequest) String() string {
 func (*ProcessResponsesRequest) ProtoMessage() {}
 
 func (x *ProcessResponsesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[10]
+	mi := &file_kernel_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -888,7 +888,7 @@ func (x *ProcessResponsesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessResponsesRequest.ProtoReflect.Descriptor instead.
 func (*ProcessResponsesRequest) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{10}
+	return file_kernel_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ProcessResponsesRequest) GetCodeCommitment() []byte {
@@ -928,7 +928,7 @@ type ProcessResponsesResponse struct {
 
 func (x *ProcessResponsesResponse) Reset() {
 	*x = ProcessResponsesResponse{}
-	mi := &file_tee_proto_msgTypes[11]
+	mi := &file_kernel_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -940,7 +940,7 @@ func (x *ProcessResponsesResponse) String() string {
 func (*ProcessResponsesResponse) ProtoMessage() {}
 
 func (x *ProcessResponsesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[11]
+	mi := &file_kernel_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -953,7 +953,7 @@ func (x *ProcessResponsesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessResponsesResponse.ProtoReflect.Descriptor instead.
 func (*ProcessResponsesResponse) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{11}
+	return file_kernel_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ProcessResponsesResponse) GetJustifications() []*Justification {
@@ -977,7 +977,7 @@ type ProcessJustificationRequest struct {
 
 func (x *ProcessJustificationRequest) Reset() {
 	*x = ProcessJustificationRequest{}
-	mi := &file_tee_proto_msgTypes[12]
+	mi := &file_kernel_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -989,7 +989,7 @@ func (x *ProcessJustificationRequest) String() string {
 func (*ProcessJustificationRequest) ProtoMessage() {}
 
 func (x *ProcessJustificationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[12]
+	mi := &file_kernel_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1002,7 +1002,7 @@ func (x *ProcessJustificationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessJustificationRequest.ProtoReflect.Descriptor instead.
 func (*ProcessJustificationRequest) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{12}
+	return file_kernel_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ProcessJustificationRequest) GetCodeCommitment() []byte {
@@ -1042,7 +1042,7 @@ type ProcessJustificationResponse struct {
 
 func (x *ProcessJustificationResponse) Reset() {
 	*x = ProcessJustificationResponse{}
-	mi := &file_tee_proto_msgTypes[13]
+	mi := &file_kernel_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1054,7 +1054,7 @@ func (x *ProcessJustificationResponse) String() string {
 func (*ProcessJustificationResponse) ProtoMessage() {}
 
 func (x *ProcessJustificationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[13]
+	mi := &file_kernel_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1067,7 +1067,7 @@ func (x *ProcessJustificationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessJustificationResponse.ProtoReflect.Descriptor instead.
 func (*ProcessJustificationResponse) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{13}
+	return file_kernel_proto_rawDescGZIP(), []int{13}
 }
 
 type FinalizeDKGRequest struct {
@@ -1081,7 +1081,7 @@ type FinalizeDKGRequest struct {
 
 func (x *FinalizeDKGRequest) Reset() {
 	*x = FinalizeDKGRequest{}
-	mi := &file_tee_proto_msgTypes[14]
+	mi := &file_kernel_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1093,7 +1093,7 @@ func (x *FinalizeDKGRequest) String() string {
 func (*FinalizeDKGRequest) ProtoMessage() {}
 
 func (x *FinalizeDKGRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[14]
+	mi := &file_kernel_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1106,7 +1106,7 @@ func (x *FinalizeDKGRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FinalizeDKGRequest.ProtoReflect.Descriptor instead.
 func (*FinalizeDKGRequest) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{14}
+	return file_kernel_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *FinalizeDKGRequest) GetCodeCommitment() []byte {
@@ -1145,7 +1145,7 @@ type FinalizeDKGResponse struct {
 
 func (x *FinalizeDKGResponse) Reset() {
 	*x = FinalizeDKGResponse{}
-	mi := &file_tee_proto_msgTypes[15]
+	mi := &file_kernel_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1157,7 +1157,7 @@ func (x *FinalizeDKGResponse) String() string {
 func (*FinalizeDKGResponse) ProtoMessage() {}
 
 func (x *FinalizeDKGResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[15]
+	mi := &file_kernel_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1170,7 +1170,7 @@ func (x *FinalizeDKGResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FinalizeDKGResponse.ProtoReflect.Descriptor instead.
 func (*FinalizeDKGResponse) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{15}
+	return file_kernel_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *FinalizeDKGResponse) GetCodeCommitment() []byte {
@@ -1236,7 +1236,7 @@ type PartialDecryptTDH2Request struct {
 
 func (x *PartialDecryptTDH2Request) Reset() {
 	*x = PartialDecryptTDH2Request{}
-	mi := &file_tee_proto_msgTypes[16]
+	mi := &file_kernel_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1248,7 +1248,7 @@ func (x *PartialDecryptTDH2Request) String() string {
 func (*PartialDecryptTDH2Request) ProtoMessage() {}
 
 func (x *PartialDecryptTDH2Request) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[16]
+	mi := &file_kernel_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1261,7 +1261,7 @@ func (x *PartialDecryptTDH2Request) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartialDecryptTDH2Request.ProtoReflect.Descriptor instead.
 func (*PartialDecryptTDH2Request) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{16}
+	return file_kernel_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *PartialDecryptTDH2Request) GetCodeCommitment() []byte {
@@ -1318,7 +1318,7 @@ type PartialDecryptTDH2Response struct {
 
 func (x *PartialDecryptTDH2Response) Reset() {
 	*x = PartialDecryptTDH2Response{}
-	mi := &file_tee_proto_msgTypes[17]
+	mi := &file_kernel_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1330,7 +1330,7 @@ func (x *PartialDecryptTDH2Response) String() string {
 func (*PartialDecryptTDH2Response) ProtoMessage() {}
 
 func (x *PartialDecryptTDH2Response) ProtoReflect() protoreflect.Message {
-	mi := &file_tee_proto_msgTypes[17]
+	mi := &file_kernel_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1343,7 +1343,7 @@ func (x *PartialDecryptTDH2Response) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartialDecryptTDH2Response.ProtoReflect.Descriptor instead.
 func (*PartialDecryptTDH2Response) Descriptor() ([]byte, []int) {
-	return file_tee_proto_rawDescGZIP(), []int{17}
+	return file_kernel_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *PartialDecryptTDH2Response) GetEncryptedPartialDecryption() []byte {
@@ -1374,11 +1374,11 @@ func (x *PartialDecryptTDH2Response) GetSignature() []byte {
 	return nil
 }
 
-var File_tee_proto protoreflect.FileDescriptor
+var File_kernel_proto protoreflect.FileDescriptor
 
-const file_tee_proto_rawDesc = "" +
+const file_kernel_proto_rawDesc = "" +
 	"\n" +
-	"\ttee.proto\x12\x12story.dkg.v1.types\x1a\n" +
+	"\fkernel.proto\x12\x12story.dkg.v1.types\x1a\n" +
 	"deal.proto\"\x1a\n" +
 	"\x18GetCodeCommitmentRequest\"D\n" +
 	"\x19GetCodeCommitmentResponse\x12'\n" +
@@ -1502,20 +1502,20 @@ const file_tee_proto_rawDesc = "" +
 	"\x12PartialDecryptTDH2\x12-.story.dkg.v1.types.PartialDecryptTDH2Request\x1a..story.dkg.v1.types.PartialDecryptTDH2ResponseB-Z+github.com/piplabs/story-kernel/types/pb/v0b\x06proto3"
 
 var (
-	file_tee_proto_rawDescOnce sync.Once
-	file_tee_proto_rawDescData []byte
+	file_kernel_proto_rawDescOnce sync.Once
+	file_kernel_proto_rawDescData []byte
 )
 
-func file_tee_proto_rawDescGZIP() []byte {
-	file_tee_proto_rawDescOnce.Do(func() {
-		file_tee_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_tee_proto_rawDesc), len(file_tee_proto_rawDesc)))
+func file_kernel_proto_rawDescGZIP() []byte {
+	file_kernel_proto_rawDescOnce.Do(func() {
+		file_kernel_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_kernel_proto_rawDesc), len(file_kernel_proto_rawDesc)))
 	})
-	return file_tee_proto_rawDescData
+	return file_kernel_proto_rawDescData
 }
 
-var file_tee_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_tee_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
-var file_tee_proto_goTypes = []any{
+var file_kernel_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_kernel_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_kernel_proto_goTypes = []any{
 	(DKGStage)(0),                        // 0: story.dkg.v1.types.DKGStage
 	(DKGRegStatus)(0),                    // 1: story.dkg.v1.types.DKGRegStatus
 	(*GetCodeCommitmentRequest)(nil),     // 2: story.dkg.v1.types.GetCodeCommitmentRequest
@@ -1540,7 +1540,7 @@ var file_tee_proto_goTypes = []any{
 	(*Response)(nil),                     // 21: story.dkg.v1.types.Response
 	(*Justification)(nil),                // 22: story.dkg.v1.types.Justification
 }
-var file_tee_proto_depIdxs = []int32{
+var file_kernel_proto_depIdxs = []int32{
 	1,  // 0: story.dkg.v1.types.DKGRegistration.status:type_name -> story.dkg.v1.types.DKGRegStatus
 	0,  // 1: story.dkg.v1.types.DKGNetwork.stage:type_name -> story.dkg.v1.types.DKGStage
 	20, // 2: story.dkg.v1.types.GenerateDealsResponse.deals:type_name -> story.dkg.v1.types.Deal
@@ -1572,9 +1572,9 @@ var file_tee_proto_depIdxs = []int32{
 	0,  // [0:8] is the sub-list for field type_name
 }
 
-func init() { file_tee_proto_init() }
-func file_tee_proto_init() {
-	if File_tee_proto != nil {
+func init() { file_kernel_proto_init() }
+func file_kernel_proto_init() {
+	if File_kernel_proto != nil {
 		return
 	}
 	file_deal_proto_init()
@@ -1582,18 +1582,18 @@ func file_tee_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tee_proto_rawDesc), len(file_tee_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kernel_proto_rawDesc), len(file_kernel_proto_rawDesc)),
 			NumEnums:      2,
 			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_tee_proto_goTypes,
-		DependencyIndexes: file_tee_proto_depIdxs,
-		EnumInfos:         file_tee_proto_enumTypes,
-		MessageInfos:      file_tee_proto_msgTypes,
+		GoTypes:           file_kernel_proto_goTypes,
+		DependencyIndexes: file_kernel_proto_depIdxs,
+		EnumInfos:         file_kernel_proto_enumTypes,
+		MessageInfos:      file_kernel_proto_msgTypes,
 	}.Build()
-	File_tee_proto = out.File
-	file_tee_proto_goTypes = nil
-	file_tee_proto_depIdxs = nil
+	File_kernel_proto = out.File
+	file_kernel_proto_goTypes = nil
+	file_kernel_proto_depIdxs = nil
 }

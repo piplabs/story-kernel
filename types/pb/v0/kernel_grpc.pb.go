@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             (unknown)
-// source: tee.proto
+// source: kernel.proto
 
 package v0
 
@@ -383,5 +383,5 @@ var KernelService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "tee.proto",
+	Metadata: "kernel.proto",
 }
