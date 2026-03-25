@@ -25,13 +25,16 @@ type RoundContext struct {
 }
 
 type RoundContextCache struct {
-	mu    sync.RWMutex
-	items map[uint32]*RoundContext
+	mu      sync.RWMutex
+	items   map[uint32]*RoundContext
+	order   []uint32
+	maxSize int
 }
 
 func NewRoundContextCache() *RoundContextCache {
 	return &RoundContextCache{
-		items: make(map[uint32]*RoundContext),
+		items:   make(map[uint32]*RoundContext),
+		maxSize: maxCacheSize,
 	}
 }
 
@@ -48,7 +51,21 @@ func (c *RoundContextCache) Set(round uint32, rc *RoundContext) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if _, exists := c.items[round]; !exists {
+		c.evictIfFull()
+		c.order = append(c.order, round)
+	}
 	c.items[round] = rc
+}
+
+// evictIfFull removes the oldest entry when the cache is at capacity.
+// Must be called while holding c.mu write lock.
+func (c *RoundContextCache) evictIfFull() {
+	if len(c.items) >= c.maxSize && len(c.order) > 0 {
+		oldest := c.order[0]
+		c.order = c.order[1:]
+		delete(c.items, oldest)
+	}
 }
 
 type DKGCache struct {
@@ -185,6 +202,7 @@ func (c *DistKeyShareCache) evictIfFull() {
 }
 
 // PIDCache stores the 1-based PID for each round, derived during SetupDKGNetwork.
+// No eviction — entries are uint32 pairs (~8 bytes each) and accumulate slowly.
 type PIDCache struct {
 	mu    sync.RWMutex
 	cache map[uint32]uint32 // round -> 1-based PID
