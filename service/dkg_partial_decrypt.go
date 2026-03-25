@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/crypto/hkdf"
 
+	"github.com/coinbase/cb-mpc/demos-go/cb-mpc-go/api/curve"
 	mpc "github.com/coinbase/cb-mpc/demos-go/cb-mpc-go/api/mpc"
 	ecrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/ecies"
@@ -24,7 +25,6 @@ import (
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
 
 	"go.dedis.ch/kyber/v4"
-	"go.dedis.ch/kyber/v4/group/edwards25519"
 	dkg "go.dedis.ch/kyber/v4/share/dkg/pedersen"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -121,6 +121,22 @@ func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecry
 	defer pubKey.Free()
 
 	ct := &mpc.TDH2Ciphertext{Bytes: req.GetCiphertext()}
+
+	log.WithFields(log.Fields{
+		"round":          req.GetRound(),
+		"pid":            ownPID,
+		"global_pub_key": hex.EncodeToString(req.GetGlobalPubKey()),
+		"label":          hex.EncodeToString(req.GetLabel()),
+		"ciphertext_len": len(req.GetCiphertext()),
+		"ciphertext_hex": hex.EncodeToString(req.GetCiphertext()),
+		"priv_share_len": len(privShare.Bytes),
+	}).Info("TDH2 partial decrypt: inputs")
+
+	// Verify ciphertext independently before attempting partial decrypt
+	verifyErr := mpc.TDH2Verify(pubKey, ct.Bytes, req.GetLabel())
+	log.WithFields(log.Fields{
+		"verify_result": verifyErr,
+	}).Info("TDH2 partial decrypt: ciphertext verify")
 
 	pd, err := mpc.TDH2PartialDecrypt(int(ownPID), privShare, pubKey, ct, req.GetLabel())
 	if err != nil {
@@ -277,16 +293,33 @@ func buildTDH2PublicKey(dkgPubKey []byte) (*mpc.TDH2PublicKey, error) {
 }
 
 func marshalPubShare(scalar kyber.Scalar) ([]byte, error) {
-	suite := edwards25519.NewBlakeSHA256Ed25519()
-	pubSharePoint := suite.Point().Mul(scalar, nil)
-
-	pointBz, err := pubSharePoint.MarshalBinary()
+	// Convert kyber scalar (little-endian) to cb-mpc scalar (big-endian),
+	// matching the reversal done in bytes2PrivateShare for TDH2PartialDecrypt.
+	shareBz, err := scalar.MarshalBinary()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("marshal scalar: %w", err)
 	}
+	defer zeroBytes(shareBz)
 
-	// Prepend cb-mpc curve prefix so TDH2Combine can deserialize the point.
-	return append([]byte{sec1UncompressedPrefix, tdh2Edwards25519CurveID}, pointBz...), nil
+	// Compute pub share using cb-mpc (x_i * G) so the serialized point is
+	// consistent with the DLEQ proof produced by TDH2PartialDecrypt.
+	c, err := curve.NewEd25519()
+	if err != nil {
+		return nil, fmt.Errorf("create Ed25519 curve: %w", err)
+	}
+	defer c.Free()
+
+	reversed := reverseBytes(shareBz)
+	defer zeroBytes(reversed)
+
+	s := &curve.Scalar{Bytes: reversed}
+	point, err := c.MultiplyGenerator(s)
+	if err != nil {
+		return nil, fmt.Errorf("multiply generator: %w", err)
+	}
+	defer point.Free()
+
+	return point.Bytes(), nil
 }
 
 // encryptPartialToRequester performs secp256k1 ECDH with an ephemeral key and encrypts the partial via AES-GCM.
