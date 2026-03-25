@@ -10,8 +10,8 @@ BIN_NAME = story-kernel
 
 # cb-mpc settings
 CBMPC_DIR = .cbmpc
-CBMPC_REPO = https://github.com/piplabs/cb-mpc.git
-CBMPC_COMMIT = 7f03db8a8fa1
+CBMPC_REPO = https://github.com/piplabs/cb-mpc-fork.git
+CBMPC_COMMIT = v0.0.1-alpha
 CBMPC_PATH = $(CBMPC_DIR)
 
 PROTO_DIR=proto
@@ -22,20 +22,13 @@ PROTO_OUT_DIR=./
         gramine-manifest gramine-sign gramine-enclave-info all-gramine \
         setup-cbmpc lint
 
-# Clone and build cb-mpc if not present
+# Clone cb-mpc if not present; the C++ build is handled by go_with_cpp.sh
 setup-cbmpc:
 	@if [ ! -d "$(CBMPC_DIR)" ]; then \
 		echo "Cloning cb-mpc..."; \
 		git lfs install --skip-smudge 2>/dev/null || true; \
 		git clone $(CBMPC_REPO) $(CBMPC_DIR); \
 		cd $(CBMPC_DIR) && git checkout $(CBMPC_COMMIT); \
-	fi
-	@if [ ! -f "$(CBMPC_DIR)/lib/Release/libcbmpc.dylib" ] && [ ! -f "$(CBMPC_DIR)/lib/Release/libcbmpc.so" ]; then \
-		echo "Building cb-mpc C++ library (dynamic)..."; \
-		mkdir -p $(CBMPC_DIR)/build; \
-		cd $(CBMPC_DIR)/build && \
-		cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DBUILD_SHARED_LIBS=ON && \
-		make -j$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4); \
 	fi
 
 # Simple build without cb-mpc (requires pre-built libcbmpc.a)

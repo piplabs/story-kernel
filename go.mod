@@ -22,7 +22,8 @@ require (
 	google.golang.org/protobuf v1.36.10
 )
 
-replace github.com/coinbase/cb-mpc/demos-go/cb-mpc-go => github.com/piplabs/cb-mpc/demos-go/cb-mpc-go v0.0.0-20251217005819-7f03db8a8fa1
+// in case of update note that changing this is not enough, you also need to update the value in the Makefile
+replace github.com/coinbase/cb-mpc/demos-go/cb-mpc-go => github.com/piplabs/cb-mpc-fork/demos-go/cb-mpc-go v0.0.1-alpha
 
 require (
 	cosmossdk.io/api v0.7.6 // indirect
