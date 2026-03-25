@@ -65,13 +65,6 @@ func toUint256Bytes(v uint32) []byte {
 	return out
 }
 
-func toEthSignedMessageHash(msgHash []byte) []byte {
-	prefix := "\x19Ethereum Signed Message:\n32"
-	data := append([]byte(prefix), msgHash...)
-
-	return ecrypto.Keccak256(data)
-}
-
 // uint32ToBytes converts a uint32 to a 4-byte big-endian representation.
 // This matches Solidity's abi.encodePacked behavior for uint32.
 func uint32ToBytes(i uint32) []byte {

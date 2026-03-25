@@ -49,11 +49,8 @@ func verifyFinalizationSignature(commPubKey []byte, round uint32, codeCommitment
 
 	msgHash := ecrypto.Keccak256(encoded)
 
-	// Solidity: MessageHashUtils.toEthSignedMessageHash(msgHash)
-	ethMsgHash := toEthSignedMessageHash(msgHash)
-
-	// Solidity: signature recovery
-	pubKey, err := ecrypto.SigToPub(ethMsgHash, signature)
+	// Signature recovery using raw keccak256 hash (no Ethereum prefix)
+	pubKey, err := ecrypto.SigToPub(msgHash, signature)
 	if err != nil {
 		return false
 	}

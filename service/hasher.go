@@ -28,7 +28,5 @@ func hashFinalizeDKGResponse(codeCommitment []byte, round uint32, participantsRo
 
 	encoded = append(encoded, pubKeyShare...)
 
-	hash := ecrypto.Keccak256(encoded)
-
-	return toEthSignedMessageHash(hash), nil
+	return ecrypto.Keccak256(encoded), nil
 }
