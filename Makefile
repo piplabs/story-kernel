@@ -49,8 +49,6 @@ run:
 # Generate Gramine manifest from template
 gramine-manifest: build-with-cpp
 	gramine-manifest \
-		-Dlog_level=error \
-		-Dbin_name=$(BIN_NAME) \
 		story-kernel.manifest.template > story-kernel.manifest
 
 # Sign for Gramine SGX
