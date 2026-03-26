@@ -1,19 +1,20 @@
-# Gramine manifest for story-kernel
+# Gramine manifest for story-kernel (Ubuntu 24.04)
 
 [loader]
-log_level = "{{ log_level }}"
-insecure__use_cmdline_argv = true
+log_level = "error"
+argv = ["story-kernel", "start", "--home", "/opt/story-kernel"]
 
 [loader.entrypoint]
 uri = "file:{{ gramine.libos }}"
 
 [loader.env]
 LD_LIBRARY_PATH = "/lib:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu"
-HOME = "/home/ubuntu"
+HOME = "/opt/story-kernel"
 PATH = "/usr/bin:/bin"
+GOMEMLIMIT = "3GiB"
 
 [libos]
-entrypoint = "/{{ bin_name }}"
+entrypoint = "/story-kernel"
 
 [sys]
 insecure__allow_eventfd = true
@@ -36,19 +37,19 @@ path = "/etc"
 uri = "file:/etc"
 
 [[fs.mounts]]
-path = "/{{ bin_name }}"
-uri = "file:./build/{{ bin_name }}"
+path = "/story-kernel"
+uri = "file:./build/story-kernel"
 
 [[fs.mounts]]
-path = "/home/ubuntu"
-uri = "file:/home/ubuntu"
+path = "/opt/story-kernel"
+uri = "file:/opt/story-kernel"
 
 [[fs.mounts]]
 path = "/tmp"
 type = "tmpfs"
 
 [sgx]
-debug = true
+debug = false
 enclave_size = "4G"
 max_threads = 32
 remote_attestation = "dcap"
@@ -56,14 +57,14 @@ remote_attestation = "dcap"
 trusted_files = [
     "file:{{ gramine.libos }}",
     "file:{{ gramine.runtimedir() }}/",
-    "file:./build/{{ bin_name }}",
+    "file:./build/story-kernel",
 ]
 
 allowed_files = [
     "file:/etc/hosts",
     "file:/etc/resolv.conf",
-    "file:/etc/ssl/",
-    "file:/home/ubuntu/",
+    "file:/etc/ssl/certs/",
+    "file:/opt/story-kernel/",
     "file:/lib/x86_64-linux-gnu/",
     "file:/usr/lib/x86_64-linux-gnu/",
 ]

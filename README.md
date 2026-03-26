@@ -45,9 +45,20 @@ operations.
 
 ### Software Requirements
 
-- Ubuntu 24.04
-- Go 1.24+
-- Gramine 1.8+
+All validators **must** use the exact same versions below to produce identical `mr_enclave`
+(code commitment) values. The Gramine manifest content — including resolved library paths — is
+measured into the enclave identity. Any version difference can produce a different code commitment.
+
+| Component | Required Version | Why pinned |
+|-----------|-----------------|------------|
+| **Ubuntu** | 24.04 LTS | Library paths (`/lib/x86_64-linux-gnu/`) are Ubuntu-specific and baked into MRENCLAVE |
+| **Go** | 1.24.0 | Different Go versions (including patch) produce different binaries → different MRENCLAVE |
+| **Gramine** | 1.9 | `gramine.libos` and `gramine.runtimedir()` resolve to version-specific paths → different MRENCLAVE |
+
+> **Why Ubuntu only?** The manifest contains Ubuntu's multiarch library paths
+> (`/lib/x86_64-linux-gnu/`). RHEL-based distros use `/lib64/` instead. Since
+> the manifest is measured into MRENCLAVE, all validators must use the same OS
+> to share a single code commitment.
 
 ## Installation
 
@@ -64,7 +75,7 @@ sudo apt install -y build-essential cmake libssl-dev
 # Add Intel SGX repository
 sudo mkdir -p /etc/apt/keyrings
 wget -qO- https://download.01.org/intel-sgx/sgx_repo/ubuntu/intel-sgx-deb.key | sudo tee /etc/apt/keyrings/intel-sgx-keyring.asc > /dev/null
-echo "deb [signed-by=/etc/apt/keyrings/intel-sgx-keyring.asc arch=amd64] https://download.01.org/intel-sgx/sgx_repo/ubuntu $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/intel-sgx.list
+echo "deb [signed-by=/etc/apt/keyrings/intel-sgx-keyring.asc arch=amd64] https://download.01.org/intel-sgx/sgx_repo/ubuntu noble main" | sudo tee /etc/apt/sources.list.d/intel-sgx.list
 
 sudo apt update
 
@@ -83,18 +94,24 @@ Edit `/etc/sgx_default_qcnl.conf` to set the PCCS endpoint:
 }
 ```
 
-### 4. Install Gramine
+### 4. Install Gramine 1.9
 
-Follow the official Gramine installation guide: https://gramine.readthedocs.io/en/stable/installation.html
-
-For Ubuntu, you can use:
+> **Version matters.** All validators must install the same Gramine version via
+> the same method (apt). Do not build from source — it produces different library
+> paths.
 
 ```bash
 sudo curl -fsSLo /usr/share/keyrings/gramine-keyring.gpg https://packages.gramineproject.io/gramine-keyring.gpg
-echo "deb [arch=amd64 signed-by=/usr/share/keyrings/gramine-keyring.gpg] https://packages.gramineproject.io/ $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/gramine.list
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/gramine-keyring.gpg] https://packages.gramineproject.io/ noble main" | sudo tee /etc/apt/sources.list.d/gramine.list
 
 sudo apt update
-sudo apt install -y gramine
+sudo apt install -y gramine=1.9
+```
+
+Verify the installation:
+
+```bash
+gramine-manifest --version   # should show 1.9
 ```
 
 ### 5. Clone and Build
@@ -105,6 +122,36 @@ cd story-kernel
 
 # Build the binary with cb-mpc library
 make build-with-cpp
+```
+
+## Data Directory
+
+Story Kernel uses a fixed data directory at `/opt/story-kernel/` instead of the conventional
+`~/.story-kernel/` under the user's home directory.
+
+**Why `/opt/story-kernel/`?**
+
+In SGX, the Gramine manifest — including all file paths — is loaded into enclave memory and
+measured into `mr_enclave` (code commitment). If the manifest contained a user-dependent path
+like `/home/ubuntu/.story-kernel/`, every validator would need the exact same OS username to
+produce matching code commitments. Since different cloud providers use different default users
+(AWS: `ubuntu`, Azure: `azureuser`, GCP: varies), a user-dependent path would break
+cross-environment reproducibility.
+
+By using `/opt/story-kernel/` — a fixed, OS-agnostic path following the
+[Filesystem Hierarchy Standard](https://refspecs.linuxfoundation.org/FHS_3.0/fhs/ch03s13.html) —
+all validators produce identical manifests and therefore identical code commitments, regardless
+of their OS user or cloud provider.
+
+> **Note:** While the data directory is OS-agnostic, the manifest still contains Ubuntu-specific
+> system library paths (e.g., `/lib/x86_64-linux-gnu/`). See [Software Requirements](#software-requirements)
+> for details on OS support.
+
+**Setup:**
+
+```bash
+sudo mkdir -p /opt/story-kernel
+sudo chown $USER:$USER /opt/story-kernel
 ```
 
 ## Running with Gramine SGX
@@ -132,14 +179,18 @@ This will display the `mr_enclave` (code commitment) value needed for registrati
 ### 4. Initialize Configuration
 
 ```bash
-gramine-sgx story-kernel init
+gramine-sgx story-kernel init --home /opt/story-kernel
 ```
 
-This creates a configuration directory at `~/.story-kernel` with a `config.toml` file.
+This creates a configuration directory at `/opt/story-kernel/` with a `config.toml` file.
+
+> **Note:** The `init` command must be run separately because the production manifest
+> hardcodes `argv` to `["story-kernel", "start", "--home", "/opt/story-kernel"]`.
+> After initialization, the service starts automatically with the correct data directory.
 
 ### 5. Configure the Client
 
-Edit `~/.story-kernel/config.toml`:
+Edit `/opt/story-kernel/config.toml`:
 
 ```toml
 log-level = "info"
@@ -190,7 +241,7 @@ chmod 600 ca.key server.key client.key
 **Server-side TLS only** (story-kernel verifies its identity to story):
 
 ```toml
-# In ~/.story-kernel/config.toml
+# In /opt/story-kernel/config.toml
 [grpc]
 listen_addr = ":50051"
 tls_cert_file = "/path/to/server.crt"
@@ -200,7 +251,7 @@ tls_key_file = "/path/to/server.key"
 **Mutual TLS** (both sides verify each other):
 
 ```toml
-# In ~/.story-kernel/config.toml
+# In /opt/story-kernel/config.toml
 [grpc]
 listen_addr = ":50051"
 tls_cert_file = "/path/to/server.crt"
@@ -223,8 +274,11 @@ kernel-tls-key-file = "/path/to/client.key"     # for mTLS
 ### 7. Start the Service
 
 ```bash
-gramine-sgx story-kernel start
+gramine-sgx story-kernel
 ```
+
+The manifest's `loader.argv` is hardcoded to `["story-kernel", "start", "--home", "/opt/story-kernel"]`,
+so no additional arguments are needed.
 
 ### 8. (Optional) Setup as Systemd Service
 
@@ -237,7 +291,7 @@ After=network.target
 [Service]
 User=$USER
 WorkingDirectory=$HOME/story-kernel
-ExecStart=/bin/bash -lc "gramine-sgx story-kernel start 2>&1 | systemd-cat -t story-kernel"
+ExecStart=/bin/bash -lc "gramine-sgx story-kernel 2>&1 | systemd-cat -t story-kernel"
 Restart=always
 RestartSec=5
 
@@ -313,9 +367,13 @@ The service exposes a gRPC API with the following methods:
 
 ## Security Considerations
 
-- **Code Commitment**: The `mr_enclave` value uniquely identifies the enclave code. Any modification to the binary changes this value.
+- **Code Commitment**: The `mr_enclave` value uniquely identifies the enclave code. Any modification to the binary or the Gramine manifest changes this value.
 - **Sealed Storage**: Private keys are sealed using SGX sealing keys and can only be unsealed by the same enclave on the same platform.
 - **Remote Attestation**: The service generates DCAP quotes that can be verified by remote parties.
+- **SGX Debug Mode**: The manifest sets `sgx.debug = false` for production. Debug mode disables enclave memory protection and must never be enabled in production.
+- **File Access**: The Gramine manifest restricts enclave file access to `/opt/story-kernel/` only. `/etc/ssl/certs/` is in `allowed_files` (not `trusted_files`) because CA certificate bundles differ across machines and would break MRENCLAVE reproducibility.
+- **Fixed Data Path**: The data directory is `/opt/story-kernel/` (not `~/.story-kernel/`) to ensure all validators produce the same MRENCLAVE regardless of OS user. See the [Data Directory](#data-directory) section for details.
+- **MRENCLAVE Reproducibility**: The entire Gramine manifest — every byte — is measured into the code commitment. All values that could vary (log level, binary name) are hardcoded in the manifest. See [Software Requirements](#software-requirements) for the exact versions required.
 
 ## Contributing
 
