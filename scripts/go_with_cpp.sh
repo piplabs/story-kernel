@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Path to the public cb-mpc repository (e.g. sibling directory)
-CBMPC_REPO="${CBMPC_REPO:-https://github.com/piplabs/cb-mpc.git}"
+CBMPC_REPO="${CBMPC_REPO:-https://github.com/piplabs/cb-mpc-fork.git}"
 CBMPC_ROOT_ARG="${1:-}"
 if [[ -n "${CBMPC_ROOT_ARG}" ]]; then
   if [[ -d "${CBMPC_ROOT_ARG}" ]]; then
