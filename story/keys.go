@@ -51,6 +51,8 @@ func GetDecryptRequestRegistryKey(requesterPubKey []byte, label []byte, round ui
 }
 
 // decryptRequestRegistryKey matches the server-side DKG registry key format.
+// The label is hex-encoded to match the story CL's key format and to prevent
+// raw bytes from containing the '_' separator, which would cause key collisions.
 func decryptRequestRegistryKey(requesterPubKey []byte, label []byte, round uint32, ciphertext []byte) string {
 	requesterHash := sha256.Sum256(requesterPubKey)
 	ciphertextHash := sha256.Sum256(ciphertext)
@@ -58,7 +60,7 @@ func decryptRequestRegistryKey(requesterPubKey []byte, label []byte, round uint3
 	return fmt.Sprintf(
 		"%s_%s_%d_%s",
 		hex.EncodeToString(requesterHash[:]),
-		label,
+		hex.EncodeToString(label),
 		round,
 		hex.EncodeToString(ciphertextHash[:]),
 	)
