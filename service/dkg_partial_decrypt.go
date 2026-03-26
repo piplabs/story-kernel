@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -65,9 +66,22 @@ func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecry
 
 	ownPID, ok := s.PIDCache.Get(req.GetRound())
 	if !ok {
-		log.Errorf("PID not found in cache for round %d", req.GetRound())
+		// PIDCache miss — CachePID may have failed during GenerateDeals
+		// (e.g., sealed key not yet available during resharing). Fall back
+		// to computing the PID on-the-fly from the sealed key and the
+		// round's registrations.
+		cch := hex.EncodeToString(req.GetCodeCommitment())
+		resolvedPID, err := s.resolvePID(cch, req.GetRound())
+		if err != nil {
+			log.WithFields(log.Fields{
+				"round":           req.GetRound(),
+				"code_commitment": cch,
+			}).Errorf("PID not cached and lazy resolution failed: %v", err)
 
-		return nil, status.Errorf(codes.FailedPrecondition, "PID not found: SetupDKGNetwork may not have been called for this round")
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"PID not found and lazy resolution failed: %v", err)
+		}
+		ownPID = resolvedPID
 	}
 
 	// Validate PID is within the expected range for the network.
@@ -173,6 +187,63 @@ func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecry
 		PubShare:                   pubShareBz,
 		Signature:                  signature,
 	}, nil
+}
+
+// resolvePID computes the validator's 1-based polynomial index (PID) by
+// loading the sealed Ed25519 key for the given round and matching its public
+// key against the round's registrations. On success the result is cached in
+// PIDCache for future calls. This serves as a lazy fallback when CachePID
+// failed during GenerateDeals (e.g., during resharing when the sealed key
+// was not yet available).
+func (s *DKGServer) resolvePID(codeCommitmentHex string, round uint32) (uint32, error) {
+	rc, err := s.GetOrLoadRoundContext(codeCommitmentHex, round)
+	if err != nil {
+		return 0, fmt.Errorf("load round context: %w", err)
+	}
+
+	pid, err := s.matchPIDFromRegistrations(codeCommitmentHex, round, rc.Registrations)
+	if err != nil {
+		return 0, err
+	}
+
+	// Cache the resolved PID so subsequent calls hit the fast path.
+	s.PIDCache.Set(round, pid)
+
+	log.WithFields(log.Fields{
+		"round":           round,
+		"code_commitment": codeCommitmentHex,
+		"pid":             pid,
+	}).Info("lazily resolved and cached PID from sealed key")
+
+	return pid, nil
+}
+
+// matchPIDFromRegistrations loads the sealed Ed25519 key, derives its public
+// key, and finds the matching registration index. This is the same logic as
+// CachePID but factored out so it can be reused by resolvePID.
+func (s *DKGServer) matchPIDFromRegistrations(codeCommitmentHex string, round uint32, regs []*pb.DKGRegistration) (uint32, error) {
+	longterm, err := s.DKGStore.LoadSealedEd25519Key(codeCommitmentHex, round)
+	if err != nil {
+		return 0, fmt.Errorf("load sealed Ed25519 key: %w", err)
+	}
+
+	ownPubKey := s.Suite.Point().Mul(longterm, nil)
+	ownPubKeyBytes, err := ownPubKey.MarshalBinary()
+	if err != nil {
+		return 0, fmt.Errorf("marshal own public key: %w", err)
+	}
+
+	for _, reg := range regs {
+		if bytes.Equal(reg.GetDkgPubKey(), ownPubKeyBytes) {
+			if reg.GetIndex() == 0 {
+				return 0, errors.New("matched registration has zero index")
+			}
+
+			return reg.GetIndex(), nil
+		}
+	}
+
+	return 0, errors.New("own public key not found in registrations")
 }
 
 func (s *DKGServer) validatePartialDecryptTDH2Request(ctx context.Context, req *pb.PartialDecryptTDH2Request) error {

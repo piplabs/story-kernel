@@ -51,6 +51,12 @@ func ExtractDealerPolyCoeffs(dkgInst *dkg.DistKeyGenerator, suite *edwards25519.
 	}
 
 	coeffs := poly.Coefficients()
+	defer func() {
+		// Zero secret scalar coefficients to prevent heap residue
+		for _, c := range coeffs {
+			c.Zero()
+		}
+	}()
 	if len(coeffs) == 0 {
 		return nil, errors.New("dealer polynomial has no coefficients")
 	}
@@ -104,6 +110,14 @@ func RestoreDealerPoly(suite *edwards25519.SuiteEd25519, dkgInst *dkg.DistKeyGen
 
 	// Unmarshal scalar coefficients
 	coeffs := make([]kyber.Scalar, len(coeffBytes))
+	defer func() {
+		// Zero secret scalar coefficients to prevent heap residue
+		for _, c := range coeffs {
+			if c != nil {
+				c.Zero()
+			}
+		}
+	}()
 	for i, bz := range coeffBytes {
 		s := suite.Scalar()
 		if err := s.UnmarshalBinary(bz); err != nil {

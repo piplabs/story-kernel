@@ -4,31 +4,47 @@ import (
 	"fmt"
 
 	ecrypto "github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/pkg/errors"
 )
 
-// hashFinalizeDKGResponse hashes the final response payload to sign.
+// finalizationSignatureMaterial holds the fields committed to by the validator
+// signature on a DKG finalization response. RLP encoding gives each field an
+// unambiguous length prefix, preventing boundary-shift collisions that arise
+// from raw concatenation of variable-length byte slices.
+type finalizationSignatureMaterial struct {
+	CodeCommitment   []byte
+	Round            uint32
+	ParticipantsRoot [32]byte
+	GlobalPubKey     []byte
+	PublicCoeffs     [][]byte
+	PubKeyShare      []byte
+}
+
+// hashFinalizeDKGResponse hashes the final response payload to sign using RLP encoding.
 func hashFinalizeDKGResponse(codeCommitment []byte, round uint32, participantsRoot [32]byte, globalPubKey []byte, publicCoeffsBz [][]byte, pubKeyShare []byte) ([]byte, error) {
 	if len(codeCommitment) != 32 {
 		return nil, errors.New("the length of code commitment should be 32")
 	}
 
-	// concat
-	encoded := append([]byte{}, codeCommitment[:]...)
-	encoded = append(encoded, uint32ToBytes(round)...)
-	encoded = append(encoded, participantsRoot[:]...)
-	encoded = append(encoded, globalPubKey...)
-
 	for i, coeff := range publicCoeffsBz {
 		if len(coeff) == 0 {
 			return nil, fmt.Errorf("public coefficient at index %d is empty", i)
 		}
-		encoded = append(encoded, coeff...)
 	}
 
-	encoded = append(encoded, pubKeyShare...)
+	material := finalizationSignatureMaterial{
+		CodeCommitment:   codeCommitment,
+		Round:            round,
+		ParticipantsRoot: participantsRoot,
+		GlobalPubKey:     globalPubKey,
+		PublicCoeffs:     publicCoeffsBz,
+		PubKeyShare:      pubKeyShare,
+	}
+	encoded, err := rlp.EncodeToBytes(material)
+	if err != nil {
+		return nil, fmt.Errorf("failed to RLP encode finalization signature material: %w", err)
+	}
 
-	hash := ecrypto.Keccak256(encoded)
-
-	return toEthSignedMessageHash(hash), nil
+	return ecrypto.Keccak256(encoded), nil
 }

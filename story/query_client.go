@@ -419,6 +419,12 @@ func (q *VerifiedQueryClient) queryWithProof(ctx context.Context, storeKey strin
 	if len(resp.Key) == 0 {
 		return nil, errors.New("empty key in response")
 	}
+	// Defense-in-depth: verify the response key matches the requested key to
+	// prevent a malicious or buggy RPC node from returning data for a
+	// different key while providing a valid proof for that other key.
+	if !bytes.Equal(resp.Key, key) {
+		return nil, fmt.Errorf("response key mismatch: requested %x, got %x", key, resp.Key)
+	}
 	if resp.ProofOps == nil || len(resp.ProofOps.Ops) == 0 {
 		return nil, errors.New("no proof ops in response")
 	}

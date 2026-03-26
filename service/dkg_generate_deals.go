@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 
@@ -46,21 +45,18 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 		return nil, status.Errorf(codes.Internal, "failed to get or load roundContext")
 	}
 
-	// For resharing rounds, skip CachePID because:
-	// 1. The dealer's identity is resolved through longterm key matching in the kyber DKG
-	//    library (dkg.Config.Longterm vs OldNodes), not through the PID cache.
-	// 2. During upgrade resharing, the current round's key is sealed by the new binary's
-	//    enclave, making it inaccessible from the old binary that generates deals.
-	// 3. PIDCache is only consumed by PartialDecryptTDH2, which receives PID in its request.
-	if !req.GetIsResharing() {
-		if err := s.CachePID(codeCommitmentHex, req.Round, rc.Registrations); err != nil {
-			log.WithFields(log.Fields{
-				"round":           req.GetRound(),
-				"code_commitment": codeCommitmentHex,
-			}).Errorf("failed to cache PID: %v", err)
-
-			return nil, status.Errorf(codes.Internal, "failed to cache PID")
-		}
+	// Best-effort PID caching: try to populate the PIDCache so that
+	// PartialDecryptTDH2 can resolve this validator's polynomial index
+	// without an extra sealed-key load. If it fails (e.g., sealed Ed25519
+	// key not yet available during resharing), log a warning and continue.
+	// PartialDecryptTDH2 has a lazy fallback (resolvePID) that will
+	// compute the PID on-the-fly from the sealed key and registrations.
+	if err := s.CachePID(codeCommitmentHex, req.Round, rc.Registrations); err != nil {
+		log.WithFields(log.Fields{
+			"round":           req.GetRound(),
+			"code_commitment": codeCommitmentHex,
+			"is_resharing":    req.GetIsResharing(),
+		}).Warnf("failed to cache PID (PartialDecryptTDH2 will resolve lazily): %v", err)
 	}
 
 	// Load DKG state from cache or rebuild from state
@@ -144,31 +140,12 @@ func (s *DKGServer) verifyDKGStartBlock(ctx context.Context, network *pb.DKGNetw
 
 func (s *DKGServer) CachePID(codeCommitmentHex string, round uint32, regs []*pb.DKGRegistration) error {
 	// Find the story-kernel's own registration by matching pubkey and use its Index as polynomial PID (1-based).
-	longterm, err := s.DKGStore.LoadSealedEd25519Key(codeCommitmentHex, round)
+	pid, err := s.matchPIDFromRegistrations(codeCommitmentHex, round, regs)
 	if err != nil {
-		return errors.Wrap(err, "failed to load sealed Ed25519 private key")
+		return err
 	}
 
-	ownPubKey := s.Suite.Point().Mul(longterm, nil)
-	ownPubKeyBytes, err := ownPubKey.MarshalBinary()
-	if err != nil {
-		return errors.Wrap(err, "failed to marshal own public key")
-	}
-
-	var ownPID uint32
-	for _, reg := range regs {
-		if bytes.Equal(reg.GetDkgPubKey(), ownPubKeyBytes) {
-			ownPID = reg.GetIndex()
-
-			break
-		}
-	}
-
-	if ownPID == 0 {
-		return errors.New("own public key not found in registrations")
-	}
-
-	s.PIDCache.Set(round, ownPID)
+	s.PIDCache.Set(round, pid)
 
 	return nil
 }

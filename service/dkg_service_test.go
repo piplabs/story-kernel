@@ -16,6 +16,7 @@ import (
 
 	ecrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/ecies"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/stretchr/testify/require"
 
 	"github.com/piplabs/story-kernel/crypto"
@@ -30,37 +31,32 @@ type Msg struct {
 	PubKeyShare      []byte
 }
 
-// _verifyFinalizationSignature in DKG.sol.
+// verifyFinalizationSignature verifies the finalization signature using RLP encoding
+// to match hashFinalizeDKGResponse and the CL verifyFinalizationSignature.
 func verifyFinalizationSignature(commPubKey []byte, round uint32, codeCommitment [32]byte, participantsRoot [32]byte, globalPubKey []byte, publicCoeffs [][]byte, pubKeyShare []byte, signature []byte) bool {
-	// Solidity: keccak256(abi.encodePacked(codeCommitment, round, participantsRoot, globalPubKey, publicCoeffs))
-	encoded := append([]byte{}, codeCommitment[:]...)
-	encoded = append(encoded, uint32ToBytes(round)...)
-	encoded = append(encoded, participantsRoot[:]...)
-	encoded = append(encoded, globalPubKey...)
-
-	for _, coeff := range publicCoeffs {
-		if len(coeff) == 0 {
-			panic("empty coefficient")
-		}
-		encoded = append(encoded, coeff...)
+	material := finalizationSignatureMaterial{
+		CodeCommitment:   codeCommitment[:],
+		Round:            round,
+		ParticipantsRoot: participantsRoot,
+		GlobalPubKey:     globalPubKey,
+		PublicCoeffs:     publicCoeffs,
+		PubKeyShare:      pubKeyShare,
 	}
-
-	encoded = append(encoded, pubKeyShare...)
+	encoded, err := rlp.EncodeToBytes(material)
+	if err != nil {
+		return false
+	}
 
 	msgHash := ecrypto.Keccak256(encoded)
 
-	// Solidity: MessageHashUtils.toEthSignedMessageHash(msgHash)
-	ethMsgHash := toEthSignedMessageHash(msgHash)
-
-	// Solidity: signature recovery
-	pubKey, err := ecrypto.SigToPub(ethMsgHash, signature)
+	// Signature recovery using raw keccak256 hash (no Ethereum prefix)
+	pubKey, err := ecrypto.SigToPub(msgHash, signature)
 	if err != nil {
 		return false
 	}
 
 	recoveredAddr := ecrypto.PubkeyToAddress(*pubKey)
 
-	// Solidity: address(uint160(uint256(keccak256(commPubKey))))
 	commAddr := ecrypto.PubkeyToAddress(*mustPubKeyFromBytes(commPubKey))
 
 	return bytes.Equal(recoveredAddr.Bytes(), commAddr.Bytes())

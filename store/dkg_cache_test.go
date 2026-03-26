@@ -474,3 +474,63 @@ func TestMaxCacheSize_Constant(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, 10, maxCacheSize)
 }
+
+// =============================================================================
+// RoundContextCache eviction tests
+// =============================================================================
+
+// TestRoundContextCache_EvictsOldestWhenFull verifies that inserting more than
+// maxCacheSize entries causes the oldest entries to be evicted in FIFO order.
+func TestRoundContextCache_EvictsOldestWhenFull(t *testing.T) {
+	t.Parallel()
+
+	cache := NewRoundContextCache()
+
+	// Insert 12 entries, exceeding maxCacheSize (10) by 2.
+	for i := uint32(1); i <= 12; i++ {
+		cache.Set(i, &RoundContext{Round: i})
+	}
+
+	// Exactly maxCacheSize entries must remain.
+	require.Equal(t, maxCacheSize, len(cache.items), "cache should hold exactly maxCacheSize entries")
+
+	// The two oldest entries (rounds 1 and 2) must have been evicted.
+	_, ok := cache.Get(1)
+	assert.False(t, ok, "round 1 should have been evicted")
+
+	_, ok = cache.Get(2)
+	assert.False(t, ok, "round 2 should have been evicted")
+
+	// Rounds 3–12 must still be present.
+	for i := uint32(3); i <= 12; i++ {
+		got, ok := cache.Get(i)
+		require.True(t, ok, "round %d should be present", i)
+		assert.Equal(t, i, got.Round, "round %d entry should have correct round number", i)
+	}
+}
+
+// TestRoundContextCache_EvictPreservesNewest verifies that after a full cache
+// receives one more insertion, the newest entry is retained and the oldest is evicted.
+func TestRoundContextCache_EvictPreservesNewest(t *testing.T) {
+	t.Parallel()
+
+	cache := NewRoundContextCache()
+
+	// Fill to capacity.
+	for i := uint32(1); i <= uint32(maxCacheSize); i++ {
+		cache.Set(i, &RoundContext{Round: i})
+	}
+
+	// Insert one more entry beyond capacity.
+	newest := uint32(maxCacheSize + 1)
+	cache.Set(newest, &RoundContext{Round: newest})
+
+	// The newest entry must be present.
+	got, ok := cache.Get(newest)
+	require.True(t, ok, "newest entry (round %d) should be present", newest)
+	assert.Equal(t, newest, got.Round)
+
+	// The oldest entry (round 1) must have been evicted.
+	_, ok = cache.Get(1)
+	assert.False(t, ok, "oldest entry (round 1) should have been evicted")
+}
