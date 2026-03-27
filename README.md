@@ -199,7 +199,7 @@ log-level = "info"
 listen_addr = ":50051"
 
 [light_client]
-chain_id = "odyssey-1"
+chain_id = "devnet-1"
 rpc_addr = "http://localhost:26657"
 primary_addr = "http://localhost:26657"
 witness_addrs = ["http://witness1:26657", "http://witness2:26657"]
