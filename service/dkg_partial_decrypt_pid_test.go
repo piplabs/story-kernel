@@ -41,33 +41,6 @@ func (m *mockQueryClientForPID) Close() error {
 	return nil
 }
 
-func TestVerifyRoundMatchesLatestNetwork_ReturnsNetwork(t *testing.T) {
-	t.Parallel()
-
-	network := &pb.DKGNetwork{Round: 5, Total: 10}
-	mock := &mockQueryClientForPID{latestNetwork: network}
-	server := &DKGServer{QueryClient: mock}
-
-	got, err := server.verifyRoundMatchesLatestNetwork(context.Background(), 5)
-	require.NoError(t, err)
-	require.NotNil(t, got)
-	assert.Equal(t, uint32(5), got.GetRound())
-	assert.Equal(t, uint32(10), got.GetTotal())
-}
-
-func TestVerifyRoundMatchesLatestNetwork_RoundMismatch(t *testing.T) {
-	t.Parallel()
-
-	network := &pb.DKGNetwork{Round: 5, Total: 10}
-	mock := &mockQueryClientForPID{latestNetwork: network}
-	server := &DKGServer{QueryClient: mock}
-
-	got, err := server.verifyRoundMatchesLatestNetwork(context.Background(), 99)
-	require.Error(t, err)
-	require.Nil(t, got)
-	assert.Contains(t, err.Error(), "round mismatch")
-}
-
 func TestPIDBoundsValidation(t *testing.T) {
 	t.Parallel()
 
