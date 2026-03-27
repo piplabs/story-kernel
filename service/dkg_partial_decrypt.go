@@ -49,20 +49,23 @@ func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecry
 		return nil, status.Errorf(codes.InvalidArgument, "invalid request: %v", err)
 	}
 
-	latestNetwork, err := s.verifyRoundMatchesLatestNetwork(ctx, req.GetRound())
-	if err != nil {
-		log.WithFields(log.Fields{
-			"round": req.GetRound(),
-		}).Errorf("round does not match latest network: %v", err)
-
-		return nil, status.Errorf(codes.FailedPrecondition, "round does not match latest active network")
-	}
-
 	if err := enclave.ValidateCodeCommitment(req.GetCodeCommitment()); err != nil {
 		log.Errorf("invalid code commitment: %v", err)
 
 		return nil, status.Errorf(codes.InvalidArgument, "invalid code commitment")
 	}
+
+	codeCommitmentHex := hex.EncodeToString(req.GetCodeCommitment())
+
+	roundCtx, err := s.GetOrLoadRoundContext(codeCommitmentHex, req.GetRound())
+	if err != nil {
+		log.WithFields(log.Fields{
+			"round":           req.GetRound(),
+			"code_commitment": codeCommitmentHex,
+		}).Errorf("failed to get or load roundContext: %v", err)
+		return nil, status.Errorf(codes.FailedPrecondition, "failed to get round context for round %d", req.GetRound())
+	}
+	network := roundCtx.Network
 
 	ownPID, ok := s.PIDCache.Get(req.GetRound())
 	if !ok {
@@ -70,12 +73,11 @@ func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecry
 		// (e.g., sealed key not yet available during resharing). Fall back
 		// to computing the PID on-the-fly from the sealed key and the
 		// round's registrations.
-		cch := hex.EncodeToString(req.GetCodeCommitment())
-		resolvedPID, err := s.resolvePID(cch, req.GetRound())
+		resolvedPID, err := s.resolvePID(codeCommitmentHex, req.GetRound())
 		if err != nil {
 			log.WithFields(log.Fields{
 				"round":           req.GetRound(),
-				"code_commitment": cch,
+				"code_commitment": codeCommitmentHex,
 			}).Errorf("PID not cached and lazy resolution failed: %v", err)
 
 			return nil, status.Errorf(codes.FailedPrecondition,
@@ -85,17 +87,16 @@ func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecry
 	}
 
 	// Validate PID is within the expected range for the network.
-	if ownPID < 1 || ownPID > latestNetwork.GetTotal() {
+	if ownPID < 1 || ownPID > network.GetTotal() {
 		log.WithFields(log.Fields{
 			"round": req.GetRound(),
 			"pid":   ownPID,
-			"total": latestNetwork.GetTotal(),
+			"total": network.GetTotal(),
 		}).Errorf("PID out of bounds")
 
 		return nil, status.Errorf(codes.FailedPrecondition,
-			"invalid PID %d: must be in range [1, %d]", ownPID, latestNetwork.GetTotal())
+			"invalid PID %d: must be in range [1, %d]", ownPID, network.GetTotal())
 	}
-	codeCommitmentHex := hex.EncodeToString(req.GetCodeCommitment())
 
 	// Load DistKeyShare from cache or sealed store.
 	var distKeyShare *dkg.DistKeyShare
@@ -283,21 +284,6 @@ func (s *DKGServer) validatePartialDecryptTDH2Request(ctx context.Context, req *
 	}
 
 	return nil
-}
-
-// verifyRoundMatchesLatestNetwork fetches the latest active DKG network and verifies
-// that the given round matches the network's round. Returns the network on success.
-func (s *DKGServer) verifyRoundMatchesLatestNetwork(ctx context.Context, round uint32) (*pb.DKGNetwork, error) {
-	latest, err := s.QueryClient.GetLatestActiveDKGNetwork(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("get latest active DKG network: %w", err)
-	}
-
-	if latest.GetRound() != round {
-		return nil, fmt.Errorf("round mismatch: request round %d != latest network round %d", round, latest.GetRound())
-	}
-
-	return latest, nil
 }
 
 // partialDecryptSignatureMaterial holds the fields committed to by the validator
