@@ -35,7 +35,7 @@ type Config struct {
 	// When true, GenerateDeals will produce one deal with an invalid VSS share
 	// (V+1) that passes Schnorr signature verification but fails VerifyDeal,
 	// triggering a StatusComplaint response and the justification pipeline.
-	// This is set via CLI flag only and is NOT persisted in config.toml.
+	// Set via CLI flag or DKG_TEST_CORRUPT_DEAL=true env var.
 	DKGTestCorruptDeal bool `mapstructure:"-"`
 }
 

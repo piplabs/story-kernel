@@ -26,6 +26,10 @@ var startCmd = &cobra.Command{
 		}
 
 		cfg.DKGTestCorruptDeal, _ = cmd.Flags().GetBool(FlagDKGTestCorruptDeal)
+		// Fallback: check env var for Gramine SGX where loader.argv overrides CLI args.
+		if !cfg.DKGTestCorruptDeal && os.Getenv("DKG_TEST_CORRUPT_DEAL") == "true" {
+			cfg.DKGTestCorruptDeal = true
+		}
 		if cfg.DKGTestCorruptDeal {
 			log.Warn("⚠ DKG test mode: one deal will be corrupted per GenerateDeals call")
 		}
