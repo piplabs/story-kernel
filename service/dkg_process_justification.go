@@ -111,6 +111,9 @@ func (s *DKGServer) ProcessJustification(_ context.Context, req *pb.ProcessJusti
 			}
 		}
 
+		// Always persist justifications for recovery replay, even if some DKG
+		// instances rejected them. During resharing, a justification may apply
+		// to only one of the DKG instances (prev or next).
 		processed = append(processed, *justification)
 
 		log.WithFields(log.Fields{
@@ -118,6 +121,14 @@ func (s *DKGServer) ProcessJustification(_ context.Context, req *pb.ProcessJusti
 			"code_commitment": codeCommitmentHex,
 			"dealer_index":    justification.Index,
 		}).Info("Justification processed successfully, DKG state restored for the deal")
+	}
+
+	if len(processed) == 0 {
+		log.WithFields(log.Fields{
+			"round":           req.GetRound(),
+			"code_commitment": codeCommitmentHex,
+			"submitted":       len(req.GetJustifications()),
+		}).Warn("all submitted justifications were skipped")
 	}
 
 	// Persist successfully processed justifications for recovery replay
