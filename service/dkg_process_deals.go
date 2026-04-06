@@ -88,10 +88,21 @@ func (s *DKGServer) ProcessDeals(_ context.Context, req *pb.ProcessDealsRequest)
 		deals = append(deals, *deal)
 	}
 
-	// Reject the request if every submitted deal failed processing.
+	// If no deals were successfully processed (e.g., all duplicates), return
+	// an empty success response instead of an error. This is consistent with
+	// ProcessResponses and ProcessJustifications, and prevents the CL from
+	// caching duplicate deals for infinite retry.
 	if len(deals) == 0 {
-		return nil, status.Errorf(codes.InvalidArgument,
-			"all %d submitted deals were rejected", len(req.GetDeals()))
+		log.WithFields(log.Fields{
+			"round":           req.GetRound(),
+			"code_commitment": codeCommitmentHex,
+			"submitted":       len(req.GetDeals()),
+		}).Warn("all submitted deals were skipped (e.g., duplicates)")
+
+		return &pb.ProcessDealsResponse{
+			CodeCommitment: req.GetCodeCommitment(),
+			Round:          req.GetRound(),
+		}, nil
 	}
 
 	if err := s.DKGStore.AddDeals(codeCommitmentHex, req.GetRound(), deals); err != nil {
@@ -100,7 +111,12 @@ func (s *DKGServer) ProcessDeals(_ context.Context, req *pb.ProcessDealsRequest)
 		return nil, status.Errorf(codes.Internal, "failed to add deals to the DKG state")
 	}
 
-	log.Info("All deals have been processed", "code_commitment", codeCommitmentHex, "round", req.GetRound())
+	log.WithFields(log.Fields{
+		"code_commitment": codeCommitmentHex,
+		"round":           req.GetRound(),
+		"submitted":       len(req.GetDeals()),
+		"processed":       len(deals),
+	}).Info("Deals processed")
 
 	return &pb.ProcessDealsResponse{
 		CodeCommitment: req.GetCodeCommitment(),

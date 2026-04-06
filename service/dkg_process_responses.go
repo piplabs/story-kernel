@@ -124,7 +124,12 @@ func (s *DKGServer) ProcessResponses(_ context.Context, req *pb.ProcessResponses
 		return nil, status.Errorf(codes.Internal, "failed to add responses to the DKG state")
 	}
 
-	log.Info("All responses have been processed", "code_commitment", codeCommitmentHex, "round", req.GetRound())
+	log.WithFields(log.Fields{
+		"code_commitment": codeCommitmentHex,
+		"round":           req.GetRound(),
+		"submitted":       len(req.GetResponses()),
+		"processed":       len(resps),
+	}).Info("Responses processed")
 
 	return &pb.ProcessResponsesResponse{
 		Justifications: justifications,
