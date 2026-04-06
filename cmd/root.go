@@ -9,6 +9,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
+	"github.com/piplabs/story-kernel/buildinfo"
 	"github.com/piplabs/story-kernel/config"
 )
 
@@ -37,6 +38,7 @@ func init() {
 	rootCmd.AddCommand(
 		initCmd,
 		startCmd,
+		buildinfo.NewVersionCmd(),
 	)
 }
 
