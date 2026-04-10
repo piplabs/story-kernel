@@ -22,7 +22,6 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/piplabs/story-kernel/enclave"
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
 
 	"go.dedis.ch/kyber/v4"
@@ -49,7 +48,7 @@ func (s *DKGServer) PartialDecryptTDH2(ctx context.Context, req *pb.PartialDecry
 		return nil, status.Errorf(codes.InvalidArgument, "invalid request: %v", err)
 	}
 
-	if err := enclave.ValidateCodeCommitment(req.GetCodeCommitment()); err != nil {
+	if err := s.validateCodeCommitment(req.GetCodeCommitment()); err != nil {
 		log.Errorf("invalid code commitment: %v", err)
 
 		return nil, status.Errorf(codes.InvalidArgument, "invalid code commitment")

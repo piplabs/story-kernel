@@ -29,3 +29,5 @@ coverage.*
 *.manifest
 *.manifest.sgx
 *.sig
+
+.claude

@@ -11,7 +11,6 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/piplabs/story-kernel/enclave"
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
 
 	dkg "go.dedis.ch/kyber/v4/share/dkg/pedersen"
@@ -33,7 +32,7 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 	}
 
 	// Validate code commitment
-	if err := enclave.ValidateCodeCommitment(req.GetCodeCommitment()); err != nil {
+	if err := s.validateCodeCommitment(req.GetCodeCommitment()); err != nil {
 		log.Errorf("failed to validate code commitment: %v", err)
 
 		return nil, status.Errorf(codes.InvalidArgument, "failed to validate code commitment")

@@ -30,7 +30,7 @@ func (s *DKGServer) GenerateAndSealKey(_ context.Context, req *pb.GenerateAndSea
 	}
 
 	// Compare the code commitment
-	if err := enclave.ValidateCodeCommitment(req.GetCodeCommitment()); err != nil {
+	if err := s.validateCodeCommitment(req.GetCodeCommitment()); err != nil {
 		log.Errorf("invalid code commitment: %v", err)
 
 		return nil, status.Errorf(codes.InvalidArgument, "failed to validate code commitment")

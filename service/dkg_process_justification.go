@@ -7,7 +7,6 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/piplabs/story-kernel/enclave"
 	"github.com/piplabs/story-kernel/types"
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
 
@@ -34,7 +33,7 @@ func (s *DKGServer) ProcessJustification(_ context.Context, req *pb.ProcessJusti
 	}
 
 	// Validate code commitment
-	if err := enclave.ValidateCodeCommitment(req.GetCodeCommitment()); err != nil {
+	if err := s.validateCodeCommitment(req.GetCodeCommitment()); err != nil {
 		log.Errorf("failed to validate code commitment: %v", err)
 
 		return nil, status.Errorf(codes.InvalidArgument, "failed to validate code commitment")
