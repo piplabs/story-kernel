@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /Users/steven/go/src/stevemilk/story-kernel -name \"*.go\" -type f -exec grep -l \"resharing\\\\|Resharing\" {} \\\\;)",
+      "Read(//Users/steven/go/src/**)",
+      "Bash(go build:*)",
+      "Bash(ls /Users/steven/go/src/stevemilk/story-kernel/*.mk)",
+      "Bash(gofmt -l /Users/steven/go/src/stevemilk/story-kernel/service/dkg_partial_decrypt_concurrency_test.go)",
+      "Bash(CGO_LDFLAGS_ALLOW=\".*\" ./scripts/go_with_cpp.sh .cbmpc go test -run TestPartialDecryptTDH2Concurrent -v -count=1 ./service/)",
+      "Bash(ls .cbmpc/build/Release/lib*.a)",
+      "Bash(xcrun --show-sdk-path)",
+      "Bash(clang++ --version)",
+      "Bash(CGO_LDFLAGS_ALLOW=\".*\" SDKROOT=$\\(xcrun --show-sdk-path\\) ./scripts/go_with_cpp.sh .cbmpc go test -run TestPartialDecryptTDH2Concurrent -v -count=1 ./service/)",
+      "Bash(CGO_LDFLAGS_ALLOW=\".*\" SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk ./scripts/go_with_cpp.sh .cbmpc go test -run TestPartialDecryptTDH2Concurrent -v -count=1 ./service/)",
+      "Bash(CGO_LDFLAGS_ALLOW=\".*\" ./scripts/go_with_cpp.sh .cbmpc go test -run \"TestPartialDecryptTDH2Concurrent|TestTDH2AllPartiesConcurrent|TestTDH2SinglePartyConcurrent|TestPartialDecryptTDH2SerialVsConcurrent\" -v -count=1 ./service/)",
+      "Bash(go vet:*)",
+      "Bash(go run:*)",
+      "Bash(gofmt -e server/server.go)",
+      "Bash(gofmt -e server/server.go story/query_client.go)"
+    ]
+  }
+}
