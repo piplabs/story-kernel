@@ -8,6 +8,12 @@ BUILD_FLAGS := -tags "$(build_tags)"
 OUT_DIR = ./build
 BIN_NAME = story-kernel
 
+# Build info injected via -ldflags -X
+GIT_COMMIT := $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo "unknown")
+GIT_TIMESTAMP := $(shell git log -1 --format=%cI 2>/dev/null || echo "unknown")
+BUILDINFO_PKG := github.com/piplabs/story-kernel/buildinfo
+BUILDINFO_FLAGS := -X $(BUILDINFO_PKG).GitCommit=$(GIT_COMMIT) -X $(BUILDINFO_PKG).GitTimestamp=$(GIT_TIMESTAMP)
+
 # cb-mpc settings
 CBMPC_DIR = .cbmpc
 CBMPC_REPO = https://github.com/piplabs/cb-mpc-fork.git
@@ -33,11 +39,11 @@ setup-cbmpc:
 
 # Simple build without cb-mpc (requires pre-built libcbmpc.a)
 build:
-	$(GO) build -mod=readonly $(BUILD_FLAGS) -o $(OUT_DIR)/$(BIN_NAME) ./
+	$(GO) build -mod=readonly $(BUILD_FLAGS) -ldflags="$(BUILDINFO_FLAGS)" -o $(OUT_DIR)/$(BIN_NAME) ./
 
 # Build with cb-mpc C++ library (auto-builds cb-mpc if needed)
 build-with-cpp: setup-cbmpc
-	CGO_LDFLAGS_ALLOW=".*" ./scripts/go_with_cpp.sh $(CBMPC_PATH) $(GO) build -mod=readonly $(BUILD_FLAGS) -ldflags="-extldflags=-Wl,-w" -o $(OUT_DIR)/$(BIN_NAME) ./
+	CGO_LDFLAGS_ALLOW=".*" ./scripts/go_with_cpp.sh $(CBMPC_PATH) $(GO) build -mod=readonly $(BUILD_FLAGS) -ldflags="-buildid= $(BUILDINFO_FLAGS) -extldflags=-Wl,-w" -o $(OUT_DIR)/$(BIN_NAME) ./
 
 # Run standard (non-SGX) binary
 run:

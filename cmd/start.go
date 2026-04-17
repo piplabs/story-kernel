@@ -8,6 +8,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
+	"github.com/piplabs/story-kernel/buildinfo"
 	"github.com/piplabs/story-kernel/server"
 )
 
@@ -15,6 +16,11 @@ var startCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the story-kernel gRPC server",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		log.WithFields(log.Fields{
+			"version": buildinfo.VersionWithMeta(),
+			"commit":  buildinfo.GitCommit,
+		}).Info("Starting story-kernel")
+
 		cfg, err := loadConfigFromHome(cmd)
 		if err != nil {
 			return err

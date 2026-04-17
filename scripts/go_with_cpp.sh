@@ -137,7 +137,7 @@ cd "${REPO_ROOT}"
 # Inject reproducible build flags for SGX code commitment determinism
 # Without these, builds on different machines produce different binaries
 if [[ "${1:-}" == *go && "${2:-}" == "build" ]]; then
-  REPRO_FLAGS=(-trimpath -buildvcs=false -ldflags="-buildid=")
+  REPRO_FLAGS=(-trimpath -buildvcs=false)
   echo "[go_with_cpp] Adding reproducible build flags: ${REPRO_FLAGS[*]}"
   set -- "$1" "$2" "${REPRO_FLAGS[@]}" "${@:3}"
 fi
