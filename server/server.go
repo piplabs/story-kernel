@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 
 	cmtdb "github.com/cometbft/cometbft-db"
+	cmtlight "github.com/cometbft/cometbft/light"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/piplabs/story-kernel/config"
@@ -109,10 +110,16 @@ func initializeQueryClient(cfg *config.Config) (story.QueryClient, error) {
 		log.Info("Found existing light client state in sealed DB, resuming...")
 		queryClient, err := story.LoadVerifiedQueryClient(ctx, cfg, db)
 		if err != nil {
-			// Existing state likely expired (beyond trusted period).
-			// Attempt recovery by falling back to config's trusted block info.
-			log.Warnf("Failed to resume light client from DB (possibly expired): %v", err)
-			log.Info("Falling back to config's trusted block after clearing expired DB state")
+			// Only clear DB state and re-initialize when the error indicates the stored
+			// state itself is invalid (expired or bad header). Transient failures such as
+			// "connection refused" (RPC not yet up) or config errors (ErrNoWitnesses) must
+			// NOT clear the DB — doing so would destroy valid state and cause a boot loop
+			// if the config's trusted block is also expired.
+			if !isDBStateError(err) {
+				return nil, fmt.Errorf("failed to resume light client from DB: %w", err)
+			}
+
+			log.Warnf("Light client DB state is invalid, falling back to config's trusted block: %v", err)
 
 			queryClient, fallbackErr := fallbackToConfigTrustedBlock(ctx, cfg, db)
 			if fallbackErr != nil {
@@ -184,6 +191,19 @@ func fallbackToConfigTrustedBlock(ctx context.Context, cfg *config.Config, db cm
 	log.Info("Consider updating trusted_height and trusted_hash in config.toml with a more recent block to avoid this on future restarts")
 
 	return queryClient, nil
+}
+
+// isDBStateError reports whether err indicates the light client's stored state is
+// invalid and must be cleared. Only ErrOldHeaderExpired and ErrInvalidHeader qualify;
+// all other errors (e.g. ErrNoWitnesses, connection refused) are transient and the
+// DB should be preserved.
+func isDBStateError(err error) bool {
+	var expiredErr cmtlight.ErrOldHeaderExpired
+	if errors.As(err, &expiredErr) {
+		return true
+	}
+	var invalidErr cmtlight.ErrInvalidHeader
+	return errors.As(err, &invalidErr)
 }
 
 // recoveryInterceptor returns a gRPC unary interceptor that catches panics
