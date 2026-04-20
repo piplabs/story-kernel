@@ -135,6 +135,11 @@ func initializeQueryClient(cfg *config.Config) (story.QueryClient, error) {
 	}
 
 	// No existing state — first-time initialization from config.
+	// After DKG registration, the light client must only resume from sealed DB.
+	if err := rejectConfigFallbackIfDKGKeysExist(cfg); err != nil {
+		return nil, err
+	}
+
 	return newQueryClientFromConfig(ctx, cfg, db)
 }
 
@@ -175,6 +180,12 @@ func newQueryClientFromConfig(ctx context.Context, cfg *config.Config, db cmtdb.
 // If the config's trusted block is also expired, returns an actionable error asking the operator
 // to update config.toml with a recent trusted block.
 func fallbackToConfigTrustedBlock(ctx context.Context, cfg *config.Config, db cmtdb.DB) (story.QueryClient, error) {
+	// Check BEFORE ClearTrustedState to avoid irreversibly destroying valid DB state.
+	// After DKG registration, the light client must only resume from sealed DB.
+	if err := rejectConfigFallbackIfDKGKeysExist(cfg); err != nil {
+		return nil, err
+	}
+
 	if err := story.ClearTrustedState(db, cfg.LightClient.ChainID); err != nil {
 		return nil, fmt.Errorf("failed to clear expired light client state: %w", err)
 	}
@@ -191,6 +202,26 @@ func fallbackToConfigTrustedBlock(ctx context.Context, cfg *config.Config, db cm
 	log.Info("Consider updating trusted_height and trusted_hash in config.toml with a more recent block to avoid this on future restarts")
 
 	return queryClient, nil
+}
+
+// rejectConfigFallbackIfDKGKeysExist checks whether any sealed DKG key shares
+// exist. After DKG registration, the light client must resume from sealed DB
+// rather than config.toml to preserve chain identity continuity.
+func rejectConfigFallbackIfDKGKeysExist(cfg *config.Config) error {
+	hasKeys, err := store.HasAnyDistKeyShareInDir(cfg.GetDKGStateDir())
+	if err != nil {
+		return fmt.Errorf("failed to check for existing DKG key shares: %w", err)
+	}
+
+	if hasKeys {
+		return fmt.Errorf(
+			"sealed DKG key shares exist but light client state is missing or expired. "+
+				"To recover, remove the DKG state directory (%s) and re-register",
+			cfg.GetDKGStateDir(),
+		)
+	}
+
+	return nil
 }
 
 // isDBStateError reports whether err indicates the light client's stored state is

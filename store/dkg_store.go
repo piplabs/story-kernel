@@ -103,3 +103,57 @@ func (s *DKGStore) LoadDistKeyShare(codeCommitmentHex string, round uint32) (*dk
 
 	return share, nil
 }
+
+// HasAnyDistKeyShare checks whether any dist_key_share.sealed file exists in
+// this store's state directory.
+func (s *DKGStore) HasAnyDistKeyShare() (bool, error) {
+	return HasAnyDistKeyShareInDir(s.stateDir)
+}
+
+// HasAnyDistKeyShareInDir walks the given DKG state directory to check whether
+// any dist_key_share.sealed file exists under any round/codeCommitment
+// subdirectory. The directory layout is:
+//
+//	{stateDir}/{round}/{codeCommitment}/dist_key_share.sealed
+//
+// After DKG registration, the light client must resume from sealed DB rather
+// than config.toml to preserve chain identity continuity. If the directory does
+// not exist, it returns (false, nil).
+func HasAnyDistKeyShareInDir(stateDir string) (bool, error) {
+	if _, err := os.Stat(stateDir); os.IsNotExist(err) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("failed to stat DKG state dir: %w", err)
+	}
+
+	roundEntries, err := os.ReadDir(stateDir)
+	if err != nil {
+		return false, fmt.Errorf("failed to read DKG state dir: %w", err)
+	}
+
+	for _, roundEntry := range roundEntries {
+		if !roundEntry.IsDir() {
+			continue
+		}
+
+		roundPath := filepath.Join(stateDir, roundEntry.Name())
+		commitEntries, err := os.ReadDir(roundPath)
+		if err != nil {
+			// Skip unreadable round directories rather than failing hard.
+			continue
+		}
+
+		for _, commitEntry := range commitEntries {
+			if !commitEntry.IsDir() {
+				continue
+			}
+
+			sharePath := filepath.Join(roundPath, commitEntry.Name(), config.DistKeyShareFile)
+			if _, err := os.Stat(sharePath); err == nil {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
+}

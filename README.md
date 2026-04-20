@@ -365,6 +365,58 @@ The service exposes a gRPC API with the following methods:
 | `FinalizeDKG` | Finalize DKG and produce distributed key share |
 | `PartialDecryptTDH2` | Perform TDH2 partial decryption |
 
+## Light Client Recovery
+
+Story Kernel uses a CometBFT light client backed by a sealed LevelDB to verify on-chain state.
+The light client's trusted state is sealed with SGX, ensuring confidentiality and integrity.
+`config.toml`, however, resides in `allowed_files` and is not sealed.
+
+### Initialization strategy
+
+On startup, the kernel determines its light client initialization strategy as follows:
+
+| Sealed DB state | DKG key shares | Action |
+|-----------------|---------------|--------|
+| Valid | Any | Resume from sealed DB |
+| Expired / Invalid | None | Fall back to `config.toml` (pre-registration) |
+| Expired / Invalid | Exist | **Refuse to start** |
+| Missing | None | Initialize from `config.toml` (first boot) |
+| Missing | Exist | **Refuse to start** |
+
+Once DKG key shares (`dist_key_share.sealed`) exist, the kernel will only resume from
+its sealed light client DB. It will not fall back to `config.toml` for light client
+initialization because `config.toml` is not sealed and could be modified from outside the
+enclave.
+
+### Recovery procedure
+
+If the kernel refuses to start because the sealed light client state is missing or expired
+while DKG key shares exist, the operator must:
+
+1. Remove the DKG state directory:
+   ```bash
+   rm -rf /opt/story-kernel/dkg_state/
+   ```
+2. Restart the kernel (it will initialize the light client from `config.toml`)
+3. Re-register for the current DKG round
+
+> **Note:** This recovery procedure removes all past round `dist_key_share` files.
+> The validator will no longer be able to participate in TDH2 partial decryption for
+> previous rounds. This is an accepted tradeoff — allowing `config.toml` to re-initialize
+> the light client while key shares exist would break the chain identity continuity
+> guarantee that the sealed light client DB provides.
+
+### Preventing light client state loss
+
+To avoid the recovery procedure above, operators should:
+
+- **Keep the kernel running.** The light client state expires after the trusted period
+  (~2 weeks of inactivity). Restarting within this window resumes normally from the sealed DB.
+- **Monitor the kernel process.** If the kernel goes down, restart it promptly before the
+  trusted period expires.
+- **Do not delete files under `/opt/story-kernel/`.** The sealed light client DB and DKG
+  state are critical persistent data.
+
 ## Security Considerations
 
 - **Code Commitment**: The `mr_enclave` value uniquely identifies the enclave code. Any modification to the binary or the Gramine manifest changes this value.
@@ -374,6 +426,7 @@ The service exposes a gRPC API with the following methods:
 - **File Access**: The Gramine manifest restricts enclave file access to `/opt/story-kernel/` only. `/etc/ssl/certs/` is in `allowed_files` (not `trusted_files`) because CA certificate bundles differ across machines and would break MRENCLAVE reproducibility.
 - **Fixed Data Path**: The data directory is `/opt/story-kernel/` (not `~/.story-kernel/`) to ensure all validators produce the same MRENCLAVE regardless of OS user. See the [Data Directory](#data-directory) section for details.
 - **MRENCLAVE Reproducibility**: The entire Gramine manifest — every byte — is measured into the code commitment. All values that could vary (log level, binary name) are hardcoded in the manifest. See [Software Requirements](#software-requirements) for the exact versions required.
+- **Light Client Chain Identity**: After DKG registration, the kernel refuses to initialize the light client from `config.toml`. See the [Light Client Recovery](#light-client-recovery) section for the rationale and recovery procedure.
 
 ## Contributing
 
