@@ -221,3 +221,68 @@ func TestTDH2ServiceWithRequesterEncryption(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, plaintext, recovered)
 }
+
+// TestTDH2VerifyRejectsInvalidCiphertext verifies that TDH2Verify returns a
+// non-nil error for corrupted or garbage ciphertext, confirming that the
+// enforcement gate in PartialDecryptTDH2 will block invalid inputs.
+func TestTDH2VerifyRejectsInvalidCiphertext(t *testing.T) {
+	const (
+		n         = 3
+		threshold = 2
+	)
+
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+	pubKey, _, _, _, _ := shamirSetup(t, suite, n, threshold)
+
+	label := []byte("verify-reject-label")
+
+	t.Run("garbage ciphertext bytes", func(t *testing.T) {
+		garbageCT := make([]byte, 256)
+		for i := range garbageCT {
+			garbageCT[i] = byte(i)
+		}
+
+		err := mpc.TDH2Verify(pubKey, garbageCT, label)
+		require.Error(t, err, "TDH2Verify must reject garbage ciphertext")
+	})
+
+	t.Run("empty ciphertext", func(t *testing.T) {
+		err := mpc.TDH2Verify(pubKey, []byte{}, label)
+		require.Error(t, err, "TDH2Verify must reject empty ciphertext")
+	})
+
+	t.Run("valid ciphertext passes", func(t *testing.T) {
+		plaintext := []byte("valid-data")
+		ct, err := mpc.TDH2Encrypt(pubKey, plaintext, label)
+		require.NoError(t, err)
+
+		err = mpc.TDH2Verify(pubKey, ct.Bytes, label)
+		require.NoError(t, err, "TDH2Verify must accept valid ciphertext")
+	})
+
+	t.Run("corrupted valid ciphertext", func(t *testing.T) {
+		plaintext := []byte("corrupt-me")
+		ct, err := mpc.TDH2Encrypt(pubKey, plaintext, label)
+		require.NoError(t, err)
+
+		// Corrupt a byte in the ciphertext
+		corrupted := make([]byte, len(ct.Bytes))
+		copy(corrupted, ct.Bytes)
+		if len(corrupted) > 10 {
+			corrupted[10] ^= 0xFF
+		}
+
+		err = mpc.TDH2Verify(pubKey, corrupted, label)
+		require.Error(t, err, "TDH2Verify must reject corrupted ciphertext")
+	})
+
+	t.Run("wrong label", func(t *testing.T) {
+		plaintext := []byte("wrong-label-test")
+		ct, err := mpc.TDH2Encrypt(pubKey, plaintext, label)
+		require.NoError(t, err)
+
+		wrongLabel := []byte("different-label")
+		err = mpc.TDH2Verify(pubKey, ct.Bytes, wrongLabel)
+		require.Error(t, err, "TDH2Verify must reject ciphertext verified with wrong label")
+	})
+}
