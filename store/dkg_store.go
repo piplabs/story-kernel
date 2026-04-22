@@ -139,8 +139,7 @@ func HasAnyDistKeyShareInDir(stateDir string) (bool, error) {
 		roundPath := filepath.Join(stateDir, roundEntry.Name())
 		commitEntries, err := os.ReadDir(roundPath)
 		if err != nil {
-			// Skip unreadable round directories rather than failing hard.
-			continue
+			return false, fmt.Errorf("failed to read round directory %s: %w", roundPath, err)
 		}
 
 		for _, commitEntry := range commitEntries {

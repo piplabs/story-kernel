@@ -101,6 +101,25 @@ func TestHasAnyDistKeyShareInDir_FilesAtRoundLevel(t *testing.T) {
 	require.False(t, has)
 }
 
+// TestHasAnyDistKeyShareInDir_UnreadableRoundDir verifies that an unreadable round
+// directory causes an error (fail-closed) rather than being silently skipped.
+func TestHasAnyDistKeyShareInDir_UnreadableRoundDir(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	// Create a round directory and make it unreadable.
+	roundDir := filepath.Join(dir, "1")
+	require.NoError(t, os.MkdirAll(roundDir, 0o700))
+	require.NoError(t, os.Chmod(roundDir, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(roundDir, 0o700) })
+
+	has, err := HasAnyDistKeyShareInDir(dir)
+	require.Error(t, err, "unreadable round directory should cause an error, not be skipped")
+	require.False(t, has)
+	require.Contains(t, err.Error(), "failed to read round directory")
+}
+
 // TestHasAnyDistKeyShare_ViaMethod verifies the DKGStore method delegates correctly.
 func TestHasAnyDistKeyShare_ViaMethod(t *testing.T) {
 	t.Parallel()
