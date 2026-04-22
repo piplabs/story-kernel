@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
@@ -56,14 +57,14 @@ func Serve(cfg *config.Config) (*grpc.Server, chan error) {
 
 	svr := grpc.NewServer(serverOpts...)
 
-	// Initialize query client
-	queryClient, err := initializeQueryClient(cfg)
+	// Initialize query client and session nonce (bound to the light client DB instance).
+	queryClient, sessionNonce, err := initializeQueryClient(cfg)
 	if err != nil {
 		log.Fatalf("Failed to initialize query client: %v", err)
 	}
 
 	// Register story-kernel service server
-	registerAllServices(svr, cfg, queryClient)
+	registerAllServices(svr, cfg, queryClient, sessionNonce)
 
 	// Only enable gRPC reflection in debug mode for development/testing.
 	// Reflection exposes service metadata and must not be enabled in production.
@@ -88,12 +89,18 @@ func runServer(cfg *config.Config, svr *grpc.Server, errCh chan error) {
 	errCh <- svr.Serve(lis)
 }
 
-func initializeQueryClient(cfg *config.Config) (story.QueryClient, error) {
+func initializeQueryClient(cfg *config.Config) (story.QueryClient, []byte, error) {
 	// Create SGX-protected database for light client
 	lightClientDir := cfg.GetLightClientDir()
 	db, err := enclave.NewSealedLevelDB("light_client", lightClientDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create light client database: %w", err)
+		return nil, nil, fmt.Errorf("failed to create light client database: %w", err)
+	}
+
+	// Ensure a session nonce exists in the DB, binding sealed files to this DB instance.
+	sessionNonce, err := ensureSessionNonce(db)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to ensure session nonce: %w", err)
 	}
 
 	ctx := context.Background()
@@ -103,7 +110,7 @@ func initializeQueryClient(cfg *config.Config) (story.QueryClient, error) {
 	// - If DB is empty (first-time startup): Create new instance from config's trusted block.
 	hasExistingState, err := story.HasTrustedState(db, cfg.LightClient.ChainID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check existing light client state: %w", err)
+		return nil, nil, fmt.Errorf("failed to check existing light client state: %w", err)
 	}
 
 	if hasExistingState {
@@ -116,31 +123,33 @@ func initializeQueryClient(cfg *config.Config) (story.QueryClient, error) {
 			// NOT clear the DB — doing so would destroy valid state and cause a boot loop
 			// if the config's trusted block is also expired.
 			if !isDBStateError(err) {
-				return nil, fmt.Errorf("failed to resume light client from DB: %w", err)
+				return nil, nil, fmt.Errorf("failed to resume light client from DB: %w", err)
 			}
 
 			log.Warnf("Light client DB state is invalid, falling back to config's trusted block: %v", err)
 
 			queryClient, fallbackErr := fallbackToConfigTrustedBlock(ctx, cfg, db)
 			if fallbackErr != nil {
-				return nil, fmt.Errorf("failed to resume from DB (%w) and fallback from config also failed: %w", err, fallbackErr)
+				return nil, nil, fmt.Errorf("failed to resume from DB (%w) and fallback from config also failed: %w", err, fallbackErr)
 			}
 
-			return queryClient, nil
+			return queryClient, sessionNonce, nil
 		}
 
 		log.Info("Resumed light client from existing sealed state")
 
-		return queryClient, nil
+		return queryClient, sessionNonce, nil
 	}
 
 	// No existing state — first-time initialization from config.
-	// After DKG registration, the light client must only resume from sealed DB.
-	if err := rejectConfigFallbackIfDKGKeysExist(cfg); err != nil {
-		return nil, err
+	// Any pre-existing sealed DKG files from a prior DB session will fail
+	// nonce verification at use time, so no explicit file check is needed here.
+	qc, err := newQueryClientFromConfig(ctx, cfg, db)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	return newQueryClientFromConfig(ctx, cfg, db)
+	return qc, sessionNonce, nil
 }
 
 // newQueryClientFromConfig creates a new verified query client using config's trusted block info.
@@ -204,16 +213,56 @@ func fallbackToConfigTrustedBlock(ctx context.Context, cfg *config.Config, db cm
 	return queryClient, nil
 }
 
-// rejectConfigFallbackIfDKGKeysExist checks whether any sealed DKG key shares
-// exist. After DKG registration, the light client must resume from sealed DB
-// rather than config.toml to preserve chain identity continuity.
+// sessionNonceKey is the LevelDB key for the session nonce stored in the
+// light client's sealed database. The __kernel/ prefix avoids collisions
+// with CometBFT light client keys (which use lb/{chainID}/ and "size").
+// ClearTrustedState's store.Prune(0) only deletes light block keys, so
+// this nonce survives DB prune operations.
+var sessionNonceKey = []byte("__kernel/session_nonce")
+
+// ensureSessionNonce reads or creates a session nonce in the light client DB.
+// The nonce binds all sealed DKG files to this specific DB instance.
+// If the DB was re-created (e.g., after deletion), a new nonce is generated
+// and any pre-existing sealed DKG files will fail nonce verification at use time.
+func ensureSessionNonce(db cmtdb.DB) ([]byte, error) {
+	existing, err := db.Get(sessionNonceKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read session nonce from DB: %w", err)
+	}
+
+	if existing != nil {
+		if len(existing) != store.SessionNonceSize {
+			return nil, fmt.Errorf("corrupted session nonce in DB: expected %d bytes, got %d",
+				store.SessionNonceSize, len(existing))
+		}
+		return existing, nil
+	}
+
+	// No nonce in DB — generate a fresh one.
+	nonce := make([]byte, store.SessionNonceSize)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, fmt.Errorf("failed to generate session nonce: %w", err)
+	}
+
+	if err := db.SetSync(sessionNonceKey, nonce); err != nil {
+		return nil, fmt.Errorf("failed to persist session nonce to DB: %w", err)
+	}
+
+	log.Info("Generated and stored new session nonce in DB")
+
+	return nonce, nil
+}
+
+// rejectConfigFallbackIfDKGKeysExist checks whether any sealed dist_key_share
+// files exist. After DKG finalization, the light client must resume from sealed
+// DB rather than config.toml to preserve chain identity continuity.
 func rejectConfigFallbackIfDKGKeysExist(cfg *config.Config) error {
-	hasKeys, err := store.HasAnyDistKeyShareInDir(cfg.GetDKGStateDir())
+	hasShares, err := store.HasAnyDistKeyShareInDir(cfg.GetDKGStateDir())
 	if err != nil {
 		return fmt.Errorf("failed to check for existing DKG key shares: %w", err)
 	}
 
-	if hasKeys {
+	if hasShares {
 		return fmt.Errorf(
 			"sealed DKG key shares exist but light client state is missing or expired. "+
 				"To recover, remove the DKG state directory (%s) and re-register",
@@ -292,8 +341,15 @@ func loadServerTLSCredentials(grpcCfg config.GRPCConfig) (credentials.TransportC
 	return credentials.NewTLS(tlsConfig), nil
 }
 
-func registerAllServices(svr *grpc.Server, cfg *config.Config, queryClient story.QueryClient) {
+func registerAllServices(svr *grpc.Server, cfg *config.Config, queryClient story.QueryClient, sessionNonce []byte) {
 	suite := edwards25519.NewBlakeSHA256Ed25519()
+
+	// Wrap the default SGX sealer with session nonce binding so that all sealed
+	// DKG files are tied to the current light client DB instance.
+	nonceSealer, err := store.NewNonceBindingSealer(store.NewEnclaveSealer(), sessionNonce)
+	if err != nil {
+		log.Fatalf("Failed to create nonce-binding sealer: %v", err)
+	}
 
 	pb.RegisterKernelServiceServer(svr, &service.DKGServer{
 		Cfg:                cfg,
@@ -304,7 +360,7 @@ func registerAllServices(svr *grpc.Server, cfg *config.Config, queryClient story
 		ResharingPrevCache: store.NewResharingDKGCache(),
 		ResharingNextCache: store.NewDKGCache(),
 		DistKeyShareCache:  store.NewDistKeyShareCache(),
-		DKGStore:           store.NewDKGStore(cfg.GetKeysDir(), cfg.GetDKGStateDir(), suite),
+		DKGStore:           store.NewDKGStoreWithSealer(cfg.GetKeysDir(), cfg.GetDKGStateDir(), suite, nonceSealer),
 		PIDCache:           store.NewPIDCache(),
 	})
 }

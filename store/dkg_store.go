@@ -39,6 +39,11 @@ func (enclaveSealer) UnsealFromFile(path string) ([]byte, error) {
 	return enclave.UnsealFromFile(path)
 }
 
+// NewEnclaveSealer returns a Sealer that delegates to the SGX enclave.
+func NewEnclaveSealer() Sealer {
+	return enclaveSealer{}
+}
+
 type DKGStore struct {
 	suite  *edwards25519.SuiteEd25519
 	sealer Sealer
@@ -51,7 +56,7 @@ type DKGStore struct {
 func NewDKGStore(keyDir, stateDir string, suite *edwards25519.SuiteEd25519) *DKGStore {
 	return &DKGStore{
 		suite:    suite,
-		sealer:   enclaveSealer{},
+		sealer:   NewEnclaveSealer(),
 		keyDir:   keyDir,
 		stateDir: stateDir,
 	}

@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	cmtdb "github.com/cometbft/cometbft-db"
 	"github.com/piplabs/story-kernel/config"
+	"github.com/piplabs/story-kernel/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -60,4 +62,36 @@ func TestRejectConfigFallbackIfDKGKeysExist_NoDKGStateDir(t *testing.T) {
 	// Do NOT create the DKG state directory — simulate fresh install.
 	err := rejectConfigFallbackIfDKGKeysExist(cfg)
 	require.NoError(t, err, "fresh install with no DKG state dir should be allowed")
+}
+
+// =============================================================================
+// ensureSessionNonce tests
+// =============================================================================
+
+// TestEnsureSessionNonce_NewDB verifies that a fresh DB generates a new session nonce.
+func TestEnsureSessionNonce_NewDB(t *testing.T) {
+	t.Parallel()
+
+	db := cmtdb.NewMemDB()
+
+	nonce, err := ensureSessionNonce(db)
+	require.NoError(t, err)
+	require.Len(t, nonce, store.SessionNonceSize)
+}
+
+// TestEnsureSessionNonce_ExistingDB verifies that a DB with an existing nonce
+// returns the same nonce.
+func TestEnsureSessionNonce_ExistingDB(t *testing.T) {
+	t.Parallel()
+
+	db := cmtdb.NewMemDB()
+
+	// Generate nonce on first call.
+	nonce1, err := ensureSessionNonce(db)
+	require.NoError(t, err)
+
+	// Second call returns the same nonce.
+	nonce2, err := ensureSessionNonce(db)
+	require.NoError(t, err)
+	require.Equal(t, nonce1, nonce2)
 }
