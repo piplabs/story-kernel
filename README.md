@@ -375,40 +375,28 @@ The light client's trusted state is sealed with SGX, ensuring confidentiality an
 
 On startup, the kernel determines its light client initialization strategy as follows:
 
-| Sealed DB state | DKG key shares | Action |
-|-----------------|---------------|--------|
-| Valid | Any | Resume from sealed DB |
-| Expired / Invalid | None | Fall back to `config.toml` (pre-registration) |
-| Expired / Invalid | Exist | **Refuse to start** |
-| Missing | None | Initialize from `config.toml` (first boot) |
-| Missing | Exist | **Refuse to start** |
+| Sealed DB state | Action |
+|-----------------|--------|
+| Valid | Resume from sealed DB, use existing session nonce |
+| Expired / Invalid | Re-initialize from `config.toml`, generate new session nonce |
+| Missing | Initialize from `config.toml` (first boot), generate new session nonce |
 
-Once DKG key shares (`dist_key_share.sealed`) exist, the kernel will only resume from
-its sealed light client DB. It will not fall back to `config.toml` for light client
-initialization because `config.toml` is not sealed and could be modified from outside the
-enclave.
+A session nonce (32-byte random value) is stored in the sealed light client DB and
+embedded in all sealed DKG files via the `NonceBindingSealer`. When the light client is
+re-initialized from `config.toml` (due to expiration, corruption, or DB deletion), a new
+nonce is generated. Any pre-existing sealed DKG files created under the prior nonce will
+fail verification at use time and must be re-created through a new DKG round.
 
-### Recovery procedure
+### Recovery after light client state loss
 
-If the kernel refuses to start because the sealed light client state is missing or expired
-while DKG key shares exist, the operator must:
-
-1. Remove the DKG state directory:
-   ```bash
-   rm -rf /opt/story-kernel/dkg_state/
-   ```
-2. Restart the kernel (it will initialize the light client from `config.toml`)
-3. Re-register for the current DKG round
-
-> **Note:** This recovery procedure removes all past round `dist_key_share` files.
-> The validator will no longer be able to participate in TDH2 partial decryption for
-> previous rounds. This is an accepted tradeoff — allowing `config.toml` to re-initialize
-> the light client while key shares exist would break the chain identity continuity
-> guarantee that the sealed light client DB provides.
+If the light client state is lost (DB deleted or expired beyond the trusted period),
+the kernel will re-initialize from `config.toml` with a new session nonce. Existing
+sealed DKG files will no longer be usable due to nonce mismatch. The operator must
+re-register for the current DKG round to resume participation.
 
 ### Preventing light client state loss
 
-To avoid the recovery procedure above, operators should:
+To avoid the need for re-registration, operators should:
 
 - **Keep the kernel running.** The light client state expires after the trusted period
   (~2 weeks of inactivity). Restarting within this window resumes normally from the sealed DB.
@@ -426,7 +414,7 @@ To avoid the recovery procedure above, operators should:
 - **File Access**: The Gramine manifest restricts enclave file access to `/opt/story-kernel/` only. `/etc/ssl/certs/` is in `allowed_files` (not `trusted_files`) because CA certificate bundles differ across machines and would break MRENCLAVE reproducibility.
 - **Fixed Data Path**: The data directory is `/opt/story-kernel/` (not `~/.story-kernel/`) to ensure all validators produce the same MRENCLAVE regardless of OS user. See the [Data Directory](#data-directory) section for details.
 - **MRENCLAVE Reproducibility**: The entire Gramine manifest — every byte — is measured into the code commitment. All values that could vary (log level, binary name) are hardcoded in the manifest. See [Software Requirements](#software-requirements) for the exact versions required.
-- **Light Client Chain Identity**: After DKG registration, the kernel refuses to initialize the light client from `config.toml`. See the [Light Client Recovery](#light-client-recovery) section for the rationale and recovery procedure.
+- **Light Client Session Binding**: All sealed DKG files are bound to the light client DB session via a nonce. When the light client is re-initialized from `config.toml`, a new nonce is generated and prior sealed files are invalidated. See the [Light Client Recovery](#light-client-recovery) section for details.
 
 ## Contributing
 
