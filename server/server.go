@@ -133,6 +133,12 @@ func initializeQueryClient(cfg *config.Config) (story.QueryClient, []byte, error
 				return nil, nil, fmt.Errorf("failed to resume from DB (%w) and fallback from config also failed: %w", err, fallbackErr)
 			}
 
+			// Re-read the nonce because fallbackToConfigTrustedBlock regenerates it.
+			sessionNonce, err = ensureSessionNonce(db)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to read regenerated session nonce: %w", err)
+			}
+
 			return queryClient, sessionNonce, nil
 		}
 
@@ -190,13 +196,20 @@ func newQueryClientFromConfig(ctx context.Context, cfg *config.Config, db cmtdb.
 // to update config.toml with a recent trusted block.
 func fallbackToConfigTrustedBlock(ctx context.Context, cfg *config.Config, db cmtdb.DB) (story.QueryClient, error) {
 	// Check BEFORE ClearTrustedState to avoid irreversibly destroying valid DB state.
-	// After DKG registration, the light client must only resume from sealed DB.
+	// After DKG finalization, the light client must only resume from sealed DB.
 	if err := rejectConfigFallbackIfDKGKeysExist(cfg); err != nil {
 		return nil, err
 	}
 
 	if err := story.ClearTrustedState(db, cfg.LightClient.ChainID); err != nil {
 		return nil, fmt.Errorf("failed to clear expired light client state: %w", err)
+	}
+
+	// Regenerate the session nonce. Re-initializing from config.toml breaks chain
+	// identity continuity, so any sealed DKG files from the prior session must not
+	// be usable under the new light client state.
+	if err := regenerateSessionNonce(db); err != nil {
+		return nil, fmt.Errorf("failed to regenerate session nonce: %w", err)
 	}
 
 	queryClient, err := newQueryClientFromConfig(ctx, cfg, db)
@@ -251,6 +264,25 @@ func ensureSessionNonce(db cmtdb.DB) ([]byte, error) {
 	log.Info("Generated and stored new session nonce in DB")
 
 	return nonce, nil
+}
+
+// regenerateSessionNonce replaces the existing session nonce in the DB with a
+// fresh random value. This is called when falling back to config.toml for light
+// client re-initialization, which breaks chain identity continuity. Any sealed
+// DKG files created under the prior nonce will fail verification at use time.
+func regenerateSessionNonce(db cmtdb.DB) error {
+	nonce := make([]byte, store.SessionNonceSize)
+	if _, err := rand.Read(nonce); err != nil {
+		return fmt.Errorf("failed to generate new session nonce: %w", err)
+	}
+
+	if err := db.SetSync(sessionNonceKey, nonce); err != nil {
+		return fmt.Errorf("failed to persist regenerated session nonce: %w", err)
+	}
+
+	log.Info("Regenerated session nonce for config-based light client re-initialization")
+
+	return nil
 }
 
 // rejectConfigFallbackIfDKGKeysExist checks whether any sealed dist_key_share
