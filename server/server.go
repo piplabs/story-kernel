@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
@@ -56,14 +57,14 @@ func Serve(cfg *config.Config) (*grpc.Server, chan error) {
 
 	svr := grpc.NewServer(serverOpts...)
 
-	// Initialize query client
-	queryClient, err := initializeQueryClient(cfg)
+	// Initialize query client and session nonce (bound to the light client DB instance).
+	queryClient, sessionNonce, err := initializeQueryClient(cfg)
 	if err != nil {
 		log.Fatalf("Failed to initialize query client: %v", err)
 	}
 
 	// Register story-kernel service server
-	registerAllServices(svr, cfg, queryClient)
+	registerAllServices(svr, cfg, queryClient, sessionNonce)
 
 	// Only enable gRPC reflection in debug mode for development/testing.
 	// Reflection exposes service metadata and must not be enabled in production.
@@ -88,24 +89,22 @@ func runServer(cfg *config.Config, svr *grpc.Server, errCh chan error) {
 	errCh <- svr.Serve(lis)
 }
 
-func initializeQueryClient(cfg *config.Config) (story.QueryClient, error) {
+func initializeQueryClient(cfg *config.Config) (story.QueryClient, []byte, error) {
 	// Create SGX-protected database for light client
 	lightClientDir := cfg.GetLightClientDir()
 	db, err := enclave.NewSealedLevelDB("light_client", lightClientDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create light client database: %w", err)
+		return nil, nil, fmt.Errorf("failed to create light client database: %w", err)
 	}
 
 	ctx := context.Background()
 
-	// Determine initialization strategy based on DB state, not config values.
-	// - If DB has existing light client state (from a previous run): Load from DB.
-	// - If DB is empty (first-time startup): Create new instance from config's trusted block.
 	hasExistingState, err := story.HasTrustedState(db, cfg.LightClient.ChainID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check existing light client state: %w", err)
+		return nil, nil, fmt.Errorf("failed to check existing light client state: %w", err)
 	}
 
+	// If sealed DB has valid light client state, resume from it and use the existing nonce.
 	if hasExistingState {
 		log.Info("Found existing light client state in sealed DB, resuming...")
 		queryClient, err := story.LoadVerifiedQueryClient(ctx, cfg, db)
@@ -116,26 +115,47 @@ func initializeQueryClient(cfg *config.Config) (story.QueryClient, error) {
 			// NOT clear the DB — doing so would destroy valid state and cause a boot loop
 			// if the config's trusted block is also expired.
 			if !isDBStateError(err) {
-				return nil, fmt.Errorf("failed to resume light client from DB: %w", err)
+				return nil, nil, fmt.Errorf("failed to resume light client from DB: %w", err)
 			}
 
 			log.Warnf("Light client DB state is invalid, falling back to config's trusted block: %v", err)
 
-			queryClient, fallbackErr := fallbackToConfigTrustedBlock(ctx, cfg, db)
-			if fallbackErr != nil {
-				return nil, fmt.Errorf("failed to resume from DB (%w) and fallback from config also failed: %w", err, fallbackErr)
-			}
-
-			return queryClient, nil
+			return initFromConfig(ctx, cfg, db)
 		}
 
 		log.Info("Resumed light client from existing sealed state")
 
-		return queryClient, nil
+		nonce, err := readSessionNonce(db)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read session nonce: %w", err)
+		}
+
+		return queryClient, nonce, nil
 	}
 
-	// No existing state — first-time initialization from config.
-	return newQueryClientFromConfig(ctx, cfg, db)
+	// No existing light client state — initialize from config.toml.
+	return initFromConfig(ctx, cfg, db)
+}
+
+// initFromConfig initializes the light client from config.toml with a fresh session nonce.
+// Every config-based initialization (first boot, expired DB fallback, etc.) generates a
+// new nonce, invalidating any sealed DKG files from a prior session.
+func initFromConfig(ctx context.Context, cfg *config.Config, db cmtdb.DB) (story.QueryClient, []byte, error) {
+	if err := story.ClearTrustedState(db, cfg.LightClient.ChainID); err != nil {
+		return nil, nil, fmt.Errorf("failed to clear light client state: %w", err)
+	}
+
+	nonce, err := writeNewSessionNonce(db)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to write session nonce: %w", err)
+	}
+
+	qc, err := newQueryClientFromConfig(ctx, cfg, db)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to initialize light client from config: %w", err)
+	}
+
+	return qc, nonce, nil
 }
 
 // newQueryClientFromConfig creates a new verified query client using config's trusted block info.
@@ -169,28 +189,49 @@ func newQueryClientFromConfig(ctx context.Context, cfg *config.Config, db cmtdb.
 	return queryClient, nil
 }
 
-// fallbackToConfigTrustedBlock clears expired light client state and re-initializes from config.
-// This handles the case where the story-kernel was offline longer than the trusted period (~2 weeks),
-// causing the stored light client state to expire.
-// If the config's trusted block is also expired, returns an actionable error asking the operator
-// to update config.toml with a recent trusted block.
-func fallbackToConfigTrustedBlock(ctx context.Context, cfg *config.Config, db cmtdb.DB) (story.QueryClient, error) {
-	if err := story.ClearTrustedState(db, cfg.LightClient.ChainID); err != nil {
-		return nil, fmt.Errorf("failed to clear expired light client state: %w", err)
-	}
+// sessionNonceKey is the LevelDB key for the session nonce stored in the
+// light client's sealed database. The __kernel/ prefix avoids collisions
+// with CometBFT light client keys (which use lb/{chainID}/ and "size").
+// ClearTrustedState's store.Prune(0) only deletes light block keys, so
+// this nonce survives DB prune operations.
+var sessionNonceKey = []byte("__kernel/session_nonce")
 
-	queryClient, err := newQueryClientFromConfig(ctx, cfg, db)
+// readSessionNonce reads the existing session nonce from the light client DB.
+// Returns an error if the nonce is missing or corrupted.
+func readSessionNonce(db cmtdb.DB) ([]byte, error) {
+	nonce, err := db.Get(sessionNonceKey)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"config's trusted block (height=%d, hash=%s) is also expired or invalid: %w. Please update trusted_height and trusted_hash in config.toml with a recent block (within the trusted period)",
-			cfg.LightClient.TrustedHeight, cfg.LightClient.TrustedHash, err,
-		)
+		return nil, fmt.Errorf("failed to read session nonce from DB: %w", err)
 	}
 
-	log.Warn("Re-initialized light client from config's trusted block after clearing expired DB state")
-	log.Info("Consider updating trusted_height and trusted_hash in config.toml with a more recent block to avoid this on future restarts")
+	if nonce == nil {
+		return nil, errors.New("session nonce not found in DB")
+	}
 
-	return queryClient, nil
+	if len(nonce) != store.SessionNonceSize {
+		return nil, fmt.Errorf("corrupted session nonce in DB: expected %d bytes, got %d",
+			store.SessionNonceSize, len(nonce))
+	}
+
+	return nonce, nil
+}
+
+// writeNewSessionNonce generates a fresh random session nonce and stores it in the DB,
+// replacing any existing nonce. This is called on every config-based light client
+// initialization to ensure sealed DKG files from a prior session are invalidated.
+func writeNewSessionNonce(db cmtdb.DB) ([]byte, error) {
+	nonce := make([]byte, store.SessionNonceSize)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, fmt.Errorf("failed to generate session nonce: %w", err)
+	}
+
+	if err := db.SetSync(sessionNonceKey, nonce); err != nil {
+		return nil, fmt.Errorf("failed to persist session nonce to DB: %w", err)
+	}
+
+	log.Info("Generated new session nonce")
+
+	return nonce, nil
 }
 
 // isDBStateError reports whether err indicates the light client's stored state is
@@ -261,8 +302,15 @@ func loadServerTLSCredentials(grpcCfg config.GRPCConfig) (credentials.TransportC
 	return credentials.NewTLS(tlsConfig), nil
 }
 
-func registerAllServices(svr *grpc.Server, cfg *config.Config, queryClient story.QueryClient) {
+func registerAllServices(svr *grpc.Server, cfg *config.Config, queryClient story.QueryClient, sessionNonce []byte) {
 	suite := edwards25519.NewBlakeSHA256Ed25519()
+
+	// Wrap the default SGX sealer with session nonce binding so that all sealed
+	// DKG files are tied to the current light client DB instance.
+	nonceSealer, err := store.NewNonceBindingSealer(store.NewEnclaveSealer(), sessionNonce)
+	if err != nil {
+		log.Fatalf("Failed to create nonce-binding sealer: %v", err)
+	}
 
 	pb.RegisterKernelServiceServer(svr, &service.DKGServer{
 		Cfg:                cfg,
@@ -273,7 +321,7 @@ func registerAllServices(svr *grpc.Server, cfg *config.Config, queryClient story
 		ResharingPrevCache: store.NewResharingDKGCache(),
 		ResharingNextCache: store.NewDKGCache(),
 		DistKeyShareCache:  store.NewDistKeyShareCache(),
-		DKGStore:           store.NewDKGStore(cfg.GetKeysDir(), cfg.GetDKGStateDir(), suite),
+		DKGStore:           store.NewDKGStoreWithSealer(cfg.GetKeysDir(), cfg.GetDKGStateDir(), suite, nonceSealer),
 		PIDCache:           store.NewPIDCache(),
 	})
 }
