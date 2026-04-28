@@ -50,11 +50,20 @@ func (s *DKGServer) ProcessJustification(_ context.Context, req *pb.ProcessJusti
 		return nil, status.Errorf(codes.Internal, "failed to get or load roundContext")
 	}
 
-	// Get the appropriate DistKeyGenerator(s) based on whether this is a resharing round.
-	// For resharing, justifications must be processed through both prev and next DKGs
-	// (same pattern as ProcessResponses).
+	// Bounds-check references for the per-item loop:
+	//   dealerCount    — upper bound for outer Justification.Index (the dealer).
+	//   recipientCount — upper bound for inner VssJustification.Index
+	//                    (the recipient of the original deal).
+	// Non-resharing rounds have a single committee acting as both. In
+	// resharing, dealers live in the OLD committee and recipients live
+	// in the NEW committee.
+	var dealerCount, recipientCount int
+
 	var distKeyGens []*dkg.DistKeyGenerator
 	if !req.GetIsResharing() {
+		dealerCount = len(rc.SortedPubKeys)
+		recipientCount = len(rc.SortedPubKeys)
+
 		distKeyGen, err := s.GetInitDKG(codeCommitmentHex, req.GetRound(), rc.Network.GetThreshold(), rc.SortedPubKeys)
 		if err != nil {
 			log.Errorf("failed to load or rebuild initial distributed key generator: %v", err)
@@ -69,6 +78,15 @@ func (s *DKGServer) ProcessJustification(_ context.Context, req *pb.ProcessJusti
 
 			return nil, status.Errorf(codes.Internal, "failed to get the latest active round of DKG")
 		}
+		// Defence in depth against a future regression that returns
+		// (nil, nil) on an uninitialised state.
+		if latest == nil || latest.GetTotal() == 0 {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"resharing requires an active prior DKG network")
+		}
+
+		dealerCount = int(latest.GetTotal())   // OLD committee
+		recipientCount = len(rc.SortedPubKeys) // NEW committee
 
 		prevDistKeyGen, err := s.GetResharingPrevDKG(codeCommitmentHex, req.GetRound(), rc.Network.GetThreshold(), rc.SortedPubKeys, latest)
 		if err != nil {
@@ -85,9 +103,22 @@ func (s *DKGServer) ProcessJustification(_ context.Context, req *pb.ProcessJusti
 		}
 	}
 
-	// Process each justification through all DKG instances, continuing on
-	// individual failures (matches ProcessDeals/ProcessResponses pattern).
-	var processed []dkg.Justification
+	// Fail loudly if no DistKeyGenerator is available (see ProcessResponses for
+	// the same guard — otherwise the per-item loop silently succeeds).
+	if len(distKeyGens) == 0 {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"no DistKeyGenerator available for this round (node not a member of the required committee(s))")
+	}
+
+	// Process each justification. A justification is considered rejected iff
+	// proto conversion fails, the dealer/recipient index is out of bounds, OR
+	// every configured DistKeyGenerator rejects it with a non-idempotent error.
+	// If every generator returns an idempotent "already processed" error the
+	// justification is silently skipped (NOT added to rejected_justifications).
+	var (
+		justs    []dkg.Justification
+		rejected []*pb.Justification
+	)
 	for _, j := range req.GetJustifications() {
 		justification, err := types.ConvertToJustification(j)
 		if err != nil {
@@ -96,9 +127,26 @@ func (s *DKGServer) ProcessJustification(_ context.Context, req *pb.ProcessJusti
 				"code_commitment": codeCommitmentHex,
 			}).Errorf("failed to convert justification from proto: %v", err)
 
+			rejected = append(rejected, j)
+
 			continue
 		}
 
+		// Defence in depth: bounds-check both the dealer and the recipient
+		// index before kyber. In resharing the dealer is an old-committee
+		// member (range [0, dealerCount)) and the recipient is a new-committee
+		// member (range [0, recipientCount)).
+		if int(justification.Index) >= dealerCount ||
+			int(j.GetVssJustification().GetIndex()) >= recipientCount {
+			rejected = append(rejected, j)
+
+			continue
+		}
+
+		// processed: at least one DistKeyGenerator applied this justification
+		// (real success or idempotent re-submission). Reject only when
+		// EVERY generator returned a real (non-idempotent) error.
+		processed := false
 		for _, distKeyGen := range distKeyGens {
 			if err := distKeyGen.ProcessJustification(justification); err != nil {
 				log.WithFields(log.Fields{
@@ -107,11 +155,22 @@ func (s *DKGServer) ProcessJustification(_ context.Context, req *pb.ProcessJusti
 					"dealer_index":    justification.Index,
 				}).Errorf("failed to process justification: %v", err)
 
+				if isAlreadyProcessedErr(err) {
+					processed = true
+				}
+
 				continue
 			}
+			processed = true
 		}
 
-		processed = append(processed, *justification)
+		if !processed {
+			rejected = append(rejected, j)
+
+			continue
+		}
+
+		justs = append(justs, *justification)
 
 		log.WithFields(log.Fields{
 			"round":           req.GetRound(),
@@ -121,17 +180,24 @@ func (s *DKGServer) ProcessJustification(_ context.Context, req *pb.ProcessJusti
 	}
 
 	// Persist successfully processed justifications for recovery replay
-	if len(processed) > 0 {
-		if err := s.DKGStore.AddJustifications(codeCommitmentHex, req.GetRound(), processed); err != nil {
+	if len(justs) > 0 {
+		if err := s.DKGStore.AddJustifications(codeCommitmentHex, req.GetRound(), justs); err != nil {
 			log.Errorf("failed to add justifications to the DKG state: %v", err)
 
 			return nil, status.Errorf(codes.Internal, "failed to add justifications to the DKG state")
 		}
 	}
 
-	log.Info("All justifications have been processed", "code_commitment", codeCommitmentHex, "round", req.GetRound())
+	log.WithFields(log.Fields{
+		"code_commitment": codeCommitmentHex,
+		"round":           req.GetRound(),
+		"processed":       len(justs),
+		"rejected":        len(rejected),
+	}).Info("Processed justifications")
 
-	return &pb.ProcessJustificationResponse{}, nil
+	return &pb.ProcessJustificationResponse{
+		RejectedJustifications: rejected,
+	}, nil
 }
 
 func validateProcessJustificationRequest(req *pb.ProcessJustificationRequest) error {

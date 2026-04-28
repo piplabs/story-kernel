@@ -796,8 +796,10 @@ type ProcessDealsResponse struct {
 	CodeCommitment []byte                 `protobuf:"bytes,1,opt,name=code_commitment,proto3" json:"code_commitment,omitempty"`
 	Round          uint32                 `protobuf:"varint,2,opt,name=round,proto3" json:"round,omitempty"`
 	Responses      []*Response            `protobuf:"bytes,3,rep,name=responses,proto3" json:"responses,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Deals the kernel rejected; the client may retry these.
+	RejectedDeals []*Deal `protobuf:"bytes,4,rep,name=rejected_deals,proto3" json:"rejected_deals,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ProcessDealsResponse) Reset() {
@@ -847,6 +849,13 @@ func (x *ProcessDealsResponse) GetRound() uint32 {
 func (x *ProcessDealsResponse) GetResponses() []*Response {
 	if x != nil {
 		return x.Responses
+	}
+	return nil
+}
+
+func (x *ProcessDealsResponse) GetRejectedDeals() []*Deal {
+	if x != nil {
+		return x.RejectedDeals
 	}
 	return nil
 }
@@ -922,8 +931,10 @@ func (x *ProcessResponsesRequest) GetIsResharing() bool {
 type ProcessResponsesResponse struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Justifications []*Justification       `protobuf:"bytes,1,rep,name=justifications,proto3" json:"justifications,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Responses the kernel rejected; the client may retry these.
+	RejectedResponses []*Response `protobuf:"bytes,2,rep,name=rejected_responses,proto3" json:"rejected_responses,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ProcessResponsesResponse) Reset() {
@@ -959,6 +970,13 @@ func (*ProcessResponsesResponse) Descriptor() ([]byte, []int) {
 func (x *ProcessResponsesResponse) GetJustifications() []*Justification {
 	if x != nil {
 		return x.Justifications
+	}
+	return nil
+}
+
+func (x *ProcessResponsesResponse) GetRejectedResponses() []*Response {
+	if x != nil {
+		return x.RejectedResponses
 	}
 	return nil
 }
@@ -1035,9 +1053,11 @@ func (x *ProcessJustificationRequest) GetIsResharing() bool {
 
 // ProcessJustificationResponse is returned from TEE after processing justifications.
 type ProcessJustificationResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Justifications the kernel rejected; the client may retry these.
+	RejectedJustifications []*Justification `protobuf:"bytes,1,rep,name=rejected_justifications,proto3" json:"rejected_justifications,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *ProcessJustificationResponse) Reset() {
@@ -1068,6 +1088,13 @@ func (x *ProcessJustificationResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ProcessJustificationResponse.ProtoReflect.Descriptor instead.
 func (*ProcessJustificationResponse) Descriptor() ([]byte, []int) {
 	return file_kernel_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ProcessJustificationResponse) GetRejectedJustifications() []*Justification {
+	if x != nil {
+		return x.RejectedJustifications
+	}
+	return nil
 }
 
 type FinalizeDKGRequest struct {
@@ -1435,24 +1462,27 @@ const file_kernel_proto_rawDesc = "" +
 	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
 	"\x05round\x18\x02 \x01(\rR\x05round\x12.\n" +
 	"\x05deals\x18\x03 \x03(\v2\x18.story.dkg.v1.types.DealR\x05deals\x12\"\n" +
-	"\fis_resharing\x18\x04 \x01(\bR\fis_resharing\"\x92\x01\n" +
+	"\fis_resharing\x18\x04 \x01(\bR\fis_resharing\"\xd4\x01\n" +
 	"\x14ProcessDealsResponse\x12(\n" +
 	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
 	"\x05round\x18\x02 \x01(\rR\x05round\x12:\n" +
-	"\tresponses\x18\x03 \x03(\v2\x1c.story.dkg.v1.types.ResponseR\tresponses\"\xb9\x01\n" +
+	"\tresponses\x18\x03 \x03(\v2\x1c.story.dkg.v1.types.ResponseR\tresponses\x12@\n" +
+	"\x0erejected_deals\x18\x04 \x03(\v2\x18.story.dkg.v1.types.DealR\x0erejected_deals\"\xb9\x01\n" +
 	"\x17ProcessResponsesRequest\x12(\n" +
 	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
 	"\x05round\x18\x02 \x01(\rR\x05round\x12:\n" +
 	"\tresponses\x18\x03 \x03(\v2\x1c.story.dkg.v1.types.ResponseR\tresponses\x12\"\n" +
-	"\fis_resharing\x18\x04 \x01(\bR\fis_resharing\"e\n" +
+	"\fis_resharing\x18\x04 \x01(\bR\fis_resharing\"\xb3\x01\n" +
 	"\x18ProcessResponsesResponse\x12I\n" +
-	"\x0ejustifications\x18\x01 \x03(\v2!.story.dkg.v1.types.JustificationR\x0ejustifications\"\xcc\x01\n" +
+	"\x0ejustifications\x18\x01 \x03(\v2!.story.dkg.v1.types.JustificationR\x0ejustifications\x12L\n" +
+	"\x12rejected_responses\x18\x02 \x03(\v2\x1c.story.dkg.v1.types.ResponseR\x12rejected_responses\"\xcc\x01\n" +
 	"\x1bProcessJustificationRequest\x12(\n" +
 	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
 	"\x05round\x18\x02 \x01(\rR\x05round\x12I\n" +
 	"\x0ejustifications\x18\x03 \x03(\v2!.story.dkg.v1.types.JustificationR\x0ejustifications\x12\"\n" +
-	"\fis_resharing\x18\x04 \x01(\bR\fis_resharing\"\x1e\n" +
-	"\x1cProcessJustificationResponse\"x\n" +
+	"\fis_resharing\x18\x04 \x01(\bR\fis_resharing\"{\n" +
+	"\x1cProcessJustificationResponse\x12[\n" +
+	"\x17rejected_justifications\x18\x01 \x03(\v2!.story.dkg.v1.types.JustificationR\x17rejected_justifications\"x\n" +
 	"\x12FinalizeDKGRequest\x12(\n" +
 	"\x0fcode_commitment\x18\x01 \x01(\fR\x0fcode_commitment\x12\x14\n" +
 	"\x05round\x18\x02 \x01(\rR\x05round\x12\"\n" +
@@ -1546,30 +1576,33 @@ var file_kernel_proto_depIdxs = []int32{
 	20, // 2: story.dkg.v1.types.GenerateDealsResponse.deals:type_name -> story.dkg.v1.types.Deal
 	20, // 3: story.dkg.v1.types.ProcessDealsRequest.deals:type_name -> story.dkg.v1.types.Deal
 	21, // 4: story.dkg.v1.types.ProcessDealsResponse.responses:type_name -> story.dkg.v1.types.Response
-	21, // 5: story.dkg.v1.types.ProcessResponsesRequest.responses:type_name -> story.dkg.v1.types.Response
-	22, // 6: story.dkg.v1.types.ProcessResponsesResponse.justifications:type_name -> story.dkg.v1.types.Justification
-	22, // 7: story.dkg.v1.types.ProcessJustificationRequest.justifications:type_name -> story.dkg.v1.types.Justification
-	2,  // 8: story.dkg.v1.types.KernelService.GetCodeCommitment:input_type -> story.dkg.v1.types.GetCodeCommitmentRequest
-	4,  // 9: story.dkg.v1.types.KernelService.GenerateAndSealKey:input_type -> story.dkg.v1.types.GenerateAndSealKeyRequest
-	8,  // 10: story.dkg.v1.types.KernelService.GenerateDeals:input_type -> story.dkg.v1.types.GenerateDealsRequest
-	10, // 11: story.dkg.v1.types.KernelService.ProcessDeals:input_type -> story.dkg.v1.types.ProcessDealsRequest
-	12, // 12: story.dkg.v1.types.KernelService.ProcessResponses:input_type -> story.dkg.v1.types.ProcessResponsesRequest
-	14, // 13: story.dkg.v1.types.KernelService.ProcessJustification:input_type -> story.dkg.v1.types.ProcessJustificationRequest
-	16, // 14: story.dkg.v1.types.KernelService.FinalizeDKG:input_type -> story.dkg.v1.types.FinalizeDKGRequest
-	18, // 15: story.dkg.v1.types.KernelService.PartialDecryptTDH2:input_type -> story.dkg.v1.types.PartialDecryptTDH2Request
-	3,  // 16: story.dkg.v1.types.KernelService.GetCodeCommitment:output_type -> story.dkg.v1.types.GetCodeCommitmentResponse
-	5,  // 17: story.dkg.v1.types.KernelService.GenerateAndSealKey:output_type -> story.dkg.v1.types.GenerateAndSealKeyResponse
-	9,  // 18: story.dkg.v1.types.KernelService.GenerateDeals:output_type -> story.dkg.v1.types.GenerateDealsResponse
-	11, // 19: story.dkg.v1.types.KernelService.ProcessDeals:output_type -> story.dkg.v1.types.ProcessDealsResponse
-	13, // 20: story.dkg.v1.types.KernelService.ProcessResponses:output_type -> story.dkg.v1.types.ProcessResponsesResponse
-	15, // 21: story.dkg.v1.types.KernelService.ProcessJustification:output_type -> story.dkg.v1.types.ProcessJustificationResponse
-	17, // 22: story.dkg.v1.types.KernelService.FinalizeDKG:output_type -> story.dkg.v1.types.FinalizeDKGResponse
-	19, // 23: story.dkg.v1.types.KernelService.PartialDecryptTDH2:output_type -> story.dkg.v1.types.PartialDecryptTDH2Response
-	16, // [16:24] is the sub-list for method output_type
-	8,  // [8:16] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	20, // 5: story.dkg.v1.types.ProcessDealsResponse.rejected_deals:type_name -> story.dkg.v1.types.Deal
+	21, // 6: story.dkg.v1.types.ProcessResponsesRequest.responses:type_name -> story.dkg.v1.types.Response
+	22, // 7: story.dkg.v1.types.ProcessResponsesResponse.justifications:type_name -> story.dkg.v1.types.Justification
+	21, // 8: story.dkg.v1.types.ProcessResponsesResponse.rejected_responses:type_name -> story.dkg.v1.types.Response
+	22, // 9: story.dkg.v1.types.ProcessJustificationRequest.justifications:type_name -> story.dkg.v1.types.Justification
+	22, // 10: story.dkg.v1.types.ProcessJustificationResponse.rejected_justifications:type_name -> story.dkg.v1.types.Justification
+	2,  // 11: story.dkg.v1.types.KernelService.GetCodeCommitment:input_type -> story.dkg.v1.types.GetCodeCommitmentRequest
+	4,  // 12: story.dkg.v1.types.KernelService.GenerateAndSealKey:input_type -> story.dkg.v1.types.GenerateAndSealKeyRequest
+	8,  // 13: story.dkg.v1.types.KernelService.GenerateDeals:input_type -> story.dkg.v1.types.GenerateDealsRequest
+	10, // 14: story.dkg.v1.types.KernelService.ProcessDeals:input_type -> story.dkg.v1.types.ProcessDealsRequest
+	12, // 15: story.dkg.v1.types.KernelService.ProcessResponses:input_type -> story.dkg.v1.types.ProcessResponsesRequest
+	14, // 16: story.dkg.v1.types.KernelService.ProcessJustification:input_type -> story.dkg.v1.types.ProcessJustificationRequest
+	16, // 17: story.dkg.v1.types.KernelService.FinalizeDKG:input_type -> story.dkg.v1.types.FinalizeDKGRequest
+	18, // 18: story.dkg.v1.types.KernelService.PartialDecryptTDH2:input_type -> story.dkg.v1.types.PartialDecryptTDH2Request
+	3,  // 19: story.dkg.v1.types.KernelService.GetCodeCommitment:output_type -> story.dkg.v1.types.GetCodeCommitmentResponse
+	5,  // 20: story.dkg.v1.types.KernelService.GenerateAndSealKey:output_type -> story.dkg.v1.types.GenerateAndSealKeyResponse
+	9,  // 21: story.dkg.v1.types.KernelService.GenerateDeals:output_type -> story.dkg.v1.types.GenerateDealsResponse
+	11, // 22: story.dkg.v1.types.KernelService.ProcessDeals:output_type -> story.dkg.v1.types.ProcessDealsResponse
+	13, // 23: story.dkg.v1.types.KernelService.ProcessResponses:output_type -> story.dkg.v1.types.ProcessResponsesResponse
+	15, // 24: story.dkg.v1.types.KernelService.ProcessJustification:output_type -> story.dkg.v1.types.ProcessJustificationResponse
+	17, // 25: story.dkg.v1.types.KernelService.FinalizeDKG:output_type -> story.dkg.v1.types.FinalizeDKGResponse
+	19, // 26: story.dkg.v1.types.KernelService.PartialDecryptTDH2:output_type -> story.dkg.v1.types.PartialDecryptTDH2Response
+	19, // [19:27] is the sub-list for method output_type
+	11, // [11:19] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_kernel_proto_init() }
