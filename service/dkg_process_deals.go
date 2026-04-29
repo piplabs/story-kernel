@@ -17,23 +17,45 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// errKyberDealAlreadyProcessed, errKyberResponseAlreadyExists and
+// errKyberJustificationOnApproval mirror the idempotent-error strings kyber
+// returns when the cached DistKeyGenerator has already absorbed an artifact
+// on a prior call. They are kept as locally-defined sentinels purely to
+// centralise the strings and document the source — see the NOTE on
+// isAlreadyProcessedErr for why we still match by substring rather than
+// errors.Is.
+//
+// Source: go.dedis.ch/kyber/v4@v4.0.0-pre2/share/vss/pedersen/vss.go
+//   - line 552: var errDealAlreadyProcessed (package-private)
+//   - line 639: errors.New("vss: justification received for an approval")
+//   - line 656: errors.New("vss: already existing response from same origin")
+var (
+	errKyberDealAlreadyProcessed    = errors.New("vss: verifier already received a deal")
+	errKyberResponseAlreadyExists   = errors.New("vss: already existing response from same origin")
+	errKyberJustificationOnApproval = errors.New("vss: justification received for an approval")
+)
+
 // isAlreadyProcessedErr returns true when err indicates the cached
 // DistKeyGenerator has already absorbed the artifact on a prior call. The
 // kernel silently skips these so the CL doesn't retry forever.
 //
 // NOTE: kyber v4.0.0-pre2 does NOT expose these as exported sentinels —
 // errDealAlreadyProcessed is package-private, and the other two are inline
-// errors.New(...). String matching is the only option. Re-validate the three
-// substrings below whenever go.dedis.ch/kyber is upgraded; if kyber starts
-// exporting sentinels, switch to errors.Is.
+// errors.New(...) created on every call. errors.Is therefore cannot match
+// any of the three (no exported reference for the first; non-sentinel for
+// the others) and kyber does not wrap with %w, so chain-unwrap also fails.
+// String matching is the only option today. If a future kyber release starts
+// exporting these as sentinels and wrapping them with %w, switch to
+// errors.Is against the kyber-exported values and remove the local sentinels
+// above.
 func isAlreadyProcessedErr(err error) bool {
 	if err == nil {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "verifier already received a deal") ||
-		strings.Contains(msg, "already existing response from same origin") ||
-		strings.Contains(msg, "justification received for an approval")
+	return strings.Contains(msg, errKyberDealAlreadyProcessed.Error()) ||
+		strings.Contains(msg, errKyberResponseAlreadyExists.Error()) ||
+		strings.Contains(msg, errKyberJustificationOnApproval.Error())
 }
 
 // ProcessDeals process the deals. It is assumed that the deal has been correctly delivered to the corresponding recipient index.
