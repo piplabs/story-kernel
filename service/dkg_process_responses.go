@@ -155,11 +155,15 @@ func (s *DKGServer) ProcessResponses(_ context.Context, req *pb.ProcessResponses
 		for _, distKeyGen := range distKeyGens {
 			j, err := distKeyGen.ProcessResponse(resp)
 			if err != nil {
+				// Log only indices to match the dealing/justification handlers'
+				// hygiene; avoids dumping the full VSSResponse struct into logs
+				// in case future kyber/proto evolution adds fields not safe to
+				// expose verbatim.
 				log.WithFields(log.Fields{
-					"round":           req.GetRound(),
-					"code_commitment": codeCommitmentHex,
-					"index":           response.GetIndex(),
-					"vss_response":    response.GetVssResponse(),
+					"round":            req.GetRound(),
+					"code_commitment":  codeCommitmentHex,
+					"dealer_index":     response.GetIndex(),
+					"complainer_index": response.GetVssResponse().GetIndex(),
 				}).Errorf("failed to process the response: %v", err)
 
 				if isAlreadyProcessedErr(err) {
