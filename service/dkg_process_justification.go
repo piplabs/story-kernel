@@ -143,10 +143,21 @@ func (s *DKGServer) ProcessJustification(_ context.Context, req *pb.ProcessJusti
 			continue
 		}
 
-		// processed: at least one DistKeyGenerator applied this justification
-		// (real success or idempotent re-submission). Reject only when
-		// EVERY generator returned a real (non-idempotent) error.
-		processed := false
+		// applied:          at least one DistKeyGenerator successfully
+		//                   absorbed this justification on THIS call. Only
+		//                   then is it safe to persist for replay.
+		// alreadyProcessed: at least one DistKeyGenerator reported the
+		//                   justification was absorbed on a PRIOR call
+		//                   (idempotent re-submission). Silently skip — do
+		//                   not reject, do not persist. Persisting a
+		//                   duplicate would cause replayMessages (which
+		//                   does NOT suppress duplicate justification
+		//                   errors, unlike responses) to fail fatally on
+		//                   restart.
+		// Reject only when EVERY generator returned a real (non-idempotent)
+		// error.
+		applied := false
+		alreadyProcessed := false
 		for _, distKeyGen := range distKeyGens {
 			if err := distKeyGen.ProcessJustification(justification); err != nil {
 				log.WithFields(log.Fields{
@@ -156,16 +167,28 @@ func (s *DKGServer) ProcessJustification(_ context.Context, req *pb.ProcessJusti
 				}).Errorf("failed to process justification: %v", err)
 
 				if isAlreadyProcessedErr(err) {
-					processed = true
+					alreadyProcessed = true
 				}
 
 				continue
 			}
-			processed = true
+			applied = true
 		}
 
-		if !processed {
+		if !applied && !alreadyProcessed {
 			rejected = append(rejected, j)
+
+			continue
+		}
+
+		if !applied {
+			// Idempotent re-submission only — do not persist. Logging at
+			// debug to mirror the dealing handler's silent-skip semantics.
+			log.WithFields(log.Fields{
+				"round":           req.GetRound(),
+				"code_commitment": codeCommitmentHex,
+				"dealer_index":    justification.Index,
+			}).Debug("justification already stored on cached generator; skipping silently")
 
 			continue
 		}
