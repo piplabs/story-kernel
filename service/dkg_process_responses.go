@@ -177,12 +177,22 @@ func (s *DKGServer) ProcessResponses(_ context.Context, req *pb.ProcessResponses
 
 			justification, convErr := types.ConvertToJustificationProto(j)
 			if convErr != nil {
-				// Log only the index to avoid leaking sensitive data (e.g., SecShare in PlainDeal).
+				// kyber already absorbed `resp`; retry would hit the idempotent
+				// guard (j == nil) and never re-derive the justification.
+				// Putting `response` in rejected_responses would mislead the CL
+				// into retrying a permanently-lost artifact, and failing the
+				// whole RPC would also discard valid justifications already
+				// converted in this batch. Drop only this justification — the
+				// response itself is still added to resps below so kyber's
+				// in-memory state and DKGStore stay consistent.
+				// (Effectively unreachable on Ed25519 — kept for future suite changes.)
+				// Log only the index to avoid leaking SecShare from PlainDeal.
 				log.WithFields(log.Fields{
+					"round":               req.GetRound(),
+					"code_commitment":     codeCommitmentHex,
 					"justification_index": j.Index,
-				}).Errorf("failed to convert to justification proto: %v", convErr)
-
-				rejected = append(rejected, response)
+				}).Errorf("failed to convert generated justification to proto; "+
+					"justification dropped: %v", convErr)
 
 				continue
 			}
