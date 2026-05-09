@@ -300,7 +300,7 @@ func TestEd25519Path(t *testing.T) {
 	store := newTestDKGStoreWithSealer(t)
 	path := store.ed25519Path("abc", 5)
 	require.Contains(t, path, "5")
-	require.Contains(t, path, "abc")
+	require.Contains(t, path, commitmentDir("abc"))
 	require.Contains(t, path, KeyEd25519File)
 }
 
@@ -310,7 +310,7 @@ func TestSecp256k1Path(t *testing.T) {
 	store := newTestDKGStoreWithSealer(t)
 	path := store.secp256k1Path("def", 10)
 	require.Contains(t, path, "10")
-	require.Contains(t, path, "def")
+	require.Contains(t, path, commitmentDir("def"))
 	require.Contains(t, path, KeySecp256k1File)
 }
 

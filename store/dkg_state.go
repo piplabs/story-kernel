@@ -69,7 +69,7 @@ type justificationDealDisk struct {
 }
 
 func (s *DKGStore) statePath(codeCommitmentHex string, round uint32) string {
-	return filepath.Join(s.stateDir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex, DKGStateFile)
+	return filepath.Join(s.stateDir, strconv.FormatUint(uint64(round), 10), commitmentDir(codeCommitmentHex), DKGStateFile)
 }
 
 func (s *DKGStore) loadState(path string) (*DKGState, error) {
@@ -254,7 +254,7 @@ func (s *DKGStore) LoadPrivateCoeffs(codeCommitmentHex string, round uint32) ([]
 }
 
 func (s *DKGStore) privateCoeffsPath(codeCommitmentHex string, round uint32) string {
-	return filepath.Join(s.stateDir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex, PrivateCoeffsFile)
+	return filepath.Join(s.stateDir, strconv.FormatUint(uint64(round), 10), commitmentDir(codeCommitmentHex), PrivateCoeffsFile)
 }
 
 func (s *DKGStore) AddDeals(codeCommitmentHex string, round uint32, deals []dkg.Deal) error {

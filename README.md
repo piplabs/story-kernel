@@ -120,9 +120,130 @@ gramine-manifest --version   # should show 1.9
 git clone https://github.com/piplabs/story-kernel.git
 cd story-kernel
 
-# Build the binary with cb-mpc library
-make build-with-cpp
+# Build for production SGX/Gramine (use this on validator machines)
+make build-sgx
 ```
+
+Available build targets:
+
+| Target          | TEE backend | When to use                                                              |
+|-----------------|-------------|--------------------------------------------------------------------------|
+| `make build`    | noop        | Local development. Every TEE operation fail-closes — DO NOT run on devnet or mainnet. |
+| `make build-sgx`| sgx         | Production SGX/Gramine build. Replaces the former `make build-with-cpp`. |
+| `make build-tdx`| tdx         | Production Intel TDX build. See "TDX Build & Runtime" below for runtime requirements. |
+
+Test and lint targets follow the same split: `make test` / `make lint`
+run under the SGX backend, `make test-noop` / `make lint-noop` exercise
+the package-level shim and noop fail-closed paths without TEE hardware,
+and `make test-tdx` / `make lint-tdx` exercise the TDX backend with the
+TPM2 simulator and a mock quote provider — also no hardware required for
+unit tests.
+
+## TDX Build & Runtime
+
+Intel TDX is supported as an alternative TEE backend behind the `tdx` Go
+build tag. Selection between SGX and TDX is a build-time decision (one tag
+per binary); a single binary cannot run on both platforms. The TDX backend
+lives in its own Go sub-package at `enclave/tdx/`; the SGX backend lives at
+`enclave/sgx/`. The `cmd/tee_*.go` blank imports under build tags are the
+only build-time selectors.
+
+### Runtime requirements
+
+| Component | Requirement | Why |
+|---|---|---|
+| Linux kernel | **>= 6.7** required | configfs-tsm interface (`/sys/kernel/config/tsm/report/`) is the only supported attestation path. Older kernels without configfs-tsm support are not supported by this backend. |
+| TDX device | `/sys/kernel/config/tsm/report/` (configfs-tsm) | Only configfs-tsm is supported. The legacy `/dev/tdx_guest` ioctl path is **not** used as a fallback in the current implementation (`LinuxConfigFsQuoteProvider` does not delegate to it). |
+| vTPM | Reachable at `/dev/tpmrm0` (preferred) or `/dev/tpm0` | Sealing is bound to the vTPM PolicyOR over PCRs. |
+| Persistent TPM handle | **0x81000001 reserved** | Storage-root key is evicted to this conventional SRK handle. Operators must not assign this handle to other applications. |
+
+### vTPM-in-TCB requirement
+
+The TDX backend's sealing security depends on the vTPM being inside the TD's
+Trusted Computing Base. Two acceptable deployment models:
+
+1. **Paravisor with in-TD vTPM** (e.g., Azure Confidential VM with paravisor):
+   the vTPM is provided by code that runs inside the TD and whose measurement
+   is captured in MRTD/RTMR.
+2. **In-TD swtpm in the initrd**: bundle `swtpm` into the TD's initrd such
+   that it is measured into MRTD; no out-of-TD vTPM service.
+
+Running with an out-of-TCB vTPM (e.g., a vTPM provided by the host hypervisor
+without paravisor measurement) is **unsafe** and explicitly out of scope.
+The kernel **does not** detect or enforce this — it is an operator obligation.
+
+### supportedProviders flow
+
+The set of accepted PCR-extension states is encoded as a Go constant slice
+`supportedProviders` in `enclave/tdx/providers.go`. The default ships one
+provider:
+
+```go
+{
+    Name:           "default-tpm-pcrs-7-11",
+    PCRs:           []int{7, 11},
+    ExpectedDigest: nil, // bootstrap mode — populated empirically on first deploy
+    HashAlg:        tpm2.AlgSHA256,
+}
+```
+
+PCR 7 captures Secure Boot policy; PCR 11 captures the Linux IMA / dm-verity
+disk-image root-hash measurement. **Operators on a different vTPM stack must
+edit `supportedProviders` and rebuild.**
+
+#### First deployment (bootstrap mode)
+
+When **every** entry in `supportedProviders` has `ExpectedDigest == nil`, the
+TDX backend boots in bootstrap mode. The startup self-check emits a WARN log
+containing the empirically measured PCR digest in copy-pasteable hex:
+
+```
+WARN[ts] TDX backend in bootstrap mode — no provider has a populated ExpectedDigest.
+       Current PCR digests by provider:
+         default-tpm-pcrs-7-11 (PCRs 7,11): 0x<64-hex-chars>
+       Populate the matching entry in supportedProviders[].ExpectedDigest
+       and rebuild before production deployment.
+```
+
+The operator pastes the measured digest into source as
+`ExpectedDigest: []byte{0x..., 0x..., ...}` and rebuilds. From that point on
+the gate becomes strict: any boot whose PCR state does not match a populated
+entry will `log.Fatal` and refuse to start.
+
+#### Adding more providers
+
+Adding a second acceptable PCR state (e.g., for a planned firmware upgrade)
+is also a code edit + redeploy. The TPM enforces a PolicyOR over all
+populated branches, so any of them satisfies the unseal policy.
+
+### Out of scope (this repository)
+
+The following are explicitly NOT covered by `make build-tdx` or this
+repository's CI:
+
+- **TD disk image construction**: initrd, OVMF, td-shim, dm-verity hash chain.
+- **vTPM provisioning**: swtpm setup, paravisor configuration, EK/SRK
+  pre-eviction.
+- **dm-crypt automation**: disk encryption keys derivation, PCR-locked
+  unlock flows.
+- **Launch orchestration**: systemd units, node-launcher integration, kernel
+  command-line wiring.
+- **On-chain TDX whitelisting**: `TDXValidationHook` contract deployment and
+  `whitelistEnclaveType("TDX", ...)` registration are operator and
+  contract-team work tracked in their respective repositories.
+
+These are tracked in deployment runbooks and `node-launcher` work, not here.
+
+### Hardware-in-the-loop validation
+
+The unit-test suite (`make test-tdx`) runs entirely on the TPM2 simulator
+plus a mock quote provider — no TDX silicon required, suitable for CI. Real
+behavior on a TDX host is validated separately via the deployment pipeline:
+
+1. Boot a TDX-capable host with kernel >= 6.7 and configfs-tsm enabled.
+2. Provision a vTPM that satisfies the in-TCB requirement above.
+3. `make build-tdx && ./build/story-kernel run` and verify the startup
+   self-check WARN/INFO format and a quote round-trip.
 
 ## Data Directory
 

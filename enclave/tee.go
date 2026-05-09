@@ -134,6 +134,14 @@ func Default() TEE {
 // =============================================================================
 
 // GetRemoteQuote returns a TEE quote with the given user data embedded.
+//
+// Wire format depends on the active backend and (for TDX) the active
+// vendor; see Quoter.GetRemoteQuote for the full matrix. In short:
+//   - SGX backend: raw EREPORT bytes with userData in report_data.
+//   - TDX direct vendor: raw V4 quote with userData in V4.report_data.
+//   - TDX paravisor vendor: Path-B "STBN" bundle with userData bound
+//     via TPMS_ATTEST.qualifyingData (V4.report_data is
+//     paravisor-locked).
 func GetRemoteQuote(userData []byte) ([]byte, error) {
 	return Default().GetRemoteQuote(userData)
 }

@@ -75,7 +75,7 @@ func NewDKGStoreWithSealer(keyDir, stateDir string, suite *edwards25519.SuiteEd2
 
 // SealAndStoreDistKeyShare serializes and seals the DistKeyShare to a file.
 func (s *DKGStore) SealAndStoreDistKeyShare(share *dkg.DistKeyShare, codeCommitmentHex string, round uint32) error {
-	distKeyShareDir := filepath.Join(s.stateDir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex)
+	distKeyShareDir := filepath.Join(s.stateDir, strconv.FormatUint(uint64(round), 10), commitmentDir(codeCommitmentHex))
 	if err := os.MkdirAll(distKeyShareDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create sealed DistKeyShare directory: %w", err)
 	}
@@ -95,7 +95,7 @@ func (s *DKGStore) SealAndStoreDistKeyShare(share *dkg.DistKeyShare, codeCommitm
 
 // LoadDistKeyShare loads and unseals a DistKeyShare from a file.
 func (s *DKGStore) LoadDistKeyShare(codeCommitmentHex string, round uint32) (*dkg.DistKeyShare, error) {
-	path := filepath.Join(s.stateDir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex, config.DistKeyShareFile)
+	path := filepath.Join(s.stateDir, strconv.FormatUint(uint64(round), 10), commitmentDir(codeCommitmentHex), config.DistKeyShareFile)
 	sealed, err := s.sealer.UnsealFromFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unseal DistKeyShare: %w", err)

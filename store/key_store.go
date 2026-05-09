@@ -16,12 +16,24 @@ import (
 	"go.dedis.ch/kyber/v4"
 )
 
+// commitmentDir returns a filesystem-safe per-round-per-code-commitment
+// subdirectory name. SGX commitments are 32 bytes (64 hex chars) and fit
+// directly in a Linux filename. TDX commitments are 240 bytes (MRTD ||
+// RTMR0..3 = 480 hex chars) which exceeds NAME_MAX (255 bytes). For both
+// backends we keccak256 the hex string to yield a stable 64-hex-char
+// directory name. The same input always maps to the same directory, so
+// reseal/reload works across restarts as before.
+func commitmentDir(codeCommitmentHex string) string {
+	h := ecrypto.Keccak256([]byte(codeCommitmentHex))
+	return fmt.Sprintf("%x", h)
+}
+
 func (s *DKGStore) ed25519Path(codeCommitmentHex string, round uint32) string {
-	return filepath.Join(s.keyDir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex, KeyEd25519File)
+	return filepath.Join(s.keyDir, strconv.FormatUint(uint64(round), 10), commitmentDir(codeCommitmentHex), KeyEd25519File)
 }
 
 func (s *DKGStore) secp256k1Path(codeCommitmentHex string, round uint32) string {
-	return filepath.Join(s.keyDir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex, KeySecp256k1File)
+	return filepath.Join(s.keyDir, strconv.FormatUint(uint64(round), 10), commitmentDir(codeCommitmentHex), KeySecp256k1File)
 }
 
 func (s *DKGStore) LoadOrGenerateEd25519Key(codeCommitmentHex string, round uint32) (kyber.Scalar, kyber.Point, error) {
