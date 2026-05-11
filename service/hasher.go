@@ -22,9 +22,18 @@ type finalizationSignatureMaterial struct {
 }
 
 // hashFinalizeDKGResponse hashes the final response payload to sign using RLP encoding.
+//
+// TDX backends produce a 240-byte raw commitment (MRTD || RTMR0..3); SGX produces
+// 32-byte MRENCLAVE. The on-chain contract stores the keccak256-compressed 32-byte
+// form in DKGRegistration storage and emits it on the Finalized event, which is what
+// verifyFinalizationSignature on the CL side uses. Compress here so both sides sign
+// over the same 32-byte value regardless of backend.
 func hashFinalizeDKGResponse(codeCommitment []byte, round uint32, participantsRoot [32]byte, globalPubKey []byte, publicCoeffsBz [][]byte, pubKeyShare []byte) ([]byte, error) {
+	if len(codeCommitment) == 0 {
+		return nil, errors.New("code commitment is empty")
+	}
 	if len(codeCommitment) != 32 {
-		return nil, errors.New("the length of code commitment should be 32")
+		codeCommitment = ecrypto.Keccak256(codeCommitment)
 	}
 
 	for i, coeff := range publicCoeffsBz {
