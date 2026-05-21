@@ -1,13 +1,66 @@
 package service
 
 import (
+	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.dedis.ch/kyber/v4/group/edwards25519"
 
+	"github.com/piplabs/story-kernel/store"
+	"github.com/piplabs/story-kernel/story"
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
 )
+
+// stubQueryClient returns scripted responses per call; tests simulate light-client lag.
+// If netErr/regErr is set, that error is returned instead.
+type stubQueryClient struct {
+	networks      []*pb.DKGNetwork
+	registrations [][]*pb.DKGRegistration
+	netCalls      atomic.Int32
+	regCalls      atomic.Int32
+	netErr        error
+	regErr        error
+}
+
+var _ story.QueryClient = (*stubQueryClient)(nil)
+
+func (s *stubQueryClient) GetDKGNetwork(_ context.Context, _ string, _ uint32) (*pb.DKGNetwork, error) {
+	i := int(s.netCalls.Add(1)) - 1
+	if s.netErr != nil {
+		return nil, s.netErr
+	}
+	if i >= len(s.networks) {
+		i = len(s.networks) - 1
+	}
+	return s.networks[i], nil
+}
+
+func (s *stubQueryClient) GetAllParticipantDKGRegistrations(_ context.Context, _ string, _ uint32) ([]*pb.DKGRegistration, error) {
+	i := int(s.regCalls.Add(1)) - 1
+	if s.regErr != nil {
+		return nil, s.regErr
+	}
+	if i >= len(s.registrations) {
+		i = len(s.registrations) - 1
+	}
+	return s.registrations[i], nil
+}
+
+// Unused interface methods — panic loudly if accidentally invoked.
+func (*stubQueryClient) GetLatestActiveDKGNetwork(_ context.Context) (*pb.DKGNetwork, error) {
+	panic("stubQueryClient.GetLatestActiveDKGNetwork: not implemented for round_context tests")
+}
+func (*stubQueryClient) HasDecryptRequest(_ context.Context, _ uint32, _, _, _ string) (bool, error) {
+	panic("stubQueryClient.HasDecryptRequest: not implemented for round_context tests")
+}
+func (*stubQueryClient) VerifyStartBlock(_ context.Context, _ int64, _ []byte) error {
+	panic("stubQueryClient.VerifyStartBlock: not implemented for round_context tests")
+}
+func (*stubQueryClient) Close() error { return nil }
 
 func TestValidateRegistrations_Valid(t *testing.T) {
 	t.Parallel()
@@ -193,4 +246,156 @@ func TestValidateRegistrations_TableDriven(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- ErrLightClientLag sentinel and retry behavior (issue piplabs/story#826) ---
+
+// Total=0 + non-empty regs surfaces ErrLightClientLag so callers can retry.
+func TestValidateRegistrations_LagSentinel(t *testing.T) {
+	t.Parallel()
+
+	network := &pb.DKGNetwork{Total: 0, Round: 5}
+	regs := []*pb.DKGRegistration{
+		{Index: 1, Round: 5, ValidatorAddr: "0xaaa"},
+		{Index: 2, Round: 5, ValidatorAddr: "0xbbb"},
+		{Index: 3, Round: 5, ValidatorAddr: "0xccc"},
+	}
+
+	err := validateRegistrations(regs, network, 5)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrLightClientLag)
+	assert.Contains(t, err.Error(), "3 registrations visible but network.Total=0")
+}
+
+// Genuinely empty (registration phase not yet observed) is NOT flagged as lag.
+func TestValidateRegistrations_TotalZeroEmptyRegs_NotLag(t *testing.T) {
+	t.Parallel()
+
+	network := &pb.DKGNetwork{Total: 0, Round: 1}
+	err := validateRegistrations(nil, network, 1)
+	require.NoError(t, err)
+}
+
+// First fetch sees Total=0 (lag) → retry → second fetch succeeds.
+func TestGetOrLoadRoundContext_RetriesOnLag(t *testing.T) {
+
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+
+	// Build three valid Ed25519 public keys for the post-lag registrations.
+	// Deterministic per-index scalars keep the test stable.
+	pubKeyBytes := make([][]byte, 3)
+	for i := range pubKeyBytes {
+		scalar := suite.Scalar().SetInt64(int64(i + 1))
+		point := suite.Point().Mul(scalar, nil)
+		b, err := point.MarshalBinary()
+		require.NoError(t, err)
+		pubKeyBytes[i] = b
+	}
+
+	validRegs := []*pb.DKGRegistration{
+		{Index: 1, Round: 5, ValidatorAddr: "0xaaa", DkgPubKey: pubKeyBytes[0]},
+		{Index: 2, Round: 5, ValidatorAddr: "0xbbb", DkgPubKey: pubKeyBytes[1]},
+		{Index: 3, Round: 5, ValidatorAddr: "0xccc", DkgPubKey: pubKeyBytes[2]},
+	}
+
+	stub := &stubQueryClient{
+		networks: []*pb.DKGNetwork{
+			{Total: 0, Threshold: 0, Round: 5}, // call 1: lag
+			{Total: 3, Threshold: 2, Round: 5}, // call 2: caught up
+		},
+		registrations: [][]*pb.DKGRegistration{
+			validRegs,
+			validRegs,
+		},
+	}
+
+	s := &DKGServer{
+		QueryClient:   stub,
+		Suite:         suite,
+		RoundCtxCache: store.NewRoundContextCache(),
+	}
+
+	rc, err := s.GetOrLoadRoundContext("cc", 5)
+	require.NoError(t, err)
+	require.NotNil(t, rc)
+	require.Equal(t, uint32(3), rc.Network.GetTotal())
+	require.Equal(t, uint32(2), rc.Network.GetThreshold())
+	require.Equal(t, int32(2), stub.netCalls.Load(), "initial + 1 retry")
+}
+
+// Threshold==0 (no validation error, but stale) also triggers retry.
+func TestGetOrLoadRoundContext_RetriesOnZeroThreshold(t *testing.T) {
+
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+
+	// Total=0 AND empty regs is the "before registration phase" state — no lag
+	// signature in validateRegistrations, but Threshold=0 still triggers retry.
+	pre := &pb.DKGNetwork{Total: 0, Threshold: 0, Round: 5}
+	post := &pb.DKGNetwork{Total: 1, Threshold: 1, Round: 5}
+
+	point := suite.Point().Mul(suite.Scalar().SetInt64(1), nil)
+	pkBytes, err := point.MarshalBinary()
+	require.NoError(t, err)
+	postReg := []*pb.DKGRegistration{{Index: 1, Round: 5, ValidatorAddr: "0x1", DkgPubKey: pkBytes}}
+
+	stub := &stubQueryClient{
+		networks:      []*pb.DKGNetwork{pre, post},
+		registrations: [][]*pb.DKGRegistration{{}, postReg},
+	}
+
+	s := &DKGServer{
+		QueryClient:   stub,
+		Suite:         suite,
+		RoundCtxCache: store.NewRoundContextCache(),
+	}
+
+	rc, err := s.GetOrLoadRoundContext("cc", 5)
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), rc.Network.GetThreshold(),
+		"must retry until Threshold becomes non-zero")
+}
+
+// Retry exhaustion preserves ErrLightClientLag in the wrap chain.
+func TestGetOrLoadRoundContext_RetryExhaustedOnLag(t *testing.T) {
+
+	// All calls return lag.
+	lagRegs := []*pb.DKGRegistration{
+		{Index: 1, Round: 5, ValidatorAddr: "0xaaa"},
+	}
+
+	stub := &stubQueryClient{
+		networks:      []*pb.DKGNetwork{{Total: 0, Round: 5}},
+		registrations: [][]*pb.DKGRegistration{lagRegs},
+	}
+
+	s := &DKGServer{
+		QueryClient:   stub,
+		Suite:         edwards25519.NewBlakeSHA256Ed25519(),
+		RoundCtxCache: store.NewRoundContextCache(),
+	}
+
+	rc, err := s.GetOrLoadRoundContext("cc", 5)
+	require.Error(t, err)
+	require.Nil(t, rc)
+	require.ErrorIs(t, err, ErrLightClientLag)
+	require.Equal(t, int32(thresholdRetryAttempts+1), stub.netCalls.Load(), "initial + N retries")
+}
+
+// Non-lag fetch errors bail immediately; the retry loop must not run.
+func TestGetOrLoadRoundContext_NonLagFetchErrorAborts(t *testing.T) {
+
+	transportErr := errors.New("rpc: unavailable")
+	stub := &stubQueryClient{netErr: transportErr}
+
+	s := &DKGServer{
+		QueryClient:   stub,
+		Suite:         edwards25519.NewBlakeSHA256Ed25519(),
+		RoundCtxCache: store.NewRoundContextCache(),
+	}
+
+	rc, err := s.GetOrLoadRoundContext("cc", 5)
+	require.Error(t, err)
+	require.Nil(t, rc)
+	require.ErrorIs(t, err, transportErr)
+	require.Equal(t, int32(1), stub.netCalls.Load(), "no retry on non-lag error")
 }
