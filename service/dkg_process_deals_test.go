@@ -1,6 +1,8 @@
 package service
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -155,4 +157,55 @@ func TestValidateProcessDealsRequest_TableDriven(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestIsAlreadyProcessedErr pins the kyber v4.0.0-pre2 idempotent-error
+// strings exactly so that a kyber upgrade renaming any of them fails this
+// test loudly. See the NOTE on isAlreadyProcessedErr for upgrade procedure.
+func TestIsAlreadyProcessedErr(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"verifier-already-deal", errDealAlreadyProcessedVerbatim(), true},
+		{"already-existing-response", errAlreadyExistingResponseVerbatim(), true},
+		{"justification-on-approval", errJustificationOnApprovalVerbatim(), true},
+		{"case-insensitive", errors.New("VSS: ALREADY EXISTING RESPONSE FROM SAME ORIGIN"), true},
+		{"wrapped-once", errWrap(errDealAlreadyProcessedVerbatim()), true},
+		{"unrelated-error", errors.New("dkg: dist deal out of bounds index"), false},
+		{"nil", nil, false},
+		{"plain-non-match", errors.New("network unreachable"), false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, isAlreadyProcessedErr(tc.err))
+		})
+	}
+}
+
+// The next three helpers reproduce the EXACT kyber v4.0.0-pre2 error strings
+// (lifted from share/vss/pedersen/vss.go lines 552, 656, 639). If a kyber
+// upgrade changes the wording, the corresponding TestIsAlreadyProcessedErr
+// case fails and points at the substring that needs updating.
+func errDealAlreadyProcessedVerbatim() error {
+	return errors.New("vss: verifier already received a deal")
+}
+
+func errAlreadyExistingResponseVerbatim() error {
+	return errors.New("vss: already existing response from same origin")
+}
+
+func errJustificationOnApprovalVerbatim() error {
+	return errors.New("vss: justification received for an approval")
+}
+
+// errWrap returns an error that wraps the input — used to verify
+// isAlreadyProcessedErr handles wrapped errors via fmt.Errorf "%w".
+func errWrap(inner error) error {
+	return fmt.Errorf("kernel: %w", inner)
 }

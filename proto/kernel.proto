@@ -104,6 +104,8 @@ message ProcessDealsResponse {
   bytes code_commitment = 1 [json_name = "code_commitment"];
   uint32 round = 2 [json_name = "round"];
   repeated Response responses = 3 [json_name = "responses"];
+  // Deals the kernel rejected; the client may retry these.
+  repeated Deal rejected_deals = 4 [json_name = "rejected_deals"];
 }
 
 message ProcessResponsesRequest {
@@ -115,6 +117,8 @@ message ProcessResponsesRequest {
 
 message ProcessResponsesResponse {
   repeated Justification justifications = 1 [json_name = "justifications"];
+  // Responses the kernel rejected; the client may retry these.
+  repeated Response rejected_responses = 2 [json_name = "rejected_responses"];
 }
 
 // ProcessJustificationRequest is sent to TEE to process valid justifications
@@ -127,7 +131,10 @@ message ProcessJustificationRequest {
 }
 
 // ProcessJustificationResponse is returned from TEE after processing justifications.
-message ProcessJustificationResponse {}
+message ProcessJustificationResponse {
+  // Justifications the kernel rejected; the client may retry these.
+  repeated Justification rejected_justifications = 1 [json_name = "rejected_justifications"];
+}
 
 message FinalizeDKGRequest {
   bytes code_commitment = 1 [json_name = "code_commitment"];
