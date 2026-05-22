@@ -106,7 +106,10 @@ func (s *DKGServer) GenerateAndSealKey(_ context.Context, req *pb.GenerateAndSea
 		return nil, status.Errorf(codes.Internal, "failed to calculate report data")
 	}
 
-	// Generate SGX quote using Gramine's /dev/attestation interface
+	// Generate TEE remote attestation evidence binding reportData. The
+	// active backend chooses the wire format: SGX returns raw EREPORT
+	// bytes (Gramine /dev/attestation); TDX returns a raw V4 quote with
+	// reportData padded into V4.report_data. Caller is backend-agnostic.
 	rawQuote, err := enclave.GetRemoteQuote(reportData)
 	if err != nil {
 		log.Errorf("failed to generate quote: %v", err)

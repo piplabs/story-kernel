@@ -6,14 +6,15 @@
 
 > ⚠️ **WARNING**: This software has not been audited and is not production-ready. Use at your own risk.
 
-Story Kernel is a Trusted Execution Environment (TEE) client for Story Protocol's Distributed Key Generation (DKG)
-system. It runs inside Intel SGX enclaves to provide secure key generation, management, and threshold decryption
-operations.
+Story Kernel is a Trusted Execution Environment (TEE) client for Story
+Protocol's Distributed Key Generation (DKG) system. It runs inside a TEE
+(Intel SGX or Intel TDX) to provide secure key generation, management, and
+threshold decryption operations.
 
 ## Features
 
 - **Distributed Key Generation (DKG)**: Implements Pedersen DKG protocol for secure distributed key generation
-- **SGX Remote Attestation**: Generates and verifies SGX quotes for trust establishment
+- **Remote Attestation**: Generates hardware-signed quotes (DCAP for SGX, raw V4/V5 quote for TDX direct mode) for trust establishment
 - **Sealed Storage**: Keys are encrypted and sealed to the enclave's identity
 - **TDH2 Partial Decryption**: Supports threshold decryption using the TDH2 scheme
 - **Light Client Verification**: Verifies on-chain state using CometBFT light client
@@ -24,7 +25,7 @@ operations.
 ┌────────────────────────────────────────────────────────┐
 │                    Story Kernel                        │
 │  ┌──────────────────────────────────────────────────┐  │
-│  │               Gramine SGX Enclave                │  │
+│  │             TEE Backend (SGX or TDX)             │  │
 │  │  ┌──────────┐  ┌──────────┐  ┌────────────────┐  │  │
 │  │  │   DKG    │  │  Seal/   │  │     Light      │  │  │
 │  │  │ Service  │  │  Unseal  │  │     Client     │  │  │
@@ -37,92 +38,30 @@ operations.
                     Story Network
 ```
 
-## Prerequisites
+The TEE backend is selected at build time. See **[enclave/README.md](enclave/README.md)** for the
+backend abstraction overview, then drill into:
 
-### Hardware Requirements
+- **[enclave/sgx/README.md](enclave/sgx/README.md)** — Intel SGX setup (Gramine 1.9, MRENCLAVE
+  reproducibility, manifest sign + run, optional TLS/mTLS, systemd unit).
+- **[enclave/tdx/README.md](enclave/tdx/README.md)** — Intel TDX overview (runtime requirements,
+  vTPM-in-TCB requirement, the `supportedProviders` PolicyOR flow, bootstrap mode), with the
+  host setup guide:
+  - **[enclave/tdx/setup/direct.md](enclave/tdx/setup/direct.md)** — direct configfs-tsm path
+    (bare-metal, GCP CVMs, IBM Cloud, OCI, future AWS TDX). Paravisor-mediated TDX guests
+    (e.g., Azure CVM TDX with OpenHCL) are intentionally out of scope.
 
-- Intel CPU with SGX support enabled in BIOS
+## Build
 
-### Software Requirements
+| Target | TEE backend | When to use |
+|--------|-------------|-------------|
+| `make build`     | noop | Local development. Every TEE operation fail-closes — DO NOT run on devnet or mainnet. |
+| `make build-sgx` | sgx  | Production SGX/Gramine build. See [enclave/sgx/README.md](enclave/sgx/README.md). |
+| `make build-tdx` | tdx  | Production Intel TDX build. See [enclave/tdx/README.md](enclave/tdx/README.md). |
 
-All validators **must** use the exact same versions below to produce identical `mr_enclave`
-(code commitment) values. The Gramine manifest content — including resolved library paths — is
-measured into the enclave identity. Any version difference can produce a different code commitment.
-
-| Component | Required Version | Why pinned |
-|-----------|-----------------|------------|
-| **Ubuntu** | 24.04 LTS | Library paths (`/lib/x86_64-linux-gnu/`) are Ubuntu-specific and baked into MRENCLAVE |
-| **Go** | 1.24.0 | Different Go versions (including patch) produce different binaries → different MRENCLAVE |
-| **Gramine** | 1.9 | `gramine.libos` and `gramine.runtimedir()` resolve to version-specific paths → different MRENCLAVE |
-
-> **Why Ubuntu only?** The manifest contains Ubuntu's multiarch library paths
-> (`/lib/x86_64-linux-gnu/`). RHEL-based distros use `/lib64/` instead. Since
-> the manifest is measured into MRENCLAVE, all validators must use the same OS
-> to share a single code commitment.
-
-## Installation
-
-### 1. Install Build Dependencies
-
-```bash
-sudo apt update
-sudo apt install -y build-essential cmake libssl-dev
-```
-
-### 2. Install Intel SGX SDK and DCAP
-
-```bash
-# Add Intel SGX repository
-sudo mkdir -p /etc/apt/keyrings
-wget -qO- https://download.01.org/intel-sgx/sgx_repo/ubuntu/intel-sgx-deb.key | sudo tee /etc/apt/keyrings/intel-sgx-keyring.asc > /dev/null
-echo "deb [signed-by=/etc/apt/keyrings/intel-sgx-keyring.asc arch=amd64] https://download.01.org/intel-sgx/sgx_repo/ubuntu noble main" | sudo tee /etc/apt/sources.list.d/intel-sgx.list
-
-sudo apt update
-
-# Install SGX libraries
-sudo apt install -y libsgx-dcap-default-qpl libsgx-enclave-common libsgx-quote-ex
-```
-
-### 3. Configure PCCS (Provisioning Certificate Caching Service)
-
-Edit `/etc/sgx_default_qcnl.conf` to set the PCCS endpoint:
-
-```json
-{
-  "pccs_url": "https://global.acccache.azure.net/sgx/certification/v4/",
-  "collateral_service": "https://global.acccache.azure.net/sgx/certification/v4/"
-}
-```
-
-### 4. Install Gramine 1.9
-
-> **Version matters.** All validators must install the same Gramine version via
-> the same method (apt). Do not build from source — it produces different library
-> paths.
-
-```bash
-sudo curl -fsSLo /usr/share/keyrings/gramine-keyring.gpg https://packages.gramineproject.io/gramine-keyring.gpg
-echo "deb [arch=amd64 signed-by=/usr/share/keyrings/gramine-keyring.gpg] https://packages.gramineproject.io/ noble main" | sudo tee /etc/apt/sources.list.d/gramine.list
-
-sudo apt update
-sudo apt install -y gramine=1.9
-```
-
-Verify the installation:
-
-```bash
-gramine-manifest --version   # should show 1.9
-```
-
-### 5. Clone and Build
-
-```bash
-git clone https://github.com/piplabs/story-kernel.git
-cd story-kernel
-
-# Build the binary with cb-mpc library
-make build-with-cpp
-```
+Test/lint targets follow the same split: `make test` / `make lint` run under the SGX backend;
+`make test-noop` / `make lint-noop` exercise the package-level shim and noop fail-closed paths
+without TEE hardware; `make test-tdx` / `make lint-tdx` exercise the TDX backend with the TPM2
+simulator and a mock quote provider — also no hardware required for unit tests.
 
 ## Data Directory
 
@@ -143,168 +82,18 @@ By using `/opt/story-kernel/` — a fixed, OS-agnostic path following the
 all validators produce identical manifests and therefore identical code commitments, regardless
 of their OS user or cloud provider.
 
-> **Note:** While the data directory is OS-agnostic, the manifest still contains Ubuntu-specific
-> system library paths (e.g., `/lib/x86_64-linux-gnu/`). See [Software Requirements](#software-requirements)
-> for details on OS support.
+The TDX backend reuses the same path for parity, even though TDX does not measure the filesystem
+layout into the code commitment.
+
+> **Note:** While the data directory is OS-agnostic, the SGX manifest still contains
+> Ubuntu-specific system library paths (e.g., `/lib/x86_64-linux-gnu/`). See
+> [enclave/sgx/README.md](enclave/sgx/README.md) for the OS pinning requirement.
 
 **Setup:**
 
 ```bash
 sudo mkdir -p /opt/story-kernel
 sudo chown $USER:$USER /opt/story-kernel
-```
-
-## Running with Gramine SGX
-
-### 1. Generate Gramine Manifest
-
-```bash
-make gramine-manifest
-```
-
-### 2. Sign the Enclave
-
-```bash
-make gramine-sign
-```
-
-### 3. View Enclave Information
-
-```bash
-make gramine-enclave-info
-```
-
-This will display the `mr_enclave` (code commitment) value needed for registration.
-
-### 4. Initialize Configuration
-
-```bash
-gramine-sgx story-kernel init --home /opt/story-kernel
-```
-
-This creates a configuration directory at `/opt/story-kernel/` with a `config.toml` file.
-
-> **Note:** The `init` command must be run separately because the production manifest
-> hardcodes `argv` to `["story-kernel", "start", "--home", "/opt/story-kernel"]`.
-> After initialization, the service starts automatically with the correct data directory.
-
-### 5. Configure the Client
-
-Edit `/opt/story-kernel/config.toml`:
-
-```toml
-log-level = "info"
-
-[grpc]
-listen_addr = ":50051"
-
-[light_client]
-chain_id = "devnet-1"
-rpc_addr = "http://localhost:26657"
-primary_addr = "http://localhost:26657"
-witness_addrs = ["http://witness1:26657", "http://witness2:26657"]
-trusted_height = 1000000
-trusted_hash = "ABCD1234..."
-```
-
-### 6. (Optional) Enable TLS/mTLS
-
-By default, the gRPC server runs without TLS. To secure the connection between Story and story-kernel:
-
-**Generate certificates:**
-
-```bash
-# Create CA (ECDSA P-256 recommended for performance)
-openssl ecparam -genkey -name prime256v1 -out ca.key
-openssl req -new -x509 -days 365 -key ca.key -out ca.crt -subj "/CN=Story-Kernel-CA"
-
-# Create server cert (for story-kernel)
-# NOTE: Replace SAN values with actual hostnames/IPs in production
-openssl ecparam -genkey -name prime256v1 -out server.key
-openssl req -new -key server.key -out server.csr -subj "/CN=story-kernel"
-echo "subjectAltName = IP:127.0.0.1, DNS:localhost" > server-ext.cnf
-openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
-  -out server.crt -days 365 -extfile server-ext.cnf
-
-# Create client cert (for story consensus client)
-openssl ecparam -genkey -name prime256v1 -out client.key
-openssl req -new -key client.key -out client.csr -subj "/CN=story-client"
-openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
-  -out client.crt -days 365
-
-# Restrict key file permissions
-chmod 600 ca.key server.key client.key
-```
-
-> Certificate rotation requires a service restart. Gramine SGX users must add cert paths to the manifest's `allowed_files`.
-
-**Server-side TLS only** (story-kernel verifies its identity to story):
-
-```toml
-# In /opt/story-kernel/config.toml
-[grpc]
-listen_addr = ":50051"
-tls_cert_file = "/path/to/server.crt"
-tls_key_file = "/path/to/server.key"
-```
-
-**Mutual TLS** (both sides verify each other):
-
-```toml
-# In /opt/story-kernel/config.toml
-[grpc]
-listen_addr = ":50051"
-tls_cert_file = "/path/to/server.crt"
-tls_key_file = "/path/to/server.key"
-tls_ca_file = "/path/to/ca.crt"      # enables client cert verification
-```
-
-On the **story consensus client** side, configure in `story.toml`:
-
-```toml
-[dkg]
-kernel-endpoints = ["tls://127.0.0.1:50051"]
-kernel-tls-ca-file = "/path/to/ca.crt"
-kernel-tls-cert-file = "/path/to/client.crt"   # for mTLS
-kernel-tls-key-file = "/path/to/client.key"     # for mTLS
-```
-
-> If no TLS fields are set, the gRPC connection runs in plaintext (insecure) mode — no changes needed for existing deployments.
-
-### 7. Start the Service
-
-```bash
-gramine-sgx story-kernel
-```
-
-The manifest's `loader.argv` is hardcoded to `["story-kernel", "start", "--home", "/opt/story-kernel"]`,
-so no additional arguments are needed.
-
-### 8. (Optional) Setup as Systemd Service
-
-```bash
-sudo tee /etc/systemd/system/story-kernel.service > /dev/null <<EOF
-[Unit]
-Description=Story DKG TEE Service
-After=network.target
-
-[Service]
-User=$USER
-WorkingDirectory=$HOME/story-kernel
-ExecStart=/bin/bash -lc "gramine-sgx story-kernel 2>&1 | systemd-cat -t story-kernel"
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable story-kernel.service
-sudo systemctl start story-kernel.service
-
-# View logs
-journalctl -fu story-kernel
 ```
 
 ## Development
@@ -343,7 +132,9 @@ story-kernel/
 ├── cmd/              # CLI commands (init, start)
 ├── config/           # Configuration handling
 ├── crypto/           # Cryptographic utilities
-├── enclave/          # SGX enclave operations (seal, quote)
+├── enclave/          # TEE backend abstraction (see enclave/README.md)
+│   ├── sgx/          # SGX backend (Gramine, DCAP)
+│   └── tdx/          # TDX backend (configfs-tsm direct path)
 ├── proto/            # Protocol buffer definitions
 ├── server/           # gRPC server implementation
 ├── service/          # DKG service logic
@@ -368,8 +159,9 @@ The service exposes a gRPC API with the following methods:
 ## Light Client Recovery
 
 Story Kernel uses a CometBFT light client backed by a sealed LevelDB to verify on-chain state.
-The light client's trusted state is sealed with SGX, ensuring confidentiality and integrity.
-`config.toml`, however, resides in `allowed_files` and is not sealed.
+The light client's trusted state is sealed by the active TEE backend, ensuring confidentiality
+and integrity. `config.toml`, however, resides in the backend's allowed-files list and is not
+sealed.
 
 ### Initialization strategy
 
@@ -381,18 +173,18 @@ On startup, the kernel determines its light client initialization strategy as fo
 | Expired / Invalid | Re-initialize from `config.toml`, generate new session nonce |
 | Missing | Initialize from `config.toml` (first boot), generate new session nonce |
 
-A session nonce (32-byte random value) is stored in the sealed light client DB and
-embedded in all sealed DKG files via the `NonceBindingSealer`. When the light client is
-re-initialized from `config.toml` (due to expiration, corruption, or DB deletion), a new
-nonce is generated. Any pre-existing sealed DKG files created under the prior nonce will
-fail verification at use time and must be re-created through a new DKG round.
+A session nonce (32-byte random value) is stored in the sealed light client DB and embedded in
+all sealed DKG files via the `NonceBindingSealer`. When the light client is re-initialized from
+`config.toml` (due to expiration, corruption, or DB deletion), a new nonce is generated. Any
+pre-existing sealed DKG files created under the prior nonce will fail verification at use time
+and must be re-created through a new DKG round.
 
 ### Recovery after light client state loss
 
-If the light client state is lost (DB deleted or expired beyond the trusted period),
-the kernel will re-initialize from `config.toml` with a new session nonce. Existing
-sealed DKG files will no longer be usable due to nonce mismatch. The operator must
-re-register for the current DKG round to resume participation.
+If the light client state is lost (DB deleted or expired beyond the trusted period), the kernel
+will re-initialize from `config.toml` with a new session nonce. Existing sealed DKG files will
+no longer be usable due to nonce mismatch. The operator must re-register for the current DKG
+round to resume participation.
 
 ### Preventing light client state loss
 
@@ -402,23 +194,30 @@ To avoid the need for re-registration, operators should:
   (~2 weeks of inactivity). Restarting within this window resumes normally from the sealed DB.
 - **Monitor the kernel process.** If the kernel goes down, restart it promptly before the
   trusted period expires.
-- **Do not delete files under `/opt/story-kernel/`.** The sealed light client DB and DKG
-  state are critical persistent data.
+- **Do not delete files under `/opt/story-kernel/`.** The sealed light client DB and DKG state
+  are critical persistent data.
 
 ## Security Considerations
 
-- **Code Commitment**: The `mr_enclave` value uniquely identifies the enclave code. Any modification to the binary or the Gramine manifest changes this value.
-- **Sealed Storage**: Private keys are sealed using SGX sealing keys and can only be unsealed by the same enclave on the same platform.
-- **Remote Attestation**: The service generates DCAP quotes that can be verified by remote parties.
-- **SGX Debug Mode**: The manifest sets `sgx.debug = false` for production. Debug mode disables enclave memory protection and must never be enabled in production.
-- **File Access**: The Gramine manifest restricts enclave file access to `/opt/story-kernel/` only. `/etc/ssl/certs/` is in `allowed_files` (not `trusted_files`) because CA certificate bundles differ across machines and would break MRENCLAVE reproducibility.
-- **Fixed Data Path**: The data directory is `/opt/story-kernel/` (not `~/.story-kernel/`) to ensure all validators produce the same MRENCLAVE regardless of OS user. See the [Data Directory](#data-directory) section for details.
-- **MRENCLAVE Reproducibility**: The entire Gramine manifest — every byte — is measured into the code commitment. All values that could vary (log level, binary name) are hardcoded in the manifest. See [Software Requirements](#software-requirements) for the exact versions required.
-- **Light Client Session Binding**: All sealed DKG files are bound to the light client DB session via a nonce. When the light client is re-initialized from `config.toml`, a new nonce is generated and prior sealed files are invalidated. See the [Light Client Recovery](#light-client-recovery) section for details.
+Backend-specific security notes (MRENCLAVE reproducibility, sealed-storage semantics, debug-mode
+gating, file-access whitelist) live with each backend's documentation:
+
+- **SGX**: see *Security Considerations (SGX-specific)* in
+  [enclave/sgx/README.md](enclave/sgx/README.md).
+- **TDX**: see the *vTPM-in-TCB requirement* and *supportedProviders flow* sections in
+  [enclave/tdx/README.md](enclave/tdx/README.md), and the per-vendor setup guides under
+  [enclave/tdx/setup/](enclave/tdx/setup/).
+
+Cross-cutting:
+
+- **Light Client Session Binding**: All sealed DKG files are bound to the light client DB
+  session via a nonce. When the light client is re-initialized from `config.toml`, a new nonce
+  is generated and prior sealed files are invalidated. See [Light Client Recovery](#light-client-recovery).
 
 ## Contributing
 
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the
+process for submitting pull requests.
 
 ## Security
 
@@ -426,4 +225,5 @@ For security concerns, please see [SECURITY.md](SECURITY.md).
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE)
+file for details.

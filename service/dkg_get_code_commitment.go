@@ -12,8 +12,9 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// GetCodeCommitment returns the code commitment (MRENCLAVE) of this story-kernel instance.
-// This allows the CL client to discover which enclave build it is communicating with
+// GetCodeCommitment returns the code commitment of this story-kernel instance
+// (MRENCLAVE for SGX, keccak256(RTMR2) for supported TDX direct mode). This
+// allows the CL client to discover which enclave build it is communicating with
 // without needing to supply or know the code commitment in advance.
 func (s *DKGServer) GetCodeCommitment(_ context.Context, _ *pb.GetCodeCommitmentRequest) (*pb.GetCodeCommitmentResponse, error) {
 	codeCommitment, err := enclave.GetSelfCodeCommitment()

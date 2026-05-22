@@ -5,7 +5,6 @@ import (
 
 	ecrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/pkg/errors"
 )
 
 // finalizationSignatureMaterial holds the fields committed to by the validator
@@ -22,9 +21,14 @@ type finalizationSignatureMaterial struct {
 }
 
 // hashFinalizeDKGResponse hashes the final response payload to sign using RLP encoding.
+//
+// SGX and the supported TDX direct path both produce a 32-byte code commitment
+// (MRENCLAVE for SGX, keccak256(RTMR2) for TDX) — see backend.computeSelfIdentity.
+// `codeCommitment` is required to be that 32-byte hybrid-hook value; anything
+// else is a backend-contract violation and fails fast here.
 func hashFinalizeDKGResponse(codeCommitment []byte, round uint32, participantsRoot [32]byte, globalPubKey []byte, publicCoeffsBz [][]byte, pubKeyShare []byte) ([]byte, error) {
 	if len(codeCommitment) != 32 {
-		return nil, errors.New("the length of code commitment should be 32")
+		return nil, fmt.Errorf("code commitment must be 32 bytes, got %d", len(codeCommitment))
 	}
 
 	for i, coeff := range publicCoeffsBz {

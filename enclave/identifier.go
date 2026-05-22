@@ -7,11 +7,11 @@ type Identifier interface {
 	// GetSelfIdentity returns the running enclave's full native identity.
 	// SGX populates Type, CodeCommitment (32B MRENCLAVE), ProductID (2B
 	// ISVPRODID). TDX populates Type, MRTD, RTMR0..3, and CodeCommitment as
-	// the native MRTD || RTMR0..3 concatenation (240B).
+	// the 32-byte hybrid-hook binary commitment keccak256(RTMR2).
 	GetSelfIdentity() (*Identity, error)
 
 	// GetSelfCodeCommitment returns the running enclave's code commitment.
-	// SGX: 32B MRENCLAVE. TDX: native MRTD || RTMR0..3 concatenation (240B).
+	// SGX: 32B MRENCLAVE. TDX: 32B keccak256(RTMR2).
 	GetSelfCodeCommitment() ([]byte, error)
 
 	// ValidateCodeCommitment compares an external code commitment against the

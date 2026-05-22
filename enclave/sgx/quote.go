@@ -17,17 +17,13 @@ const (
 	quotePath          = "/dev/attestation/quote"
 )
 
-// Cached self enclave info to avoid repeated quote generation.
-//
-// Internal use of the deprecated enclave.EnclaveInfo type is intentional:
-// the SGX backend's cache shape predates the platform-agnostic Identity
-// type, and the legacy GetSelfEnclaveInfo shim still surfaces this struct
-// to callers that consume MRENCLAVE + ISVPRODID directly.
-//
-//nolint:staticcheck // SA1019: SGX backend bridges legacy EnclaveInfo to new Identity API
+// Cached self enclave info to avoid repeated quote generation. EnclaveInfo
+// is the legacy SGX-shaped projection (MRENCLAVE + ISVPRODID) defined in
+// types.go; callers that want the platform-agnostic view should use
+// GetSelfIdentity instead.
 var (
 	selfEnclaveOnce sync.Once
-	selfEnclaveInfo *enclave.EnclaveInfo
+	selfEnclaveInfo *EnclaveInfo
 	errSelfEnclave  error
 )
 
@@ -100,9 +96,7 @@ func parseQuoteFields(quote []byte) (codeCommitment, productID, reportData []byt
 
 // getSelfEnclaveInfo reads the running enclave's MRENCLAVE and ISVPRODID by
 // generating a self-quote on first call and caching the result.
-//
-//nolint:staticcheck // SA1019: legacy SGX-shaped cache; see file-level note
-func getSelfEnclaveInfo() (*enclave.EnclaveInfo, error) {
+func getSelfEnclaveInfo() (*EnclaveInfo, error) {
 	selfEnclaveOnce.Do(func() {
 		// Generate a quote with dummy data to get our own enclave info.
 		quote, err := Backend{}.GetRemoteQuote([]byte{0})
@@ -119,8 +113,7 @@ func getSelfEnclaveInfo() (*enclave.EnclaveInfo, error) {
 			return
 		}
 
-		//nolint:staticcheck // SA1019: legacy SGX-shaped cache; see file-level note
-		selfEnclaveInfo = &enclave.EnclaveInfo{
+		selfEnclaveInfo = &EnclaveInfo{
 			ProductID: productID,
 			UniqueID:  codeCommitment,
 		}

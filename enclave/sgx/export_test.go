@@ -2,8 +2,6 @@ package sgx
 
 import (
 	"sync"
-
-	"github.com/piplabs/story-kernel/enclave"
 )
 
 // Test-only helpers that mutate package-private state. The file pattern
@@ -16,8 +14,7 @@ import (
 // resetSelfEnclaveInfo to restore a fresh state for later tests.
 func seedSelfEnclaveInfo(codeCommitment, productID []byte) {
 	selfEnclaveOnce.Do(func() {})
-	//nolint:staticcheck // SA1019: tests intentionally write the legacy cache shape
-	selfEnclaveInfo = &enclave.EnclaveInfo{
+	selfEnclaveInfo = &EnclaveInfo{
 		ProductID: productID,
 		UniqueID:  codeCommitment,
 	}

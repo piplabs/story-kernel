@@ -23,7 +23,7 @@ jobs:
       - name: Setup cb-mpc library
         run: make setup-cbmpc
 
-      - name: Run golangci-lint with CGO
+      - name: Run golangci-lint with CGO (SGX backend)
         env:
           CGO_ENABLED: "1"
           CGO_CFLAGS: "-I${{ github.workspace }}/.cbmpc/src"
@@ -31,4 +31,24 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.4.0
-          args: --build-tags=build-with-cpp --timeout=10m
+          args: --build-tags=sgx --timeout=10m
+
+      - name: Run golangci-lint with CGO (noop backend)
+        env:
+          CGO_ENABLED: "1"
+          CGO_CFLAGS: "-I${{ github.workspace }}/.cbmpc/src"
+          CGO_LDFLAGS: "-L${{ github.workspace }}/.cbmpc/lib/Release -Wl,--allow-multiple-definition"
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.4.0
+          args: --timeout=10m
+
+      - name: Run golangci-lint with CGO (TDX backend)
+        env:
+          CGO_ENABLED: "1"
+          CGO_CFLAGS: "-I${{ github.workspace }}/.cbmpc/src"
+          CGO_LDFLAGS: "-L${{ github.workspace }}/.cbmpc/lib/Release -Wl,--allow-multiple-definition"
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.4.0
+          args: --build-tags=tdx --timeout=10m

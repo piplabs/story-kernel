@@ -134,23 +134,13 @@ func Default() TEE {
 // =============================================================================
 
 // GetRemoteQuote returns a TEE quote with the given user data embedded.
+//
+// Wire format depends on the active backend; see Quoter.GetRemoteQuote for
+// the full matrix. In short:
+//   - SGX backend: raw EREPORT bytes with userData in report_data.
+//   - TDX backend: raw V4 quote with userData in V4.report_data.
 func GetRemoteQuote(userData []byte) ([]byte, error) {
 	return Default().GetRemoteQuote(userData)
-}
-
-// GetSelfEnclaveInfo returns the legacy SGX-shaped self-info for the running
-// enclave. Internally it queries the active backend's GetSelfIdentity and
-// projects the SGX-relevant fields.
-func GetSelfEnclaveInfo() (*EnclaveInfo, error) {
-	id, err := Default().GetSelfIdentity()
-	if err != nil {
-		return nil, err
-	}
-
-	return &EnclaveInfo{
-		ProductID: id.ProductID,
-		UniqueID:  id.CodeCommitment,
-	}, nil
 }
 
 // GetSelfCodeCommitment returns the running enclave's code commitment.

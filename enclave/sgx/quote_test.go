@@ -206,12 +206,12 @@ func TestConstants_QuoteOffsets(t *testing.T) {
 // =============================================================================
 
 // TestSGX_GetSelfEnclaveInfo_PropagatesError verifies that
-// enclave.GetSelfEnclaveInfo returns a non-nil error when the SGX backend
+// sgx.GetSelfEnclaveInfo returns a non-nil error when the SGX backend
 // cannot reach the Gramine pseudo-filesystem.
 func TestSGX_GetSelfEnclaveInfo_PropagatesError(t *testing.T) {
 	t.Parallel()
 
-	_, err := enclave.GetSelfEnclaveInfo()
+	_, err := GetSelfEnclaveInfo()
 	require.Error(t, err)
 }
 

@@ -1,7 +1,6 @@
 package enclave_test
 
 import (
-	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -140,11 +139,6 @@ func TestShimFunctionsDelegate(t *testing.T) {
 	cc, err := enclave.GetSelfCodeCommitment()
 	require.NoError(t, err)
 	require.Equal(t, []byte("self"), cc)
-
-	info, err := enclave.GetSelfEnclaveInfo()
-	require.NoError(t, err)
-	require.Equal(t, []byte("self"), info.UniqueID)
-	require.Equal(t, []byte{0x00, 0x01}, info.ProductID)
 }
 
 func TestSealToFileAndUnsealRoundTrip(t *testing.T) {
@@ -266,47 +260,6 @@ func TestUnsealFromFile_UnsealError(t *testing.T) {
 	_, err := enclave.UnsealFromFile(src)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to unseal")
-}
-
-// TestGetSelfEnclaveInfo_ErrorPropagates ensures the shim surfaces a backend
-// identity error rather than silently returning a zero-valued EnclaveInfo.
-func TestGetSelfEnclaveInfo_ErrorPropagates(t *testing.T) {
-	idErr := errors.New("identity failure")
-	restore := enclave.SwapDefault(errorBackend{name: "err", identityErr: idErr})
-	defer restore()
-
-	info, err := enclave.GetSelfEnclaveInfo()
-	require.Error(t, err)
-	require.Nil(t, info, "info must be nil on error to prevent caller misuse")
-	require.ErrorIs(t, err, idErr, "backend error must be exposed via errors.Is")
-}
-
-// TestGetSelfEnclaveInfo_TDXShapeProjection documents the legacy-shape
-// projection for a TDX Identity. The shim populates UniqueID with the full
-// 240-byte CodeCommitment, breaking the 32-byte SGX assumption that some
-// callers may still encode. This test ensures any future change to the
-// projection logic forces a deliberate update of this assertion.
-func TestGetSelfEnclaveInfo_TDXShapeProjection(t *testing.T) {
-	tdxCommit := bytes.Repeat([]byte{0xCC}, 240)
-	fake := fakeBackend{
-		name: "fake-tdx",
-		identity: &enclave.Identity{
-			Type:           enclave.IdentityTDX,
-			CodeCommitment: tdxCommit,
-			MRTD:           bytes.Repeat([]byte{0x11}, 48),
-		},
-	}
-	restore := enclave.SwapDefault(fake)
-	defer restore()
-
-	info, err := enclave.GetSelfEnclaveInfo()
-	require.NoError(t, err)
-	require.NotNil(t, info)
-	require.Equal(t, 240, len(info.UniqueID),
-		"GetSelfEnclaveInfo projects a TDX Identity by copying the 240B CodeCommitment "+
-			"into the legacy SGX-shaped UniqueID. Callers expecting a 32B MRENCLAVE will "+
-			"reject this; new callers should use TEE.GetSelfIdentity directly.")
-	require.Equal(t, tdxCommit, info.UniqueID)
 }
 
 // =============================================================================
