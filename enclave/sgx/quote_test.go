@@ -1,10 +1,12 @@
-package enclave
+package sgx
 
 import (
 	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/piplabs/story-kernel/enclave"
 )
 
 // TestParseQuoteFields_TooShort verifies that a quote shorter than minQuoteSize returns an error.
@@ -155,7 +157,7 @@ func TestGetRemoteQuote_UserDataTooLong(t *testing.T) {
 
 	// 65 bytes exceeds the 64-byte reportDataSize limit
 	longData := make([]byte, reportDataSize+1)
-	_, err := GetRemoteQuote(longData)
+	_, err := Backend{}.GetRemoteQuote(longData)
 	require.ErrorContains(t, err, "user data exceeds")
 }
 
@@ -165,7 +167,7 @@ func TestGetRemoteQuote_ExactLimitAccepted(t *testing.T) {
 	t.Parallel()
 
 	exactData := make([]byte, reportDataSize)
-	_, err := GetRemoteQuote(exactData)
+	_, err := Backend{}.GetRemoteQuote(exactData)
 	// Should fail due to Gramine pseudo-file not being available outside SGX,
 	// not due to input validation.
 	if err != nil {
@@ -192,4 +194,111 @@ func TestConstants_QuoteOffsets(t *testing.T) {
 	require.Equal(t, 32, codeCommitmentSize)
 	require.Equal(t, 2, isvProdIDSize)
 	require.Equal(t, 64, reportDataSize)
+}
+
+// =============================================================================
+// Identity-getter dispatch tests
+//
+// On hosts without a Gramine SGX environment the underlying ego/ecrypto and
+// /dev/attestation pseudo-files are unavailable, so the tests below verify
+// that the package-level shim functions in enclave/tee.go correctly surface
+// the wrapped backend error rather than silently returning zero values.
+// =============================================================================
+
+// TestSGX_GetSelfEnclaveInfo_PropagatesError verifies that
+// enclave.GetSelfEnclaveInfo returns a non-nil error when the SGX backend
+// cannot reach the Gramine pseudo-filesystem.
+func TestSGX_GetSelfEnclaveInfo_PropagatesError(t *testing.T) {
+	t.Parallel()
+
+	_, err := enclave.GetSelfEnclaveInfo()
+	require.Error(t, err)
+}
+
+// TestSGX_GetSelfCodeCommitment_PropagatesError verifies that
+// enclave.GetSelfCodeCommitment returns a non-nil error when the SGX backend
+// cannot reach the Gramine pseudo-filesystem.
+func TestSGX_GetSelfCodeCommitment_PropagatesError(t *testing.T) {
+	t.Parallel()
+
+	_, err := enclave.GetSelfCodeCommitment()
+	require.Error(t, err)
+}
+
+// TestSGX_ValidateCodeCommitment_PropagatesError verifies that
+// enclave.ValidateCodeCommitment returns a non-nil error when the SGX
+// backend cannot reach the Gramine pseudo-filesystem (so it cannot read its
+// own MRENCLAVE for comparison).
+func TestSGX_ValidateCodeCommitment_PropagatesError(t *testing.T) {
+	t.Parallel()
+
+	err := enclave.ValidateCodeCommitment(make([]byte, codeCommitmentSize))
+	require.Error(t, err)
+}
+
+// =============================================================================
+// Defensive-copy tests
+//
+// The SGX backend caches the running enclave's MRENCLAVE + ISVPRODID after
+// the first quote round-trip. Identity getters must return defensive copies:
+// caller mutation of a returned slice must never corrupt the process-wide
+// cache. The seeding helpers in export_test.go bypass the Gramine
+// pseudo-filesystem so these tests run on any host.
+// =============================================================================
+
+// TestSGX_GetSelfCodeCommitment_ReturnsDefensiveCopy ensures that mutating
+// the slice returned from Backend.GetSelfCodeCommitment does not corrupt
+// the cached MRENCLAVE.
+func TestSGX_GetSelfCodeCommitment_ReturnsDefensiveCopy(t *testing.T) {
+	// Sequential, NOT parallel: this test mutates package-level cache state.
+	originalCC := bytes.Repeat([]byte{0xAA}, codeCommitmentSize)
+	originalPID := []byte{0x01, 0x02}
+	seedSelfEnclaveInfo(originalCC, originalPID)
+	t.Cleanup(resetSelfEnclaveInfo)
+
+	cc1, err := Backend{}.GetSelfCodeCommitment()
+	require.NoError(t, err)
+	require.Equal(t, originalCC, cc1)
+
+	// Mutate the returned slice; must not propagate to the cache.
+	cc1[0] = 0xFF
+	require.NotEqual(t, byte(0xFF), cachedSelfUniqueID()[0],
+		"cache must be independent of returned slice")
+	require.Equal(t, originalCC, cachedSelfUniqueID(),
+		"cache must remain pristine")
+
+	cc2, err := Backend{}.GetSelfCodeCommitment()
+	require.NoError(t, err)
+	require.Equal(t, originalCC, cc2,
+		"second call must return the original cached MRENCLAVE")
+}
+
+// TestSGX_GetSelfIdentity_ReturnsDefensiveCopy ensures that mutating either
+// CodeCommitment or ProductID on a returned Identity does not corrupt the
+// cached enclave info.
+func TestSGX_GetSelfIdentity_ReturnsDefensiveCopy(t *testing.T) {
+	originalCC := bytes.Repeat([]byte{0xBB}, codeCommitmentSize)
+	originalPID := []byte{0x10, 0x20}
+	seedSelfEnclaveInfo(originalCC, originalPID)
+	t.Cleanup(resetSelfEnclaveInfo)
+
+	id1, err := Backend{}.GetSelfIdentity()
+	require.NoError(t, err)
+	require.Equal(t, enclave.IdentitySGX, id1.Type)
+	require.Equal(t, originalCC, id1.CodeCommitment)
+	require.Equal(t, originalPID, id1.ProductID)
+
+	// Mutate both fields of the returned Identity; cache must remain pristine.
+	id1.CodeCommitment[0] = 0xFF
+	id1.ProductID[0] = 0xFF
+
+	require.Equal(t, originalCC, cachedSelfUniqueID(),
+		"GetSelfIdentity must clone CodeCommitment")
+	require.Equal(t, originalPID, cachedSelfProductID(),
+		"GetSelfIdentity must clone ProductID")
+
+	id2, err := Backend{}.GetSelfIdentity()
+	require.NoError(t, err)
+	require.Equal(t, originalCC, id2.CodeCommitment)
+	require.Equal(t, originalPID, id2.ProductID)
 }
