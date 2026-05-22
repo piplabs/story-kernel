@@ -47,8 +47,20 @@ func (s *DKGServer) ProcessResponses(_ context.Context, req *pb.ProcessResponses
 		return nil, status.Errorf(codes.Internal, "failed to get or load roundContext")
 	}
 
+	// Bounds-check references for the per-item loop:
+	//   dealerCount     — upper bound for outer Response.Index (the dealer).
+	//   complainerCount — upper bound for inner VssResponse.Index (the
+	//                     responder/complainer).
+	// Non-resharing rounds have a single committee acting as both. In
+	// resharing, dealers live in the OLD committee and complainers live
+	// in the NEW committee, so the bounds diverge.
+	var dealerCount, complainerCount int
+
 	var distKeyGens []*dkg.DistKeyGenerator
 	if !req.GetIsResharing() {
+		dealerCount = len(rc.SortedPubKeys)
+		complainerCount = len(rc.SortedPubKeys)
+
 		distKeyGen, err := s.GetInitDKG(codeCommitmentHex, req.GetRound(), rc.Network.GetThreshold(), rc.SortedPubKeys)
 		if err != nil {
 			log.Errorf("failed to load or rebuild initial distributed key generator: %v", err)
@@ -63,6 +75,16 @@ func (s *DKGServer) ProcessResponses(_ context.Context, req *pb.ProcessResponses
 
 			return nil, status.Errorf(codes.Internal, "failed to get the latest active round of DKG")
 		}
+		// Defence in depth against a future regression in
+		// GetLatestActiveDKGNetwork that returns (nil, nil) on an
+		// uninitialised state.
+		if latest == nil || latest.GetTotal() == 0 {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"resharing requires an active prior DKG network")
+		}
+
+		dealerCount = int(latest.GetTotal())    // OLD committee
+		complainerCount = len(rc.SortedPubKeys) // NEW committee
 
 		prevDistKeyGen, err := s.GetResharingPrevDKG(codeCommitmentHex, req.GetRound(), rc.Network.GetThreshold(), rc.SortedPubKeys, latest)
 		if err != nil {
@@ -79,55 +101,136 @@ func (s *DKGServer) ProcessResponses(_ context.Context, req *pb.ProcessResponses
 		}
 	}
 
-	// Process the responses
+	// Fail loudly if no DistKeyGenerator is available — without this guard
+	// the per-item loop would silently treat every input as processed
+	// (the empty for-range exits without setting any flags).
+	if len(distKeyGens) == 0 {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"no DistKeyGenerator available for this round (node not a member of the required committee(s))")
+	}
+
+	// Process the responses. A response is considered rejected iff it fails
+	// against EVERY configured DistKeyGenerator with a non-idempotent error.
+	// For resharing (prev+next), accepted-by-any wins. If every generator
+	// returns an idempotent "already existing" error the response is silently
+	// skipped (NOT added to rejected_responses) so the client doesn't retry
+	// something kyber has already absorbed.
+	//
+	// rejected may contain duplicates of the same response when both a
+	// proto-conversion failure AND a generator failure happen on the same
+	// item; the CL deduplicates via a per-batch map keyed by (Index, inner
+	// Index) so we don't bother deduping here.
 	var (
 		justifications []*pb.Justification
 		resps          []dkg.Response
+		rejected       []*pb.Response
 	)
 	for _, response := range req.GetResponses() {
 		resp := types.ConvertToVSSResp(response)
+
+		// Defence in depth: bounds-check the dealer AND complainer indices
+		// before kyber. processResharingResponse lazily inserts aggregators
+		// keyed by resp.Index without validation, so an out-of-range index
+		// could grow the aggregators map inside the enclave. In resharing,
+		// dealers are old-committee members and complainers are new-committee
+		// members.
+		if int(resp.Index) >= dealerCount {
+			rejected = append(rejected, response)
+
+			continue
+		}
+		if resp.Response != nil && int(resp.Response.Index) >= complainerCount {
+			rejected = append(rejected, response)
+
+			continue
+		}
+
+		// processed: at least one DistKeyGenerator applied the response (real
+		// success or idempotent re-submission). In resharing (prev + next),
+		// only one generator typically owns a given response — the others
+		// may return real errors ("unknown dealer" etc.) without indicating
+		// rejection. Reject only when EVERY generator returned a real
+		// (non-idempotent) error.
+		processed := false
 		for _, distKeyGen := range distKeyGens {
 			j, err := distKeyGen.ProcessResponse(resp)
 			if err != nil {
-				// skip the responses
+				// Log only indices to match the dealing/justification handlers'
+				// hygiene; avoids dumping the full VSSResponse struct into logs
+				// in case future kyber/proto evolution adds fields not safe to
+				// expose verbatim.
 				log.WithFields(log.Fields{
-					"round":           req.GetRound(),
-					"code_commitment": codeCommitmentHex,
-					"index":           response.GetIndex(),
-					"vss_response":    response.GetVssResponse(),
+					"round":            req.GetRound(),
+					"code_commitment":  codeCommitmentHex,
+					"dealer_index":     response.GetIndex(),
+					"complainer_index": response.GetVssResponse().GetIndex(),
 				}).Errorf("failed to process the response: %v", err)
+
+				if isAlreadyProcessedErr(err) {
+					processed = true
+				}
 
 				continue
 			}
 
-			if j != nil {
-				justification, err := types.ConvertToJustificationProto(j)
-				if err != nil {
-					// Log only the index to avoid leaking sensitive data (e.g., SecShare in PlainDeal).
-					log.WithFields(log.Fields{
-						"justification_index": j.Index,
-					}).Errorf("failed to convert to justification proto: %v", err)
+			processed = true
 
-					return nil, status.Errorf(codes.Internal, "failed to convert to justification proto")
-				}
-
-				justifications = append(justifications, justification)
+			if j == nil {
+				continue
 			}
+
+			justification, convErr := types.ConvertToJustificationProto(j)
+			if convErr != nil {
+				// kyber already absorbed `resp`; retry would hit the idempotent
+				// guard (j == nil) and never re-derive the justification.
+				// Putting `response` in rejected_responses would mislead the CL
+				// into retrying a permanently-lost artifact, and failing the
+				// whole RPC would also discard valid justifications already
+				// converted in this batch. Drop only this justification — the
+				// response itself is still added to resps below so kyber's
+				// in-memory state and DKGStore stay consistent.
+				// (Effectively unreachable on Ed25519 — kept for future suite changes.)
+				// Log only the index to avoid leaking SecShare from PlainDeal.
+				log.WithFields(log.Fields{
+					"round":               req.GetRound(),
+					"code_commitment":     codeCommitmentHex,
+					"justification_index": j.Index,
+				}).Errorf("failed to convert generated justification to proto; "+
+					"justification dropped: %v", convErr)
+
+				continue
+			}
+
+			justifications = append(justifications, justification)
+		}
+
+		if !processed {
+			rejected = append(rejected, response)
+
+			continue
 		}
 
 		resps = append(resps, *resp)
 	}
 
-	if err := s.DKGStore.AddResponses(codeCommitmentHex, req.GetRound(), resps); err != nil {
-		log.Errorf("failed to add responses to the DKG state: %v", err)
+	if len(resps) > 0 {
+		if err := s.DKGStore.AddResponses(codeCommitmentHex, req.GetRound(), resps); err != nil {
+			log.Errorf("failed to add responses to the DKG state: %v", err)
 
-		return nil, status.Errorf(codes.Internal, "failed to add responses to the DKG state")
+			return nil, status.Errorf(codes.Internal, "failed to add responses to the DKG state")
+		}
 	}
 
-	log.Info("All responses have been processed", "code_commitment", codeCommitmentHex, "round", req.GetRound())
+	log.WithFields(log.Fields{
+		"code_commitment": codeCommitmentHex,
+		"round":           req.GetRound(),
+		"processed":       len(resps),
+		"rejected":        len(rejected),
+	}).Info("Processed responses")
 
 	return &pb.ProcessResponsesResponse{
-		Justifications: justifications,
+		Justifications:    justifications,
+		RejectedResponses: rejected,
 	}, nil
 }
 
