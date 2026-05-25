@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -22,6 +23,9 @@ const (
 	thresholdRetryDelay = 2 * time.Second
 )
 
+// ErrLightClientLag is the sentinel for light-client-lag-induced fetch failures.
+var ErrLightClientLag = errors.New("light client appears to lag chain tip")
+
 func (s *DKGServer) GetOrLoadRoundContext(
 	codeCommitmentsHex string,
 	round uint32,
@@ -36,7 +40,7 @@ func (s *DKGServer) GetOrLoadRoundContext(
 	}
 
 	rc, err := s.fetchRoundContext(codeCommitmentsHex, round)
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrLightClientLag) {
 		return nil, err
 	}
 
@@ -45,7 +49,7 @@ func (s *DKGServer) GetOrLoadRoundContext(
 	// BeginDealing set the threshold. Without this, kyber falls back to
 	// MinimumT (n/2+1) which can differ from the on-chain threshold,
 	// causing deal commitment length mismatches during resharing.
-	if rc.Network.GetThreshold() == 0 {
+	if err != nil || rc.Network.GetThreshold() == 0 {
 		for attempt := range thresholdRetryAttempts {
 			log.WithFields(log.Fields{
 				"round":   round,
@@ -55,18 +59,21 @@ func (s *DKGServer) GetOrLoadRoundContext(
 			time.Sleep(thresholdRetryDelay)
 
 			rc, err = s.fetchRoundContext(codeCommitmentsHex, round)
-			if err != nil {
+			if err != nil && !errors.Is(err, ErrLightClientLag) {
 				return nil, err
 			}
-
-			if rc.Network.GetThreshold() > 0 {
+			if err == nil && rc.Network.GetThreshold() > 0 {
 				break
 			}
 		}
 
+		if err != nil {
+			return nil, fmt.Errorf("%w: round %d after %d retries: %v",
+				ErrLightClientLag, round, thresholdRetryAttempts, err)
+		}
 		if rc.Network.GetThreshold() == 0 {
-			return nil, fmt.Errorf("threshold is 0 for round %d after %d retries; "+
-				"light client may not have caught up to the dealing block", round, thresholdRetryAttempts)
+			return nil, fmt.Errorf("%w: round %d threshold still 0 after %d retries",
+				ErrLightClientLag, round, thresholdRetryAttempts)
 		}
 	}
 
@@ -114,6 +121,12 @@ func (s *DKGServer) fetchRoundContext(
 // validateRegistrations checks that the fetched registrations are consistent
 // with the on-chain network state before they are used to build DKG state.
 func validateRegistrations(regs []*pb.DKGRegistration, network *pb.DKGNetwork, round uint32) error {
+	// Light client behind BeginDealing: regs visible but Total not yet persisted.
+	if network.GetTotal() == 0 && len(regs) > 0 {
+		return fmt.Errorf("%w: %d registrations visible but network.Total=0",
+			ErrLightClientLag, len(regs))
+	}
+
 	// Registration count must match the network's expected total.
 	if uint32(len(regs)) != network.GetTotal() {
 		return fmt.Errorf("registration count %d does not match network total %d",

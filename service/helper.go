@@ -17,12 +17,14 @@ func extractSortedPubKeys(suite *edwards25519.SuiteEd25519, regs []*pb.DKGRegist
 		return nil, nil
 	}
 
-	sort.SliceStable(regs, func(i, j int) bool {
-		return regs[i].GetIndex() < regs[j].GetIndex()
+	sorted := make([]*pb.DKGRegistration, len(regs))
+	copy(sorted, regs)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].GetIndex() < sorted[j].GetIndex()
 	})
 
-	pubs := make([]kyber.Point, 0, len(regs))
-	for _, reg := range regs {
+	pubs := make([]kyber.Point, 0, len(sorted))
+	for _, reg := range sorted {
 		point := suite.Point()
 		if err := point.UnmarshalBinary(reg.GetDkgPubKey()); err != nil {
 			return nil, errors.Wrap(err, "invalid public key")
