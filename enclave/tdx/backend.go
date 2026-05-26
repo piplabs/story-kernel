@@ -98,10 +98,11 @@ type selfResult struct {
 // trigger go vet's copylocks check on every method call.
 var _ enclave.TEE = (*Backend)(nil)
 
-// rtmr3SysfsPath is the Linux configfs-tsm-exposed RTMR3 SHA-384 measurement
-// register backed by the TDX module. Writing a 48-byte buffer extends the
-// register via TDG.MR.RTMR.EXTEND (irreversible until the TD reboots), which
-// folds the value into every subsequent quote.
+// rtmr3SysfsPath is the Linux misc-driver sysfs entry that exposes RTMR3's
+// SHA-384 measurement register. The `tdx_guest` driver translates a 48-byte
+// write here into TDG.MR.RTMR.EXTEND(rtmr=3, data) on the running TD, which
+// is irreversible until the TD reboots and is folded into every subsequent
+// TDX quote at the RTMR3 slot.
 const rtmr3SysfsPath = "/sys/devices/virtual/misc/tdx_guest/measurements/rtmr3:sha384"
 
 // init wires the production TDX backend. On a host without TDX silicon or
@@ -160,6 +161,45 @@ func init() {
 	enclave.Register(b)
 }
 
+// hashSelfBinary returns the SHA-384 digest of the running kernel ELF.
+// Reads `/proc/self/exe` to defeat path-based spoofing — if a caller has
+// already exec'd a tampered binary, the kernel still exposes the actual
+// loaded image through the procfs symlink. Returns a 48-byte digest on
+// success.
+func hashSelfBinary() ([]byte, error) {
+	f, err := os.Open("/proc/self/exe")
+	if err != nil {
+		return nil, fmt.Errorf("open /proc/self/exe: %w", err)
+	}
+	defer f.Close()
+
+	h := sha512.New384()
+	if _, err := io.Copy(h, f); err != nil {
+		return nil, fmt.Errorf("hash /proc/self/exe: %w", err)
+	}
+	digest := h.Sum(nil)
+	if len(digest) != 48 {
+		return nil, fmt.Errorf("unexpected SHA-384 digest length %d", len(digest))
+	}
+	return digest, nil
+}
+
+// writeRTMRExtend writes a 48-byte SHA-384 payload to the given sysfs
+// measurement path. The `tdx_guest` driver translates the write into a
+// TDG.MR.RTMR.EXTEND TDCALL for the corresponding RTMR slot. Extracted
+// from extendBinaryMeasurementOnce so the side-effecting step can be
+// exercised against a temp file in unit tests without touching the
+// production sysfs entry.
+func writeRTMRExtend(path string, digest []byte) error {
+	if len(digest) != 48 {
+		return fmt.Errorf("RTMR extend payload must be 48 bytes, got %d", len(digest))
+	}
+	if err := os.WriteFile(path, digest, 0); err != nil {
+		return fmt.Errorf("extend %s: %w", path, err)
+	}
+	return nil
+}
+
 // extendBinaryMeasurementOnce hashes the running kernel ELF and extends it
 // into RTMR3 the first time the process boots inside a TD. RTMR3 is a
 // 48-byte SHA-384 register reserved by the TDX architecture for software-
@@ -184,28 +224,13 @@ func init() {
 //     earlier by the quote-provider stub branch, but defence in depth)
 //   - short-write or kernel rejection (TDX module ENODEV, EBUSY, …)
 func extendBinaryMeasurementOnce() error {
-	f, err := os.Open("/proc/self/exe")
+	digest, err := hashSelfBinary()
 	if err != nil {
-		return fmt.Errorf("open /proc/self/exe: %w", err)
+		return err
 	}
-	defer f.Close()
-
-	h := sha512.New384()
-	if _, err := io.Copy(h, f); err != nil {
-		return fmt.Errorf("hash /proc/self/exe: %w", err)
+	if err := writeRTMRExtend(rtmr3SysfsPath, digest); err != nil {
+		return err
 	}
-	digest := h.Sum(nil)
-	if len(digest) != 48 {
-		return fmt.Errorf("unexpected SHA-384 digest length %d", len(digest))
-	}
-
-	// WriteFile opens with O_TRUNC, which the configfs-tsm RTMR backing
-	// accepts as a single 48-byte extend op (it ignores the offset and
-	// treats the payload as the extend data).
-	if err := os.WriteFile(rtmr3SysfsPath, digest, 0); err != nil {
-		return fmt.Errorf("extend %s: %w", rtmr3SysfsPath, err)
-	}
-
 	log.Infof("tdx: extended RTMR3 with binary SHA-384 %s", hex.EncodeToString(digest))
 	return nil
 }

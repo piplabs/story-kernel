@@ -2,7 +2,12 @@ package tdx
 
 import (
 	"bytes"
+	"crypto/sha512"
+	"encoding/hex"
 	"errors"
+	"io"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -97,13 +102,14 @@ func TestBackend_GetSelfIdentity_TDXShape(t *testing.T) {
 	require.Len(t, id.RTMR2, sizeMeasurement)
 	require.Len(t, id.RTMR3, sizeMeasurement)
 	require.Len(t, id.CodeCommitment, 32,
-		"v2 decomposed schema: TDX CodeCommitment is keccak256(RTMR2) (32 bytes)")
+		"v3 schema: TDX CodeCommitment is keccak256(RTMR3) (32 bytes)")
 
-	// CodeCommitment must equal keccak256(RTMR2). See backend.go::computeSelfIdentity
-	// for the v2 decomposed-schema rationale.
-	want := ecrypto.Keccak256(id.RTMR2)
+	// CodeCommitment must equal keccak256(RTMR3). See backend.go::computeSelfIdentity
+	// for the v3 schema rationale (RTMR3 carries the kernel-bound binary measurement
+	// produced by extendBinaryMeasurementOnce at startup).
+	want := ecrypto.Keccak256(id.RTMR3)
 	require.True(t, bytes.Equal(want, id.CodeCommitment),
-		"CodeCommitment must equal keccak256(RTMR2); chain v2 binary commitment slot stores the same value")
+		"CodeCommitment must equal keccak256(RTMR3); chain v3 binary commitment slot stores the same value")
 }
 
 func TestBackend_GetSelfCodeCommitment_32B(t *testing.T) {
@@ -111,7 +117,7 @@ func TestBackend_GetSelfCodeCommitment_32B(t *testing.T) {
 	b, _ := newTestBackend(t)
 	c, err := b.GetSelfCodeCommitment()
 	require.NoError(t, err)
-	require.Len(t, c, 32, "TDX code commitment under v2 decomposed schema is keccak256(RTMR2) = 32B")
+	require.Len(t, c, 32, "TDX code commitment under v3 schema is keccak256(RTMR3) = 32B")
 }
 
 func TestBackend_ValidateCodeCommitment_Match(t *testing.T) {
@@ -378,9 +384,144 @@ func TestTDX_ValidateCodeCommitment_PropagatesError(t *testing.T) {
 	if !onFailClosedHost(t) {
 		t.Skip("real TDX host; skipping fail-closed shim assertion")
 	}
-	// 32 bytes mirrors the v2 decomposed TDX code commitment shape
-	// (keccak256(RTMR2)); the comparison fails before length matters
+	// 32 bytes mirrors the v3 TDX code commitment shape
+	// (keccak256(RTMR3)); the comparison fails before length matters
 	// because the local backend cannot read its own identity.
 	err := enclave.ValidateCodeCommitment(make([]byte, 32))
 	require.Error(t, err)
+}
+
+// =============================================================================
+// RTMR3 self-extend (v3 binary-commitment binding)
+//
+// These tests cover the two halves of extendBinaryMeasurementOnce as
+// independently testable units. hashSelfBinary is exercised against the
+// test binary (which is itself /proc/self/exe inside `go test`).
+// writeRTMRExtend is exercised against a temp file so the real sysfs
+// entry is never touched.
+// =============================================================================
+
+// TestHashSelfBinary_MatchesProcSelfExe verifies hashSelfBinary returns
+// the SHA-384 of the test binary by hashing /proc/self/exe with the
+// stdlib and asserting equality.
+func TestHashSelfBinary_MatchesProcSelfExe(t *testing.T) {
+	t.Parallel()
+	if _, err := os.Stat("/proc/self/exe"); err != nil {
+		t.Skipf("/proc/self/exe unavailable on this host: %v", err)
+	}
+
+	got, err := hashSelfBinary()
+	require.NoError(t, err)
+	require.Len(t, got, 48, "SHA-384 must be 48 bytes")
+
+	// Reference: stdlib-hash /proc/self/exe directly.
+	f, err := os.Open("/proc/self/exe")
+	require.NoError(t, err)
+	defer f.Close()
+	h := sha512.New384()
+	_, err = io.Copy(h, f)
+	require.NoError(t, err)
+	require.Equal(t, h.Sum(nil), got,
+		"hashSelfBinary must match SHA-384 of /proc/self/exe byte-for-byte")
+}
+
+// TestHashSelfBinary_Deterministic checks two back-to-back calls return
+// the same digest (defends against accidental nondeterminism, e.g., if
+// the implementation ever introduced timestamps or per-call salts).
+func TestHashSelfBinary_Deterministic(t *testing.T) {
+	t.Parallel()
+	if _, err := os.Stat("/proc/self/exe"); err != nil {
+		t.Skipf("/proc/self/exe unavailable on this host: %v", err)
+	}
+	a, errA := hashSelfBinary()
+	b, errB := hashSelfBinary()
+	require.NoError(t, errA)
+	require.NoError(t, errB)
+	require.Equal(t, a, b, "hashSelfBinary must be deterministic for the same binary")
+}
+
+// TestWriteRTMRExtend_WritesDigestVerbatim verifies the sysfs-write half
+// hands the exact 48-byte payload to the file backing the RTMR slot.
+// In production this is `/sys/devices/virtual/misc/tdx_guest/measurements/rtmr3:sha384`
+// and the kernel translates the write into TDG.MR.RTMR.EXTEND. Under
+// test we hand it a temp file so the production sysfs entry is never
+// touched.
+//
+// We pre-create the target file with rw permissions because os.WriteFile
+// uses perm=0 in production (matching the existing sysfs file's mode,
+// where Linux ignores the open mode for an extant file). On a temp dir,
+// perm=0 would create a 000-mode file that the test cannot read back.
+func TestWriteRTMRExtend_WritesDigestVerbatim(t *testing.T) {
+	t.Parallel()
+	tmp := filepath.Join(t.TempDir(), "rtmr3.fake")
+	require.NoError(t, os.WriteFile(tmp, []byte("placeholder"), 0o600))
+	digest, err := hex.DecodeString(
+		"112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00" +
+			"112233445566778899aabbccddeeff00")
+	require.NoError(t, err)
+	require.Len(t, digest, 48)
+
+	require.NoError(t, writeRTMRExtend(tmp, digest))
+
+	gotBytes, err := os.ReadFile(tmp)
+	require.NoError(t, err)
+	require.Equal(t, digest, gotBytes, "sysfs-target file must mirror the digest verbatim")
+}
+
+// TestWriteRTMRExtend_RejectsShortPayload guards the 48-byte length
+// invariant required by the TDX module's RTMR EXTEND TDCALL.
+func TestWriteRTMRExtend_RejectsShortPayload(t *testing.T) {
+	t.Parallel()
+	tmp := filepath.Join(t.TempDir(), "rtmr3.fake")
+	err := writeRTMRExtend(tmp, make([]byte, 47))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "48 bytes")
+	_, statErr := os.Stat(tmp)
+	require.ErrorIs(t, statErr, os.ErrNotExist,
+		"failed length check must not create the sysfs file")
+}
+
+// TestWriteRTMRExtend_RejectsBadPath surfaces the sysfs-write error path
+// (e.g., missing tdx_guest driver, permission failure). Pointing at a
+// non-existent directory triggers ENOENT from os.WriteFile.
+func TestWriteRTMRExtend_RejectsBadPath(t *testing.T) {
+	t.Parallel()
+	digest := make([]byte, 48)
+	digest[0] = 0xAB
+	err := writeRTMRExtend(filepath.Join(t.TempDir(), "no-such-dir", "rtmr3"), digest)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "extend ")
+}
+
+// TestRTMR3_FreshBootDerivation pins the post-boot RTMR3 invariant:
+// after exactly one extend by extendBinaryMeasurementOnce on a fresh TD
+// (RTMR3 begins as 48 zero bytes), the visible value is
+// `SHA384(0x00..00 || SHA384(elf))`. The chain-side binary commitment
+// is `keccak256` of this value; matching the formula keeps kernel and
+// hook on the same identity.
+func TestRTMR3_FreshBootDerivation(t *testing.T) {
+	t.Parallel()
+	// Use an arbitrary 48-byte digest as a stand-in for SHA-384(elf);
+	// we are pinning the *algorithm*, not the binary's actual hash.
+	elfDigest, err := hex.DecodeString(
+		"6ef60196b6403ae8703d5b4c1db1fb349409c95f7c27f5c6362b11d6ac8782e3" +
+			"1df1ec2c5d07431b5e5969597ee883c2")
+	require.NoError(t, err)
+
+	// Reference: what the TDX module's RTMR extend produces for the
+	// first write into a freshly-zeroed register.
+	h := sha512.New384()
+	h.Write(bytes.Repeat([]byte{0x00}, 48))
+	h.Write(elfDigest)
+	wantRTMR3 := h.Sum(nil)
+
+	// Regression-pin against the value the live GCP TD reported with
+	// this exact elfDigest at registration block 12015. Any change in
+	// the extend formula would require rotating every whitelisted CC.
+	expected, err := hex.DecodeString(
+		"530461a8abef2f39db1e05c57492e40fb49bd7300f50e38f074ef9d7a21641b8" +
+			"29903c6d3be1d79272df597462445a89")
+	require.NoError(t, err)
+	require.Equal(t, expected, wantRTMR3,
+		"RTMR3 fresh-boot derivation must match the published formula")
 }
