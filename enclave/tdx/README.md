@@ -59,55 +59,66 @@ The following guest interfaces are explicitly NOT supported:
   host kernel to 6.7+ instead.
 
 The Story-side `TDXValidationHook` accepts raw V4/V5 quotes: it checks
-`codeCommitment = keccak256(RTMR2)` and separately approves
-`keccak256(MRTD || RTMR0 || RTMR1)`.
+`codeCommitment = keccak256(RTMR3)` against the DKG whitelist and separately
+approves `keccak256(MRTD || RTMR0 || RTMR1 || RTMR2)` against
+`approvedPlatforms` — schema v3.
+
+`RTMR3` is bound to *this* Go binary by the kernel's one-shot self-extend
+during TD bootstrap (`enclave/tdx/backend.go::extendBinaryMeasurementOnce`):
+on the first call, the kernel hashes its own ELF with SHA-384 and writes the
+48-byte digest to `/sys/devices/virtual/misc/tdx_guest/measurements/rtmr3:sha384`.
+The TDX module folds the write into RTMR3 via `TDG.MR.RTMR.EXTEND`. Every
+subsequent quote carries the post-extend RTMR3 value `SHA384(0x00…00 ||
+SHA384(elf))`, so the chain-side `keccak256(RTMR3)` reflects the running
+binary exactly.
 
 ## Supported platforms
 
-| Cloud / SKU | Region | Vintage | RTMR1 (boot chain) | Binary commitment `keccak256(RTMR2)` | Platform commitment `keccak256(MRTD‖RTMR0‖RTMR1)` |
+| Cloud / SKU | Region | Vintage | RTMR1 (boot chain) | Binary commitment `keccak256(RTMR3)` | Platform commitment `keccak256(MRTD‖RTMR0‖RTMR1‖RTMR2)` |
 |---|---|---|---|---|---|
-| GCP `c3-standard-4` | europe-west4-a | **v1** — provisioning ≤ 2026-05-11 | `c041916a…cba4` | `0xf6825d2c…37a7` | `0x824e5e0e…0faf` |
-| GCP `c3-standard-4` | europe-west4-a | **v2** — provisioning ≥ 2026-05-12 | `176bab53…57d4f` | `0xf6825d2c…37a7` | `0x9acca7cf…c785` |
+| GCP `c3-standard-4` | europe-west4-a | **v1** — provisioning ≤ 2026-05-11 | `c041916a…cba4` | _capture after deploy_ | _capture after deploy_ |
+| GCP `c3-standard-4` | europe-west4-a | **v2** — provisioning ≥ 2026-05-12 | `176bab53…57d4f` | _capture after deploy_ | _capture after deploy_ |
 
 `DKG.enclaveTypeData[2].codeCommitment` is the binary column;
 `TDXValidationHook.approvedPlatforms[…]` is the platform column.
 
-> **Why this fans out.** RTMR2 measures the TD's initrd + kernel cmdline
-> (NOT the story-kernel binary) and is stable across rebuilds; RTMR0
-> measures the SKU identity (TDX module + ACMs); RTMR1 captures OVMF +
-> bootloader and shifts whenever the cloud provider rolls out new
-> firmware. **A vintage = a distinct RTMR1.** One binary commitment fans
-> out to N platform commitments — that is the "matrix-sum (1 binary × N
-> platforms)" horizontal-scaling pattern: deploy the same TD image
-> everywhere; let governance approve each vintage's platform commitment
-> on the hook.
+> **Why this fans out.** RTMR3 binds the *kernel binary* (one value per
+> kernel build, identical across all SKUs running the same binary). RTMR0
+> pins the SKU identity (TDX module + ACMs); RTMR1 captures OVMF +
+> bootloader; RTMR2 pins the TD initrd + kernel cmdline (a property of the
+> boot image, NOT of the userspace binary). **A vintage = a distinct
+> (RTMR0, RTMR1, RTMR2) triple.** One binary commitment fans out to N
+> platform commitments — the "matrix-sum (1 binary × N platforms)"
+> horizontal-scaling pattern: deploy the same TD image everywhere; let
+> governance approve each vintage's platform commitment on the hook.
 
 ### Raw measurements (48-byte fields)
 
 ```text
-# Common across both vintages
-MRTD  = feb7486608382c1ff0e15b4648ddc0acea6ca974eb53e3529f4c4bd5ffbaa20bf335cb75965cea65fe473aed9647c162
-RTMR0 = 70e9cd9b25c0277e61f9aa328a6346fb684de307babd31c17cd9aeecf9f8f75a6e8ccc5822a09a4b6d3db529c0adfb6c
-RTMR2 = 261eb562e22a8468350019ef9a979dca3e6d1b9f8ab6db7a9544c19086e5e1b4b437e80696d34f8cd4da42999dbcab34
+# Common across vintages running the same kernel binary
+MRTD  = capture-after-deploy
+RTMR0 = capture-after-deploy
+RTMR2 = capture-after-deploy
+RTMR3 = SHA384(0x00…00 || SHA384(/proc/self/exe))   # kernel-bound, identical across SKUs
 
-# RTMR1 per vintage
-RTMR1_v1 = c041916ac1f5592fff0ce4cdf1c94b96870ae5786d857f605179f73ce6e9114892f29f8463c8ff2d27af6174f98acba4
-RTMR1_v2 = 176bab53534ff9e5b1a9a4476ed377ef041ed44b3a3225359456f3746e3051774b00f5a6cd710b876fdf91f506a57d4f
+# RTMR1 per vintage (one of the v1 / v2 / … RTMR1 values above)
 ```
 
 ### Adding a row
 
 **Append a new row to the table above whenever a new SKU/vintage is
-qualified, the TD image or initrd changes, or a firmware roll-out shifts
-the vintage on existing hosts.** Then bump the affected commitment in
+qualified, the TD image or initrd changes, the kernel binary changes
+(RTMR3 rotates), or a firmware roll-out shifts the vintage on existing
+hosts.** Then bump the affected commitment in
 `contracts/script/GenerateAlloc.s.sol` (PR #831 hybrid hook script) and
 redeploy / reapprove on the on-chain hook.
 
 #### Recapture procedure
 
 1. SSH to the target TDX host. Make sure the story-kernel build you care
-   about is the one that owns the running TD (a host reboot resets RTMR2,
-   so reboot after switching initrd / cmdline).
+   about is the one that owns the running TD (a host reboot resets RTMR2
+   and RTMR3, so reboot after switching initrd / cmdline or after
+   deploying a new binary).
 2. Pull a fresh quote off the configfs-tsm interface:
    ```bash
    sudo rmdir /sys/kernel/config/tsm/report/req 2>/dev/null
@@ -123,11 +134,14 @@ redeploy / reapprove on the on-chain hook.
    echo "RTMR0 = $(xxd -p -s 376 -l 48 $q | tr -d '\n')"
    echo "RTMR1 = $(xxd -p -s 424 -l 48 $q | tr -d '\n')"
    echo "RTMR2 = $(xxd -p -s 472 -l 48 $q | tr -d '\n')"
+   echo "RTMR3 = $(xxd -p -s 520 -l 48 $q | tr -d '\n')"
    ```
 4. Compute the 32-byte commitments off-chain
    (`python3 -c "from eth_utils import keccak; print(keccak(bytes.fromhex('<hex>')).hex())"`).
+   Binary commitment = `keccak256(RTMR3)`; platform commitment =
+   `keccak256(MRTD || RTMR0 || RTMR1 || RTMR2)`.
 5. Append a new row to the table above with the SKU, vintage tag, raw fields,
-   and derived commitments. Bump the affected platform commitment in
+   and derived commitments. Bump the affected commitments in
    `contracts/script/GenerateAlloc.s.sol` (PR #831 hybrid hook script) and
    redeploy / reapprove.
 
@@ -136,7 +150,9 @@ redeploy / reapprove on the on-chain hook.
 > created. Newly provisioned instances inherit the host's current vintage.
 > When GCP/Azure/IBM roll out a firmware update, brand new VMs will start
 > reporting a new RTMR1; old VMs that survive the rollout keep their old
-> RTMR1 until they are recreated.
+> RTMR1 until they are recreated. RTMR2 typically tracks RTMR1 (same boot
+> image), but a new TD initrd or kernel cmdline can shift RTMR2
+> independently.
 
 ## Runtime requirements
 

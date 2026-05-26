@@ -21,10 +21,13 @@ const (
 //
 // Both backends contract `CodeCommitment` to a **32-byte** hybrid-hook value:
 //   - SGX: MRENCLAVE.
-//   - TDX direct: keccak256(RTMR2) — the binary half of the on-chain hybrid
-//     hook commitment. The platform half `keccak256(MRTD || RTMR0 || RTMR1)`
-//     is derived and verified entirely on chain by the TDXValidationHook
-//     against its `approvedPlatforms` whitelist; the kernel never touches it.
+//   - TDX direct: keccak256(RTMR3) — the binary half of the on-chain hybrid
+//     hook commitment. RTMR3 is bound to the running Go binary by a one-shot
+//     SHA-384 self-extend during TD bootstrap (see
+//     `enclave/tdx/backend.go::extendBinaryMeasurementOnce`). The platform
+//     half `keccak256(MRTD || RTMR0 || RTMR1 || RTMR2)` is derived and
+//     verified entirely on chain by the TDXValidationHook against its
+//     `approvedPlatforms` whitelist; the kernel never touches it.
 //
 // `hashFinalizeDKGResponse` consumes the 32-byte value directly (no further
 // compression), and the chain stores it in `EnclaveTypeData.codeCommitment`

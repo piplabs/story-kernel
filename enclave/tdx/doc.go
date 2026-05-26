@@ -15,10 +15,15 @@
 //     IBM TDX hosts. Operator override via STORY_TDX_VENDOR=<name>.
 //   - Paravisor-mediated TDX guests (e.g., Azure Confidential VM TDX with
 //     OpenHCL) are intentionally out of scope.
-//   - CodeCommitment is the v2 binary commitment keccak256(RTMR2)
-//     (32 bytes). Identity also exposes MRTD/RTMR0..3 as raw 48-byte
-//     measurements for diagnostics and platform-commitment derivation
-//     on the chain side.
+//   - CodeCommitment is the v3 binary commitment keccak256(RTMR3)
+//     (32 bytes). RTMR3 is bound to *this* Go binary by a one-shot
+//     extend during init() with SHA-384(/proc/self/exe), so the value
+//     equals SHA384(0x00…00 || SHA384(elf)) and is reflected in every
+//     subsequent quote. RTMR2 measures only TD initrd + cmdline (not
+//     the Go binary) and so has moved into the platform commitment
+//     (computed chain-side as keccak256(MRTD || RTMR0 || RTMR1 ||
+//     RTMR2)). Identity still exposes MRTD/RTMR0..3 as raw 48-byte
+//     measurements for diagnostics.
 //   - Sealing uses a TPM2 PolicyOR over per-provider PCR sets
 //     (supportedProviders) combined with a hybrid AES-GCM wrap. The TPM
 //     seals only an AES-256 data-encryption key; the payload is encrypted
