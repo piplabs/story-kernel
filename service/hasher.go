@@ -23,7 +23,8 @@ type finalizationSignatureMaterial struct {
 // hashFinalizeDKGResponse hashes the final response payload to sign using RLP encoding.
 //
 // SGX and the supported TDX direct path both produce a 32-byte code commitment
-// (MRENCLAVE for SGX, keccak256(RTMR2) for TDX) — see backend.computeSelfIdentity.
+// (MRENCLAVE for SGX, keccak256(RTMR3) for TDX where RTMR3 is the kernel's
+// self-extended binary measurement) — see backend.computeSelfIdentity.
 // `codeCommitment` is required to be that 32-byte hybrid-hook value; anything
 // else is a backend-contract violation and fails fast here.
 func hashFinalizeDKGResponse(codeCommitment []byte, round uint32, participantsRoot [32]byte, globalPubKey []byte, publicCoeffsBz [][]byte, pubKeyShare []byte) ([]byte, error) {

@@ -13,9 +13,10 @@ import (
 )
 
 // GetCodeCommitment returns the code commitment of this story-kernel instance
-// (MRENCLAVE for SGX, keccak256(RTMR2) for supported TDX direct mode). This
-// allows the CL client to discover which enclave build it is communicating with
-// without needing to supply or know the code commitment in advance.
+// (MRENCLAVE for SGX, keccak256(RTMR3) for supported TDX direct mode — RTMR3
+// is self-extended at boot with SHA-384 of the kernel ELF). This allows the
+// CL client to discover which enclave build it is communicating with without
+// needing to supply or know the code commitment in advance.
 func (s *DKGServer) GetCodeCommitment(_ context.Context, _ *pb.GetCodeCommitmentRequest) (*pb.GetCodeCommitmentResponse, error) {
 	codeCommitment, err := enclave.GetSelfCodeCommitment()
 	if err != nil {

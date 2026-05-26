@@ -38,10 +38,15 @@ the `story` contracts repo) treat the kernel as a black-box trust anchor whose
 quote binds two 32-byte commitments:
 
 1. **codeCommitment** — proves *what code* is running (MRENCLAVE for SGX,
-   `keccak256(RTMR2)` for the supported TDX direct path, both compared
+   `keccak256(RTMR3)` for the supported TDX direct path, both compared
    against the `DKG.enclaveTypeData[enclaveType].codeCommitment` whitelist).
+   For TDX the kernel self-extends RTMR3 once at startup with SHA-384 of its
+   own ELF, so the value is `SHA-384(0x00..00 || SHA-384(elf))` and binds
+   the running Go binary (see `enclave/tdx/backend.go::extendBinaryMeasurementOnce`).
    The Story-side TDX hook checks the platform half separately as
-   `keccak256(MRTD || RTMR0 || RTMR1)` via its platform approval list.
+   `keccak256(MRTD || RTMR0 || RTMR1 || RTMR2)` via its platform approval
+   list — RTMR2 captures TD initrd + cmdline (a boot-image property) and
+   lives in the platform half, not the binary half.
 2. **dataCommitment** — proves *which on-chain registration* this kernel is
    attesting to. Computed by the kernel as `keccak256(validatorAddr || round
    || startBlockHeight || startBlockHash || dkgPubKey || enclaveCommKey)` and

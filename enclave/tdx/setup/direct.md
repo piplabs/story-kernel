@@ -132,11 +132,13 @@ succeed.
 
 ## Step 7 — On-chain registration
 
-Code commitment for supported direct-mode TDX is `keccak256(RTMR2)`. The
+Code commitment for supported direct-mode TDX is `keccak256(RTMR3)`, where
+RTMR3 is self-extended by the kernel at TD bootstrap with SHA-384 of its own
+ELF (see `enclave/tdx/backend.go::extendBinaryMeasurementOnce`). The
 Story-side `TDXValidationHook` independently derives the same binary
 commitment from the registration quote and checks the platform half
-`keccak256(MRTD || RTMR0 || RTMR1)` against its `approvePlatform` whitelist.
-Submit the binary commitment to the DKG contract via
+`keccak256(MRTD || RTMR0 || RTMR1 || RTMR2)` against its `approvePlatform`
+whitelist. Submit the binary commitment to the DKG contract via
 `whitelistEnclaveType(bytes32(2), {codeCommitment, TDXValidationHookProxy},
 true)` (operator action, see story contracts repo), then approve each platform
 commitment on the hook.
