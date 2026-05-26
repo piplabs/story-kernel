@@ -150,12 +150,17 @@ func init() {
 		// SHA384(0 || SHA384(elf)) in the RTMR3 slot, which the chain-side
 		// TDXValidationHook reads as the binary commitment.
 		//
-		// A failure here MUST be fail-closed: if we cannot bind RTMR3 to
-		// this binary, downstream code commitments are meaningless. Swap the
-		// quote provider for the fail-closed stub so every TEE call returns
-		// the wrapped error path with the explanatory message.
+		// A failure here MUST be fail-closed for the whole backend, not just
+		// the quote path. If we cannot bind RTMR3 to this binary, sealing
+		// stays usable on its own but a malicious or downgraded binary could
+		// still drive seal/unseal — defeating the trust model the chain-side
+		// hook depends on. Swap *both* the quote provider and the TPM for
+		// fail-closed stubs so every TEE operation surfaces the same wrapped
+		// error message regardless of which entry point a caller picked.
 		log.Errorf("tdx: failed to self-extend RTMR3 with binary measurement: %v", err)
-		b.quoteProvider = failClosedQuoteProvider{err: fmt.Errorf("tdx: RTMR3 binary self-extend failed: %w", err)}
+		wrapped := fmt.Errorf("tdx: RTMR3 binary self-extend failed: %w", err)
+		b.quoteProvider = failClosedQuoteProvider{err: wrapped}
+		b.tpm = failClosedTPM{err: wrapped}
 	}
 
 	enclave.Register(b)
