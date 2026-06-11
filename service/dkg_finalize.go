@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	ecrypto "github.com/ethereum/go-ethereum/crypto"
@@ -17,6 +19,14 @@ import (
 	dkg "go.dedis.ch/kyber/v4/share/dkg/pedersen"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+)
+
+const (
+	// finalizeStageRetryAttempts/Delay bound how long FinalizeDKG waits for the light
+	// client to reach the finalization stage. The light client refreshes every 3s, so a
+	// 2s interval observes the update promptly; 5 attempts (~10s) covers observed lag.
+	finalizeStageRetryAttempts = 5
+	finalizeStageRetryDelay    = 2 * time.Second
 )
 
 func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (*pb.FinalizeDKGResponse, error) {
@@ -120,12 +130,17 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 		return nil, status.Errorf(codes.Internal, "failed to marshal public coeffs")
 	}
 
-	// Calculate participants root from verified registrations
-	registrations, err := s.QueryClient.GetAllParticipantDKGRegistrations(context.Background(), codeCommitmentHex, req.GetRound())
+	// Calculate participants root from the post-invalidation participant set. The chain
+	// flips the round to the finalization stage, invalidates dealers that submitted no deal,
+	// and emits BeginDKGFinalization in the same block, so we must wait until the light
+	// client has observed that block before reading registrations. Otherwise a lagging
+	// trusted height may still report an invalidated dealer as VERIFIED, producing a
+	// participants root that disagrees with the set the chain agreed on.
+	registrations, err := s.waitForFinalizationRegistrations(codeCommitmentHex, req.GetRound())
 	if err != nil {
-		log.Errorf("failed to get verified DKG registrations: %v", err)
+		log.Errorf("failed to get finalization DKG registrations: %v", err)
 
-		return nil, status.Errorf(codes.Internal, "failed to get verified DKG registrations")
+		return nil, status.Errorf(codes.Internal, "failed to get finalization DKG registrations")
 	}
 
 	participantsRoot, err := calculateParticipantsRoot(registrations)
@@ -189,6 +204,37 @@ func validateFinalizeDKGRequest(req *pb.FinalizeDKGRequest) error {
 	}
 
 	return nil
+}
+
+// waitForFinalizationRegistrations blocks until the light client observes the round at the
+// finalization stage (or later), then returns the participant registrations read at that
+// height. Because missing-dealer invalidation happens in the same block that advances the
+// stage to finalization, waiting for that stage guarantees the returned set excludes any
+// invalidated dealer, so the kernel's participants root matches the chain's. It retries
+// while the light client still reports an earlier stage, returning ErrLightClientLag once
+// the retry budget is exhausted.
+func (s *DKGServer) waitForFinalizationRegistrations(codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error) {
+	for attempt := range finalizeStageRetryAttempts {
+		network, err := s.QueryClient.GetDKGNetwork(context.Background(), codeCommitmentHex, round)
+		if err != nil {
+			return nil, err
+		}
+
+		if network.GetStage() >= pb.DKGStage_DKG_STAGE_FINALIZATION {
+			return s.QueryClient.GetAllParticipantDKGRegistrations(context.Background(), codeCommitmentHex, round)
+		}
+
+		log.WithFields(log.Fields{
+			"round":   round,
+			"stage":   network.GetStage().String(),
+			"attempt": attempt + 1,
+		}).Warn("FinalizeDKG: light client has not observed the finalization stage yet, retrying")
+
+		time.Sleep(finalizeStageRetryDelay)
+	}
+
+	return nil, fmt.Errorf("%w: round %d did not reach finalization stage after %d retries",
+		ErrLightClientLag, round, finalizeStageRetryAttempts)
 }
 
 // This matches the validation logic in the Story blockchain DKG module.
