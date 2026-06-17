@@ -1,0 +1,50 @@
+# story-kernel-measure-binary.service — extend PCR 12 with the SHA-256 of
+# the story-kernel ELF.  Must run BEFORE story-kernel itself and AFTER swtpm.
+#
+# This is the binding step for PolicyPCR-based sealing: the kernel binary
+# can only unseal material that was originally sealed against the exact
+# PCR 12 value its hash produces.  Operators swapping in a modified ELF
+# at runtime will see PCR 12 mismatch and sealing will fail closed.
+
+[Unit]
+Description=Extend PCR 12 with story-kernel ELF measurement
+DefaultDependencies=no
+After=story-kernel-swtpm.service
+Before=story-kernel-rtmr3-extend.service story-kernel.service
+Requires=story-kernel-swtpm.service
+AssertPathExists=/usr/local/bin/story-kernel
+AssertPathExists=/dev/tpmrm0
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# No TPM2TOOLS_TCTI: tpm2-tools auto-detects /dev/tpmrm0, the same kernel
+# vtpm-proxy device story-kernel seals against (enclave/tdx/seal.go). swtpm
+# runs in --vtpm-proxy mode, so the proxy device — not swtpm's data socket —
+# is the canonical TPM channel; extending PCR 12 over the socket could leave
+# the kernel device with a divergent PCR view and break PolicyPCR sealing.
+ExecStart=/usr/local/lib/story-kernel/measure-binary.sh /usr/local/bin/story-kernel 12
+# If the measurement fails we MUST NOT proceed.  The story-kernel binary
+# is only safe to run if PCR 12 reflects its identity.
+SuccessExitStatus=0
+NoNewPrivileges=yes
+ProtectSystem=strict
+# measure-binary.sh writes a scratch file under /tmp to read back the
+# post-extend PCR value; ProtectSystem=strict makes the real /tmp read-only,
+# so give the unit a private writable /tmp (matches story-kernel.service).
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+PrivateNetwork=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=basic.target

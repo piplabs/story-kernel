@@ -1,0 +1,56 @@
+name: launcher reproducible build
+
+# Reproducibility is a release gate, not a per-commit check: a full run
+# builds the TD image twice (privileged mkosi in a pinned container) and
+# asserts every artifact is byte-identical. That is minutes-long and
+# Linux/Docker-only, so it runs only when a release is published.
+#
+# Precondition: at release cut, launcher/build/Dockerfile.builder must be
+# pinned to a real Debian digest (Pinning protocol in launcher/build/README.md).
+# build.sh refuses to run while the PLACEHOLDER digest is present, so an
+# unpinned (non-reproducible) release fails this job by design — we do NOT
+# set ALLOW_UNPINNED_BUILDER here.
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+jobs:
+  reproducible:
+    # ubuntu-latest can run privileged Docker; if the hosted runner cannot
+    # complete the mkosi image build, move this to a self-hosted Linux runner.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
+
+      - name: Cache OpenSSL static build
+        id: cache-openssl
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib64
+          key: openssl-3.0.13-static-${{ runner.os }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libssl-dev
+
+      - name: Build static OpenSSL (if not cached)
+        if: steps.cache-openssl.outputs.cache-hit != 'true'
+        run: |
+          cd /tmp
+          wget -q https://www.openssl.org/source/openssl-3.0.13.tar.gz
+          tar xzf openssl-3.0.13.tar.gz
+          cd openssl-3.0.13
+          ./config --prefix=/usr/local --openssldir=/usr/local/openssl no-shared
+          make -j"$(nproc)"
+          sudo make install_sw
+
+      - name: Verify reproducible build (build twice, diff every artifact)
+        run: ./launcher/build/verify-reproducible.sh

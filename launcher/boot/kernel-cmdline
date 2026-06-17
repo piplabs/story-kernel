@@ -1,0 +1,49 @@
+# launcher/boot/kernel-cmdline — canonical kernel command line.
+#
+# This file documents the exact cmdline string that ends up measured
+# into RTMR1 by the TDX virtual firmware.  It MUST stay in lock-step
+# with mkosi/mkosi.conf KernelCommandLine — any drift means the image
+# you ship and the image governance approved differ.
+#
+# The build pipeline (build/build.sh) sources this file, computes the
+# canonical single-line cmdline, and rejects the build if it does not
+# match mkosi.conf.
+#
+# Order matters because the kernel command line is hashed as a flat
+# string into RTMR1; reordering produces a different measurement.
+
+# === Behavior ===
+quiet
+selinux=0
+audit=0
+console=null
+loglevel=3
+systemd.show_status=false
+rd.systemd.show_status=false
+rd.udev.log_priority=3
+
+# === Randomness ===
+random.trust_cpu=on
+
+# === Failure mode ===
+oops=panic
+panic=10
+
+# === Memory hardening ===
+slab_nomerge
+page_alloc.shuffle=1
+init_on_alloc=1
+init_on_free=1
+randomize_kstack_offset=on
+
+# === Attack-surface reduction ===
+vsyscall=none
+debugfs=off
+lockdown=confidentiality
+
+# === Rootfs (filled in by build pipeline; see boot/dm-verity-build.sh) ===
+# root=PARTUUID=...
+# rd.systemd.verity=yes
+# roothash=...
+# systemd.verity_root_data=...
+# systemd.verity_root_hash=...

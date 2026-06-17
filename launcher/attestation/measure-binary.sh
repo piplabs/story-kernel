@@ -1,0 +1,72 @@
+#!/bin/sh
+# measure-binary.sh — extend PCR 12 with SHA-256(story-kernel ELF).
+#
+# This script MUST run from the TD's initrd BEFORE handoff to the rootfs
+# (i.e., before any operator-controlled code, including the rootfs's
+# systemd, can execute). It is the "measurer above measured" link that
+# makes the seal policy in enclave/tdx/providers.go meaningful — without
+# this extension, PCR 12 stays zero, the kernel's startup self-check
+# rejects it, and sealing fails closed.
+#
+# Run order inside initrd:
+#   1. modprobe tpm_vtpm_proxy   (or equivalent vTPM bring-up)
+#   2. swtpm chardev --vtpm-proxy --tpm2 --tpmstate dir=... --daemon
+#   3. wait for /dev/tpm0 (or /dev/tpmrm0) to appear
+#   4. mount the rootfs read-only on /sysroot
+#   5. THIS SCRIPT
+#   6. exec /sysroot/lib/systemd/systemd (or equivalent handoff)
+#
+# Env overrides (optional):
+#   STORY_KERNEL_ELF   path to the ELF (default: /sysroot/opt/story-kernel/bin/story-kernel)
+#   TPM2TOOLS_TCTI     tpm2-tools transport (default: tpm2-tools auto-detect)
+#
+# Exits non-zero on any failure. The initrd must treat a non-zero exit as
+# fatal so a missing or unreadable ELF, or a non-responsive vTPM, drops the
+# boot before story-kernel can run with a malformed identity chain.
+set -eu
+
+ELF_PATH="${STORY_KERNEL_ELF:-/sysroot/opt/story-kernel/bin/story-kernel}"
+
+if [ ! -f "$ELF_PATH" ]; then
+    echo "measure-binary: ELF not found at $ELF_PATH" >&2
+    exit 1
+fi
+
+# Confirm a TPM device or TCTI override is reachable. /dev/tpmrm0 is the
+# resource-managed kernel device, /dev/tpm0 is the raw fallback. If the
+# operator overrode TPM2TOOLS_TCTI (e.g., for tests), skip the device check.
+if [ -z "${TPM2TOOLS_TCTI:-}" ]; then
+    if [ ! -c /dev/tpmrm0 ] && [ ! -c /dev/tpm0 ]; then
+        echo "measure-binary: no TPM device — start in-TD swtpm + vtpm_proxy first" >&2
+        exit 1
+    fi
+fi
+
+# SHA-256 of the on-disk ELF. We deliberately read the file directly
+# (rather than /proc/self/exe of any process) because the measurer is the
+# initrd, not story-kernel — the goal is to pin "the ELF that will be
+# exec'd next", before any chance to swap.
+hash=$(sha256sum "$ELF_PATH" | awk '{print $1}')
+
+# Sanity: SHA-256 is 64 hex chars (32 bytes). Anything else means
+# coreutils sha256sum is misbehaving.
+if [ "${#hash}" -ne 64 ]; then
+    echo "measure-binary: unexpected SHA-256 hex length ${#hash} (want 64)" >&2
+    exit 1
+fi
+
+echo "measure-binary: extending PCR 12 with SHA-256($ELF_PATH) = $hash"
+tpm2_pcrextend "12:sha256=$hash"
+
+# Echo the post-extend PCR 12 value for the boot log. Useful for the
+# verify-pcr12.sh sanity check at startup and for operators debugging
+# "why does the kernel say PCR 12 is wrong?" — they can compare this
+# logged value against the kernel's self-check error message.
+#
+# Use the -o raw-output mode rather than parsing the text output, because
+# tpm2-tools' text format ("    12: 0xHEX") varies across releases.
+PCR_BIN=$(mktemp)
+trap 'rm -f "$PCR_BIN"' EXIT
+tpm2_pcrread sha256:12 -o "$PCR_BIN" >/dev/null
+post=$(xxd -p "$PCR_BIN" | tr -d '\n')
+echo "measure-binary: PCR 12 post-extend = $post"

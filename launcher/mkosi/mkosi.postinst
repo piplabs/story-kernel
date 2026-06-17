@@ -1,0 +1,54 @@
+#!/bin/sh
+# mkosi.postinst — invoked by mkosi after package installation, with the
+# rootfs accessible relative to the current working directory.  We use
+# this hook to apply our hardening tree from ../hardening/.
+#
+# mkosi sets BUILDROOT to the rootfs path when running scripts.  We fall
+# back to ./ for direct invocation (e.g. during launcher tests).
+
+set -eu
+
+ROOTFS=${BUILDROOT:-$(pwd)}
+
+# build.sh stages the hardening tree into mkosi.extra/_launcher_hardening/
+# right before invoking mkosi.  mkosi copies mkosi.extra/ verbatim into
+# the buildroot, so inside the sandbox the files end up at
+# $ROOTFS/_launcher_hardening/.
+HARDENING_DIR="$ROOTFS/_launcher_hardening"
+
+if [ ! -d "$HARDENING_DIR" ]; then
+    echo "mkosi.postinst: _launcher_hardening/ not found at $HARDENING_DIR" >&2
+    echo "  (build.sh should have staged it via mkosi.extra/)" >&2
+    exit 1
+fi
+
+echo "mkosi.postinst: applying hardening to $ROOTFS"
+sh "$HARDENING_DIR/install.sh" "$ROOTFS"
+
+# Clean up the staging directory; it should not ship in the final image.
+rm -rf "$HARDENING_DIR"
+
+# Make the helper scripts executable inside the rootfs.  install -m above
+# is fine for new files, but the ones already inside mkosi.skeleton/ keep
+# whatever mode mkosi assigned (group/world readable by default).
+for s in \
+    "$ROOTFS/usr/local/lib/story-kernel/measure-binary.sh" \
+    "$ROOTFS/usr/local/lib/story-kernel/extend-rtmr3.sh"; do
+    if [ -f "$s" ]; then
+        chmod 0755 "$s"
+    fi
+done
+
+# Strip noise that creeps in from package installation and would otherwise
+# break rootfs reproducibility.  These paths are repopulated at runtime
+# from tmpfs / journal volatile, so removing them is safe.
+rm -rf \
+    "$ROOTFS/var/cache/apt" \
+    "$ROOTFS/var/cache/debconf" \
+    "$ROOTFS/var/log"/* \
+    "$ROOTFS/var/lib/apt/lists"/* \
+    "$ROOTFS/var/lib/dpkg/info"/*.md5sums \
+    "$ROOTFS/tmp"/* \
+    2>/dev/null || true
+
+echo "mkosi.postinst: complete"

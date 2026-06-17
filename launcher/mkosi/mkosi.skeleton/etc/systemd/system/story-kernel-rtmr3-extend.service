@@ -1,0 +1,43 @@
+# story-kernel-rtmr3-extend.service — extend RTMR3 with SHA-384 of the
+# story-kernel ELF, binding code_commitment = keccak256(RTMR3) to the
+# exact binary that is about to run.
+#
+# Runs BEFORE story-kernel.service so any attempt to swap binaries
+# post-extend produces a quote that does not match approvedBinary[]
+# on chain — register-tx is rejected at the TDXValidationHook level.
+#
+# This is the "self-extend" step distinct from RTMR0..RTMR2 which come
+# from the boot chain (firmware → bootloader → kernel → cmdline).
+
+[Unit]
+Description=Extend RTMR3 with story-kernel ELF measurement
+DefaultDependencies=no
+After=story-kernel-measure-binary.service
+Before=story-kernel.service
+Requires=story-kernel-measure-binary.service
+AssertPathExists=/usr/local/bin/story-kernel
+AssertPathExists=/sys/devices/virtual/misc/tdx_guest/measurements/rtmr3:sha384
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/story-kernel/extend-rtmr3.sh /usr/local/bin/story-kernel
+# A failure here means the TDX hardware refused our extend request or
+# our binary cannot be opened.  Either way story-kernel must not run.
+SuccessExitStatus=0
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateNetwork=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# The configfs-tsm interface needs CAP_SYS_ADMIN to bind/unbind the report
+# directory.  We grant that narrowly to this service and drop it for the
+# kernel itself.
+CapabilityBoundingSet=CAP_SYS_ADMIN
+AmbientCapabilities=CAP_SYS_ADMIN
+
+[Install]
+WantedBy=basic.target

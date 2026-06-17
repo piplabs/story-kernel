@@ -1,0 +1,15 @@
+# 70-story-kernel-tpm.rules — grant the unprivileged story-kernel runtime
+# user direct access to the in-TD vTPM devices.
+#
+# story-kernel.service runs as User=story-kernel with an empty
+# CapabilityBoundingSet and opens /dev/tpmrm0 (falling back to /dev/tpm0)
+# directly to seal/unseal the DKG key share. The swtpm --vtpm-proxy device
+# is created at boot with no owning group, and this hardened image
+# deliberately ships no `tss`/`tpm` group, so without this rule the device
+# defaults to root:root 0600 and every TPM call fails with EACCES.
+#
+# /dev/tpm0 is in subsystem "tpm" and /dev/tpmrm0 in subsystem "tpmrm", so we
+# match on KERNEL name (not SUBSYSTEM) to cover both. Mode stays 0600: the
+# device is owned by the single runtime user, not shared via a group.
+KERNEL=="tpm[0-9]*",   OWNER="story-kernel", GROUP="story-kernel", MODE="0600"
+KERNEL=="tpmrm[0-9]*", OWNER="story-kernel", GROUP="story-kernel", MODE="0600"
