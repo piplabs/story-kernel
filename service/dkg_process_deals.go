@@ -141,6 +141,20 @@ func (s *DKGServer) ProcessDeals(_ context.Context, req *pb.ProcessDealsRequest)
 		// handlers and avoids exercising kyber's internal lookup tables
 		// with attacker-chosen indices.
 		if int(deal.Index) >= dealerCount {
+			// DEBUG: previously a silent reject. A deal whose dealer index exceeds
+			// dealerCount usually means the dealer-committee size the kernel built
+			// (dealerCount) disagrees with the committee the deal was made under —
+			// the same chain-fetch vs store-rebuild divergence as Bug2.
+			log.WithFields(log.Fields{
+				"round":           req.GetRound(),
+				"code_commitment": codeCommitmentHex,
+				"sender_index":    deal.Index,
+				"recipient_index": d.GetRecipientIndex(),
+				"dealer_count":    dealerCount,
+				"is_resharing":    req.GetIsResharing(),
+				"reason":          "dealer index >= dealerCount (out of range)",
+			}).Warn("ProcessDeals: rejecting deal with out-of-range dealer index")
+
 			rejected = append(rejected, d)
 
 			continue
@@ -185,11 +199,21 @@ func (s *DKGServer) ProcessDeals(_ context.Context, req *pb.ProcessDealsRequest)
 		}
 	}
 
+	// DEBUG: enumerate which dealer indices were rejected (not just the count) so a
+	// reject can be tied back to a specific dealer/validator via the committee dumps.
+	rejectedIdx := make([]uint32, 0, len(rejected))
+	for _, r := range rejected {
+		rejectedIdx = append(rejectedIdx, r.GetIndex())
+	}
+
 	log.WithFields(log.Fields{
-		"code_commitment": codeCommitmentHex,
-		"round":           req.GetRound(),
-		"processed":       len(deals),
-		"rejected":        len(rejected),
+		"code_commitment":       codeCommitmentHex,
+		"round":                 req.GetRound(),
+		"is_resharing":          req.GetIsResharing(),
+		"dealer_count":          dealerCount,
+		"processed":             len(deals),
+		"rejected":              len(rejected),
+		"rejected_sender_index": rejectedIdx,
 	}).Info("Processed deals")
 
 	return &pb.ProcessDealsResponse{

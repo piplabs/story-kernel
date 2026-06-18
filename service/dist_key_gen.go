@@ -280,7 +280,10 @@ func (s *DKGServer) buildResharingPrevDKG(
 		"nextT":           nextT,
 		"num_prevPubs":    len(prevPubs),
 		"num_nextPubs":    len(nextPubs),
+		"old_nodes":       fmtPubKeys(prevPubs),
+		"new_nodes":       fmtPubKeys(nextPubs),
 		"is_resharing":    isResharing,
+		"source":          "chain-fetch build (filtered, INVALIDATED dropped)",
 	}).Info("buildResharingPrevDKG: creating DKG handler")
 	longterm, err := s.DKGStore.LoadSealedEd25519Key(codeCommitmentHex, fromRound)
 	if err != nil {
@@ -374,6 +377,21 @@ func (s *DKGServer) rebuildResharingPrevDKG(
 	if err != nil {
 		return nil, err
 	}
+
+	// DEBUG (Bug2): store-rebuild committee for the PREV-committee handler. As in
+	// rebuildResharingNextDKG, OldNodes/NewNodes are the sealed, UNFILTERED PubKeys
+	// — compare against the chain-fetch committee for the same rounds to spot the
+	// invalidated-node divergence.
+	log.WithFields(log.Fields{
+		"code_commitment": codeCommitmentHex,
+		"from_round":      fromRound,
+		"to_round":        toRound,
+		"old_threshold":   prevState.Threshold,
+		"next_threshold":  nextState.Threshold,
+		"old_nodes":       fmtPubKeys(prevState.PubKeys),
+		"new_nodes":       fmtPubKeys(nextState.PubKeys),
+		"source":          "store-rebuild (sealed PubKeys, NOT filtered)",
+	}).Info("rebuildResharingPrevDKG: built handler from sealed state")
 
 	dkgInst, err := dkg.NewDistKeyHandler(&dkg.Config{
 		Suite:        s.Suite,
@@ -545,6 +563,9 @@ func (s *DKGServer) buildResharingNextDKG(codeCommitmentHex string, round, prevT
 		"num_prevPubs":     len(prevPubs),
 		"num_nextPubs":     len(nextPubs),
 		"num_publicCoeffs": len(publicCoeffs),
+		"old_nodes":        fmtPubKeys(prevPubs),
+		"new_nodes":        fmtPubKeys(nextPubs),
+		"source":           "chain-fetch build (filtered, INVALIDATED dropped)",
 	}).Info("buildResharingNextDKG: creating DKG handler")
 	// Create the next DKG
 	nextDKG, err := dkg.NewDistKeyHandler(&dkg.Config{
@@ -596,6 +617,25 @@ func (s *DKGServer) rebuildResharingNextDKG(
 		return nil, err
 	}
 
+	// DEBUG (Bug2): store-rebuild committee. OldNodes/NewNodes here come from the
+	// SEALED DKGState persisted earlier; they are NOT re-filtered, so a validator
+	// that was VERIFIED at seal time but later INVALIDATED still appears in this
+	// set. Compare these fingerprints against the chain-fetch committee logged by
+	// GetAllParticipantDKGRegistrations for the same round — a size/membership
+	// mismatch (e.g. 4 here vs 3 there) is the resharing-reintegration divergence
+	// that makes sessionID/Schnorr verification of replayed deals fail.
+	log.WithFields(log.Fields{
+		"code_commitment": codeCommitmentHex,
+		"to_round":        toRound,
+		"from_round":      nextState.FromRound,
+		"old_threshold":   prevState.Threshold,
+		"next_threshold":  nextState.Threshold,
+		"old_nodes":       fmtPubKeys(prevState.PubKeys),
+		"new_nodes":       fmtPubKeys(nextState.PubKeys),
+		"num_deals":       len(nextState.Deals),
+		"source":          "store-rebuild (sealed PubKeys, NOT filtered)",
+	}).Info("rebuildResharingNextDKG: built handler from sealed state")
+
 	if err := replayMessages(dkgInst, nextState); err != nil {
 		return nil, errors.Wrapf(err, "rebuildResharingNextDKG: replay failed (toRound=%d)", toRound)
 	}
@@ -626,11 +666,20 @@ func replayMessages(
 
 	for i, d := range st.Deals {
 		if _, err := dkgInst.ProcessDeal(&d); err != nil {
+			// DEBUG (Bug2): a Schnorr/sessionID failure here usually means the
+			// committee this dkgInst was built with (new_nodes below, plus the
+			// OldNodes logged at the rebuild call site) differs from the committee
+			// the deal was originally created under — i.e. the chain-fetch vs
+			// store-rebuild divergence. dealer_index is in the OLD-committee
+			// (dealer) index space.
 			log.WithFields(log.Fields{
 				"deal_index":   i,
 				"dealer_index": d.Index,
+				"from_round":   st.FromRound,
+				"new_nodes":    fmtPubKeys(st.PubKeys),
+				"num_deals":    len(st.Deals),
 				"error":        err,
-			}).Warn("failed to replay deal")
+			}).Warn("failed to replay deal (likely committee divergence: compare new_nodes vs chain-fetch committee)")
 			criticalErr = true
 		}
 	}
