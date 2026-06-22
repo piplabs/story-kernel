@@ -85,7 +85,18 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 	// Generate Distributed Key Share
 	distKeyShare, err := distKeyGen.DistKeyShare()
 	if err != nil {
-		log.Errorf("failed to compute distributed key share: %v", err)
+		// DEBUG (Bug2): "distributed key not certified" here is the symptom the OLD
+		// committee nodes report. Dump the NewNodes committee this Finalize used
+		// (chain-fetch roundContext.SortedPubKeys) and the round so we can tell
+		// which committee (3 vs 4) the cached generator was certified against.
+		log.WithFields(log.Fields{
+			"round":           req.GetRound(),
+			"code_commitment": codeCommitmentHex,
+			"is_resharing":    req.GetIsResharing(),
+			"threshold":       rc.Network.GetThreshold(),
+			"new_nodes":       fmtPubKeys(rc.SortedPubKeys),
+			"committee":       fmtRegs(rc.Registrations),
+		}).Errorf("failed to compute distributed key share: %v", err)
 
 		return nil, status.Errorf(codes.Internal, "failed to compute distributed key share")
 	}
@@ -101,7 +112,12 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 		return nil, status.Errorf(codes.Internal, "distributed key private share is nil")
 	}
 
-	log.Info("Distributed key share has been generated", "code_commitment", codeCommitmentHex, "round", req.GetRound())
+	log.WithFields(log.Fields{
+		"code_commitment": codeCommitmentHex,
+		"round":           req.GetRound(),
+		"is_resharing":    req.GetIsResharing(),
+		"new_nodes":       fmtPubKeys(rc.SortedPubKeys),
+	}).Info("Distributed key share has been generated")
 
 	pubKeyShare, err := marshalPubShare(priShare.V)
 	if err != nil {

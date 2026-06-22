@@ -267,6 +267,12 @@ func (q *VerifiedQueryClient) GetAllParticipantDKGRegistrations(ctx context.Cont
 	// Not all validators in ActiveValSet may have registered for DKG
 	// (e.g., bootnodes or validators that missed registration).
 	var registrations []*pb.DKGRegistration
+	// DEBUG (Bug2): track the members of ActiveValSet that this chain-fetch path
+	// DROPS, so the resulting committee can be compared against the store-rebuild
+	// committee (which keeps them). noReg = absence-proven (never registered, e.g.
+	// the non-TEE validator); dropped = registered but NOT in VERIFIED/FINALIZED
+	// (the INVALIDATED nodes that vanish here but persist in sealed state).
+	var noReg, dropped []string
 	for _, validatorAddr := range network.GetActiveValSet() {
 		reg, err := q.getDKGRegistration(ctx, codeCommitmentHex, round, validatorAddr)
 		if err != nil {
@@ -276,6 +282,7 @@ func (q *VerifiedQueryClient) GetAllParticipantDKGRegistrations(ctx context.Cont
 		// Skip validators that didn't register (non-existence proven)
 		if reg == nil {
 			log.Debugf("Validator %s has no DKG registration for round %d, skipping", validatorAddr, round)
+			noReg = append(noReg, validatorAddr)
 
 			continue
 		}
@@ -283,8 +290,24 @@ func (q *VerifiedQueryClient) GetAllParticipantDKGRegistrations(ctx context.Cont
 		if reg.GetStatus() == pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED ||
 			reg.GetStatus() == pb.DKGRegStatus_DKG_REG_STATUS_FINALIZED {
 			registrations = append(registrations, reg)
+		} else {
+			dropped = append(dropped, fmt.Sprintf("%s:%s", validatorAddr, reg.GetStatus()))
 		}
 	}
+
+	// DEBUG (Bug2): the chain-fetch committee AFTER status filtering. This is the
+	// "size = 3" side of the divergence when a node was invalidated this round.
+	// Compare `committee` here against the OldNodes/NewNodes dumped by
+	// rebuildResharing{Next,Prev}DKG for the same round.
+	log.WithFields(log.Fields{
+		"code_commitment": codeCommitmentHex,
+		"round":           round,
+		"active_val_set":  fmtAddrs(network.GetActiveValSet()),
+		"committee":       fmtRegs(registrations),
+		"dropped_status":  dropped,
+		"no_registration": noReg,
+		"source":          "chain-fetch (filters to VERIFIED/FINALIZED)",
+	}).Info("GetAllParticipantDKGRegistrations: built committee from chain")
 
 	if len(registrations) == 0 {
 		return nil, errors.New("no participant registrations found")
@@ -298,13 +321,36 @@ func (q *VerifiedQueryClient) GetAllParticipantDKGRegistrations(ctx context.Cont
 func (q *VerifiedQueryClient) getDKGRegistration(ctx context.Context, codeCommitmentHex string, round uint32, validatorAddr string) (*pb.DKGRegistration, error) {
 	key := GetDKGRegistrationKey(codeCommitmentHex, round, validatorAddr)
 
+	// DEBUG (Bug1): name the validator whose registration we are about to prove.
+	// When this is a never-registered (e.g. non-TEE) validator, getStoreData must
+	// verify an ICS23 NON-EXISTENCE proof; if that fails the whole roundContext
+	// build fails and dealing is skipped for this round. Logging the validator +
+	// key here is what ties the deeper "non-existence proof failed" error back to
+	// a concrete address (e.g. 0xDB82).
+	log.WithFields(log.Fields{
+		"validator": validatorAddr,
+		"round":     round,
+		"key":       hexHead(key),
+	}).Debug("getDKGRegistration: verifying registration proof")
+
 	bz, err := q.getStoreData(ctx, StoreKey, key)
 	if err != nil {
+		log.WithFields(log.Fields{
+			"validator": validatorAddr,
+			"round":     round,
+			"key":       hexHead(key),
+		}).Warnf("getDKGRegistration: store proof failed for validator: %v", err)
+
 		return nil, fmt.Errorf("failed to get DKG registration: %w", err)
 	}
 
 	// No data means the key doesn't exist (proven by non-existence proof)
 	if len(bz) == 0 {
+		log.WithFields(log.Fields{
+			"validator": validatorAddr,
+			"round":     round,
+		}).Debug("getDKGRegistration: non-existence proof verified (validator has no registration)")
+
 		return nil, nil
 	}
 
@@ -390,11 +436,35 @@ func (q *VerifiedQueryClient) getStoreData(ctx context.Context, storeKey string,
 
 	// Verify the proof chain
 	value := result.Response.Value
+	// DEBUG (Bug1): isNonExistence is true when the queried key has no value at
+	// queryHeight — these go through the ICS23 NON-MEMBERSHIP path, which is the
+	// one observed to fail on a fresh chain while same-height MEMBERSHIP proofs
+	// succeed. Logging height + key + which path on BOTH success and failure lets
+	// us diff a failing absence proof against a succeeding existence proof at the
+	// same height/AppHash.
+	isNonExistence := len(value) == 0
 	if err := q.verifyProof(result.Response.ProofOps, key, value, appHash, queryHeight, nextHeight); err != nil {
+		log.WithFields(log.Fields{
+			"store_key":        storeKey,
+			"key":              hexHead(key),
+			"query_height":     queryHeight,
+			"app_hash_height":  nextHeight,
+			"app_hash":         hexHead(appHash),
+			"is_non_existence": isNonExistence,
+		}).Warnf("getStoreData: proof verification FAILED: %v", err)
+
 		return nil, err
 	}
 
-	log.Debugf("Successfully verified Merkle proof for key: %s at height %d", hex.EncodeToString(key), queryHeight)
+	log.WithFields(log.Fields{
+		"store_key":        storeKey,
+		"key":              hexHead(key),
+		"query_height":     queryHeight,
+		"app_hash_height":  nextHeight,
+		"app_hash":         hexHead(appHash),
+		"is_non_existence": isNonExistence,
+		"value_len":        len(value),
+	}).Debug("getStoreData: proof verified")
 
 	return value, nil
 }
@@ -611,10 +681,61 @@ func verifyModuleNonExistenceProof(
 	spec := getProofSpec(moduleType)
 
 	if !ics23.VerifyNonMembership(spec, expectedModuleRoot, moduleProof, proofKey) {
+		// DEBUG (Bug1): dump everything needed to understand WHY this absence proof
+		// fails while same-height EXISTENCE proofs succeed. See nonExistProofFields.
+		log.WithFields(nonExistProofFields(moduleProof, moduleType, proofKey, expectedModuleRoot)).
+			Warn("verifyModuleNonExistenceProof: VerifyNonMembership FAILED")
+
 		return errors.New("module non-existence proof verification failed: key absence not proven under expected module root")
 	}
 
+	// DEBUG (Bug1): the SUCCESS path dumps the SAME fields as the failure path so a
+	// failing absence proof (rounds 3-4) and a succeeding one for the same absent
+	// key in a later round can be compared field-by-field (neighbors, roots) to
+	// isolate what changes between the intermittent fail and the self-heal.
+	log.WithFields(nonExistProofFields(moduleProof, moduleType, proofKey, expectedModuleRoot)).
+		Debug("verifyModuleNonExistenceProof: absence verified")
+
 	return nil
+}
+
+// nonExistProofFields builds the structured-log fields describing a non-existence
+// proof: the proof key, the expected vs calculated module root (and whether they
+// match), and the Left/Right neighbor keys that bracket the absent key. Shared by
+// both the failure and success branches so the two are directly comparable.
+func nonExistProofFields(
+	moduleProof *ics23.CommitmentProof,
+	moduleType string,
+	proofKey, expectedModuleRoot []byte,
+) log.Fields {
+	fields := log.Fields{
+		"module_type":          moduleType,
+		"proof_key":            hexHead(proofKey),
+		"expected_module_root": hexHead(expectedModuleRoot),
+	}
+	if ne := moduleProof.GetNonexist(); ne != nil {
+		fields["nonexist_key"] = hexHead(ne.GetKey())
+		if l := ne.GetLeft(); l != nil {
+			fields["left_neighbor_key"] = hexHead(l.GetKey())
+		} else {
+			fields["left_neighbor_key"] = "nil"
+		}
+		if r := ne.GetRight(); r != nil {
+			fields["right_neighbor_key"] = hexHead(r.GetKey())
+		} else {
+			fields["right_neighbor_key"] = "nil"
+		}
+	} else {
+		fields["nonexist_proof"] = "nil"
+	}
+	if calcRoot, cerr := moduleProof.Calculate(); cerr == nil {
+		fields["calculated_root"] = hexHead(calcRoot)
+		fields["roots_match"] = bytes.Equal(calcRoot, expectedModuleRoot)
+	} else {
+		fields["calculate_err"] = cerr.Error()
+	}
+
+	return fields
 }
 
 // This proves that key->value exists in the module store with the given moduleRoot.
@@ -643,6 +764,16 @@ func verifyModuleProof(
 
 		return errors.New("module proof verification failed: proof does not match expected module root")
 	}
+
+	// DEBUG (Bug1): a SUCCEEDING existence proof. Logged at the same shape as the
+	// absence-proof failure above so the two can be compared at the same height —
+	// notably whether the expected_module_root matches between an existence proof
+	// that passes and a non-existence proof that fails in the same round.
+	log.WithFields(log.Fields{
+		"module_type":          moduleType,
+		"proof_key":            hexHead(proofKey),
+		"expected_module_root": hexHead(expectedModuleRoot),
+	}).Debug("verifyModuleProof: existence verified")
 
 	return nil
 }

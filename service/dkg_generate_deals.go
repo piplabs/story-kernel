@@ -113,7 +113,27 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 		log.Warnf("failed to extract dealer polynomial coefficients: %v", extractErr)
 	}
 
-	log.Info("Succeed to generate deals", "code_commitment", codeCommitmentHex, "round", req.GetRound())
+	// DEBUG: report this node's own dealer index and the recipient indices it
+	// produced deals for. deals is map[recipientIndex]*dkg.Deal; every value
+	// carries the same dealer index (this node's position in the OLD committee
+	// for resharing, current committee otherwise). This is what was missing to
+	// tell, from the logs, exactly which validator dealt and to whom.
+	var dealerIndex uint32
+	recipients := make([]int, 0, len(deals))
+	for rcpt, d := range deals {
+		recipients = append(recipients, rcpt)
+		dealerIndex = d.Index
+	}
+
+	log.WithFields(log.Fields{
+		"code_commitment": codeCommitmentHex,
+		"round":           req.GetRound(),
+		"is_resharing":    req.GetIsResharing(),
+		"dealer_index":    dealerIndex,
+		"num_deals":       len(deals),
+		"recipient_index": recipients,
+		"num_sorted_pubs": len(rc.SortedPubKeys),
+	}).Info("Succeed to generate deals")
 
 	// Set deals into response
 	resp := createGenerateDealsResponse(req.GetRound(), req.GetCodeCommitment(), deals)

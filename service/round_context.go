@@ -110,6 +110,21 @@ func (s *DKGServer) fetchRoundContext(
 		return nil, err
 	}
 
+	// DEBUG (Bug2): the roundContext committee is the chain-fetch, post-filter set
+	// (INVALIDATED dropped). SortedPubKeys here feeds GetInitDKG/Finalize as
+	// NewNodes; compare against the sealed store-rebuild committee for the same
+	// round to detect the invalidated-node divergence.
+	log.WithFields(log.Fields{
+		"code_commitment": codeCommitmentsHex,
+		"round":           round,
+		"total":           network.GetTotal(),
+		"threshold":       network.GetThreshold(),
+		"is_resharing":    network.GetIsResharing(),
+		"committee":       fmtRegs(registrations),
+		"sorted_pub_keys": fmtPubKeys(sortedPubs),
+		"source":          "chain-fetch roundContext (filtered)",
+	}).Info("fetchRoundContext: assembled round context")
+
 	return &store.RoundContext{
 		Round:         round,
 		Network:       network,
