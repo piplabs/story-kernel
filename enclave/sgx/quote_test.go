@@ -262,4 +262,3 @@ func TestSGX_GetSelfCodeCommitment_ReturnsDefensiveCopy(t *testing.T) {
 	require.Equal(t, originalCC, cc2,
 		"second call must return the original cached MRENCLAVE")
 }
-

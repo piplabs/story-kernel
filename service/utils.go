@@ -14,6 +14,14 @@ const (
 	uint32Size          = 4
 	uint64Size          = 8
 	blockHashSize       = 32
+	// dkgPubKey and enclaveCommKey are the trailing dynamic fields of the packed
+	// preimage. Their lengths must be pinned so the concatenation stays injective
+	// (adjacent variable-length fields are otherwise ambiguous). dkgPubKey is the
+	// ed25519 public key (32 bytes); enclaveCommKey is the secp256k1 public key
+	// with the uncompressed-form prefix stripped (64 bytes). These match the
+	// require()s in DKG.sol::register.
+	dkgPubKeySize      = 32
+	enclaveCommKeySize = 64
 )
 
 // calculateReportData computes the TEE attestation report data for DKG registration.
@@ -38,8 +46,16 @@ func calculateReportData(validatorAddr string, round uint32, startBlockHeight ui
 		return nil, fmt.Errorf("startBlockHash must be %d bytes, got %d", blockHashSize, len(startBlockHash))
 	}
 
-	// Pre-allocate buffer for: validatorAddr(20) + round(4) + startBlockHeight(8) + startBlockHash(32) + variable keys
-	encoded := make([]byte, 0, ethereumAddressSize+uint32Size+uint64Size+blockHashSize+len(enclaveCommKey)+len(dkgPubKey))
+	if len(dkgPubKey) != dkgPubKeySize {
+		return nil, fmt.Errorf("dkgPubKey must be %d bytes, got %d", dkgPubKeySize, len(dkgPubKey))
+	}
+
+	if len(enclaveCommKey) != enclaveCommKeySize {
+		return nil, fmt.Errorf("enclaveCommKey must be %d bytes, got %d", enclaveCommKeySize, len(enclaveCommKey))
+	}
+
+	// Pre-allocate buffer for: validatorAddr(20) + round(4) + startBlockHeight(8) + startBlockHash(32) + dkgPubKey(32) + enclaveCommKey(64)
+	encoded := make([]byte, 0, ethereumAddressSize+uint32Size+uint64Size+blockHashSize+dkgPubKeySize+enclaveCommKeySize)
 	encoded = append(encoded, addrBytes...)
 	encoded = append(encoded, uint32ToBytes(round)...)
 	encoded = append(encoded, int64ToBytes(int64(startBlockHeight))...)

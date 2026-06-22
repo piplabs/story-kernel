@@ -90,7 +90,8 @@ func runServer(cfg *config.Config, svr *grpc.Server, errCh chan error) {
 }
 
 func initializeQueryClient(cfg *config.Config) (story.QueryClient, []byte, error) {
-	// Create SGX-protected database for light client
+	// Create TEE-sealed database for light client (SGX EGETKEY-derived
+	// or TDX vTPM PolicyOR sealing depending on the active backend).
 	lightClientDir := cfg.GetLightClientDir()
 	db, err := enclave.NewSealedLevelDB("light_client", lightClientDir)
 	if err != nil {
@@ -305,8 +306,9 @@ func loadServerTLSCredentials(grpcCfg config.GRPCConfig) (credentials.TransportC
 func registerAllServices(svr *grpc.Server, cfg *config.Config, queryClient story.QueryClient, sessionNonce []byte) {
 	suite := edwards25519.NewBlakeSHA256Ed25519()
 
-	// Wrap the default SGX sealer with session nonce binding so that all sealed
-	// DKG files are tied to the current light client DB instance.
+	// Wrap the default TEE sealer with session nonce binding so that all sealed
+	// DKG files are tied to the current light client DB instance. Underlying
+	// sealer is backend-specific (SGX EGETKEY or TDX vTPM PolicyOR).
 	nonceSealer, err := store.NewNonceBindingSealer(store.NewEnclaveSealer(), sessionNonce)
 	if err != nil {
 		log.Fatalf("Failed to create nonce-binding sealer: %v", err)
