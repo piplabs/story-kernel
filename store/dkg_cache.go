@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"sync"
 
+	log "github.com/sirupsen/logrus"
+
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
 
 	"go.dedis.ch/kyber/v4"
@@ -69,7 +71,10 @@ func (c *RoundContextCache) evictIfFull() {
 }
 
 type DKGCache struct {
-	mu      sync.RWMutex
+	mu sync.RWMutex
+	// Name labels this cache instance in logs (e.g. "init-dkg" / "resharing-next");
+	// DEBUG aid so eviction/miss lines say WHICH cache and WHICH round dropped out.
+	Name    string
 	cache   map[string]*dkg.DistKeyGenerator
 	order   []string // insertion order for eviction
 	maxSize int
@@ -82,11 +87,34 @@ func NewDKGCache() *DKGCache {
 	}
 }
 
+// NewNamedDKGCache is NewDKGCache with a log label (DEBUG aid).
+func NewNamedDKGCache(name string) *DKGCache {
+	c := NewDKGCache()
+	c.Name = name
+
+	return c
+}
+
 func (c *DKGCache) Get(round uint32) (*dkg.DistKeyGenerator, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	distKeyGen, ok := c.cache[strconv.FormatUint(uint64(round), 10)]
+
+	// DEBUG (re-addition cascade): a MISS forces a rebuildResharingNextDKG +
+	// replayMessages of this round, which fails under committee divergence. The
+	// `cached_rounds` snapshot shows whether the round was evicted by the 10-entry
+	// FIFO. MISS at Info (rare, decisive), hit at Debug (high-frequency).
+	if !ok {
+		log.WithFields(log.Fields{
+			"cache":         c.Name,
+			"round":         round,
+			"cached_rounds": append([]string(nil), c.order...),
+			"max_size":      c.maxSize,
+		}).Info("DKGCache MISS (round not in memory; will rebuild+replay)")
+	} else {
+		log.WithFields(log.Fields{"cache": c.Name, "round": round}).Debug("DKGCache hit")
+	}
 
 	return distKeyGen, ok
 }
@@ -110,6 +138,16 @@ func (c *DKGCache) evictIfFull() {
 		oldest := c.order[0]
 		c.order = c.order[1:]
 		delete(c.cache, oldest)
+
+		// DEBUG (re-addition cascade): this is the 10-entry FIFO dropping a round.
+		// When `evicted_round` is the last active round (e.g. 32), the next Get for
+		// it MISSES and the round can no longer be rebuilt cleanly -> cascade.
+		log.WithFields(log.Fields{
+			"cache":         c.Name,
+			"evicted_round": oldest,
+			"max_size":      c.maxSize,
+			"remaining":     append([]string(nil), c.order...),
+		}).Info("DKGCache EVICT (oldest entry dropped at capacity)")
 	}
 }
 

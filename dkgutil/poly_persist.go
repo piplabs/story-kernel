@@ -194,6 +194,30 @@ func getDealerViaReflect(dkgInst *dkg.DistKeyGenerator) (*vss.Dealer, error) {
 	return dealer, nil
 }
 
+// SelfDealerPubKey returns this node's long-term dealer public key from a built
+// DistKeyGenerator. DEBUG aid for the re-addition cascade: it lets the
+// "generated deals" log bind dealer_index -> the dealer's pubkey, which equals
+// this node's prev-round registration dkg_pubkey — so logs can resolve
+// dealer_index to a concrete validator (and thus expose markDealersDealt's
+// dealer-index vs registration-index misattribution) without guessing.
+// Returns (nil, nil) for a receiver-only handler (no dealer).
+func SelfDealerPubKey(dkgInst *dkg.DistKeyGenerator) (kyber.Point, error) {
+	dealer, err := getDealerViaReflect(dkgInst)
+	if err != nil {
+		return nil, err
+	}
+	if dealer == nil {
+		return nil, nil
+	}
+
+	pub, _, _, err := getDealerPublicInfo(dealer)
+	if err != nil {
+		return nil, err
+	}
+
+	return pub, nil
+}
+
 // getDealerPublicInfo extracts the public key, verifiers list, and threshold
 // from a vss.Dealer using reflection on its unexported fields.
 func getDealerPublicInfo(dealer *vss.Dealer) (kyber.Point, []kyber.Point, int, error) {

@@ -7,6 +7,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/piplabs/story-kernel/dkgutil"
 	"github.com/piplabs/story-kernel/enclave"
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
 
@@ -125,11 +126,26 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 		dealerIndex = d.Index
 	}
 
+	// DEBUG (re-addition cascade): bind dealer_index to this node's dealer pubkey.
+	// The pubkey equals this node's prev-round registration dkg_pubkey, so logs can
+	// resolve dealer_index -> a concrete validator and expose markDealersDealt's
+	// dealer-index vs registration-index misattribution. Best-effort; empty on a
+	// receiver-only handler or reflect failure.
+	selfDealerPubHex := ""
+	if pub, perr := dkgutil.SelfDealerPubKey(distKeyGen); perr != nil {
+		log.Warnf("failed to get self dealer pubkey for logging: %v", perr)
+	} else if pub != nil {
+		if bz, merr := pub.MarshalBinary(); merr == nil {
+			selfDealerPubHex = hex.EncodeToString(bz)
+		}
+	}
+
 	log.WithFields(log.Fields{
 		"code_commitment": codeCommitmentHex,
 		"round":           req.GetRound(),
 		"is_resharing":    req.GetIsResharing(),
 		"dealer_index":    dealerIndex,
+		"self_dealer_pub": selfDealerPubHex,
 		"num_deals":       len(deals),
 		"recipient_index": recipients,
 		"num_sorted_pubs": len(rc.SortedPubKeys),
