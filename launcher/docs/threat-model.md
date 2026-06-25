@@ -44,7 +44,16 @@ a threat listed here, it should be removed.
 - No SSH daemon, no serial console after early boot, all getty units masked.
 - `/dev/mem`, `/dev/kmem`, `/dev/port` unavailable.
 - The `story-kernel` user has `nologin` and no writable paths outside `/var/lib/story-kernel`.
-- Memory hardening flags in the kernel cmdline (`init_on_alloc`, `slab_nomerge`, `lockdown=confidentiality`).
+
+> **Note on `lockdown`/module-signing:** the custom kernel is built keyless
+> (`CONFIG_MODULE_SIG=n`, `SECURITY_LOCKDOWN_LSM` disabled) for reproducibility
+> without a private key (see `gcp-tdx-deployment.md` §1 and `../kernel/`). This is
+> not load-bearing for (B): the gap between operator-root and the sealed key is
+> closed by **no root entry path** (no sshd/getty, root locked) + dm-verity + the
+> PCR-bound seal — not by lockdown or signed modules (which only restrict an
+> *already-root* process that cannot be reached here). Aggressive memory-hardening
+> cmdline flags (`init_on_alloc`, `slab_nomerge`, …) are staged but kept off until
+> each is bisected against GCP TDX boot (`gcp-tdx-deployment.md` §2).
 
 **Tested by:** `launcher/tests/hardening_test.sh` (on a booted image).
 
@@ -53,8 +62,8 @@ a threat listed here, it should be removed.
 **Attack:** Threshold (t) of n validator operators each extract their plaintext DKG share, share off-chain (Discord/Telegram), compute partial decryptions for any CDR ciphertext, reconstruct plaintext. Undetectable on chain — no slashing possible.
 
 **Defenses:**
-- Key share is *sealed* against `PolicyPCR(PCR 7, 11, 12)`. PCR 12 is extended at boot with `SHA-256(story-kernel ELF)`. Only the exact ELF that produced the sealing can unseal it.
-- The unsealing happens inside the TD's in-TD `swtpm`, not on the host vTPM. The operator cannot capture a PCR snapshot and replay it elsewhere.
+- Key share is *sealed* against `PolicyPCR(PCR 7, 11, 12)` (PCR 7 = Secure Boot policy, PCR 11 = UKI/dm-verity rootfs, PCR 12 = `SHA-256(story-kernel ELF)`, self-extended at boot). Only the exact boot + ELF that produced the sealing can unseal it; no field of the (operator-supplied) node config enters the seal policy.
+- On GCP confidential VMs the seal uses the CVM's measured vTPM (`/dev/tpmrm0`); the in-TD `swtpm` path is neutralized on GCP because the CVM always exposes a built-in `tpm_tis` vTPM at `/dev/tpm0` (see `gcp-tdx-deployment.md` §3.1). A wrong boot/VM context fails the unseal policy — a sealed blob cannot be replayed on another VM.
 - (B) defenses also apply — without root access inside the running TD, the operator cannot scrape the unsealed share from process memory.
 
 **Why this is the most important defense:** (B') is the canonical APT against Story CDR. Every other security property only matters if (B') is blocked. **The entire launcher infrastructure exists primarily to make (B') impossible.**
@@ -66,11 +75,14 @@ a threat listed here, it should be removed.
 **Attack:** Attacker spins up a chain that looks superficially like Story (same genesis, similar validators) but with fake authorizations naming `pk_attacker` as a reader. If the validator's light client accepts this state, the validator generates decryption material for the attacker.
 
 **Defenses:**
-- Light client trust root (canonical chain ID + initial validator set hash) is shipped *inside* the rootfs and protected by `dm-verity`. An operator cannot swap it out post-boot.
-- The verified query client in story-kernel validates every chain query against the sealed trust root.
+- The light-client config (chain ID, RPC/witness endpoints, trusted block) is **operator-supplied via instance metadata**, not baked into the rootfs. This is deliberate (it keeps the commitments stable across chains; see `gcp-tdx-deployment.md` §4) and does **not** enable this attack, because the defenses below do not rely on the config being immutable.
+- The verified query client in story-kernel validates every chain query (Merkle proofs against the followed header) and persists trusted light-client state in the **sealed** DB; a conflicting header from a fork is detected. `witness_addrs` is required to be ≥ 2 so a single malicious primary is caught.
+- The TDX quote's `report_data` binds the followed chain's `startBlockHeight`/`startBlockHash` (+ round, validator, keys). A quote produced against a forged chain is **re-checked by the consensus client against real-chain state** and rejected — so an operator pointing the node at a fork cannot register or finalize on the real chain; at worst they DoS their own node.
 - `code_commitment = keccak256(RTMR3)` binds the on-chain whitelist to the exact light-client implementation. A modified verified-query function produces a different RTMR3 and is rejected by `TDXValidationHook.approvedBinary[]`.
 
-**Tested by:** Off-chain audit of `enclave/tdx/.../VerifiedQueryClient.go`; covered separately in STOR-18 finding.
+**Residual (config governance, not a TEE break):** because the config is mutable metadata, re-pointing a whitelisted validator leaves no on-chain trace (vs a baked config, which required a rebuild → new `platform_commitment` → visible re-whitelist). Mitigate operationally: restrict `compute.instances.setMetadata` IAM and log the config hash. It cannot extract the sealed key or forge real-chain registration.
+
+**Tested by:** Off-chain audit of the verified query client; end-to-end on devnet (forged config cannot register on the real chain — `report_data` start-block mismatch).
 
 ### (D) Sybil — fake validator joins committee
 

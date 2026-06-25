@@ -16,10 +16,12 @@ Before=story-kernel-rtmr3-extend.service story-kernel-measure-binary.service sto
 # modules-load.d / initrd) is what creates /dev/vtpm-proxy, which the
 # AssertPathExists below now hard-requires.
 After=systemd-tmpfiles-setup.service systemd-modules-load.service
-AssertPathExists=/dev/vtpm-proxy
+AssertPathExists=/dev/vtpmx
 RequiresMountsFor=/run/story-kernel-swtpm
 
 [Service]
+StandardOutput=journal+console
+StandardError=journal+console
 Type=notify
 NotifyAccess=all
 RuntimeDirectory=story-kernel-swtpm
@@ -33,7 +35,6 @@ ExecStart=/usr/bin/swtpm chardev \
         --tpm2 \
         --tpmstate dir=/run/story-kernel-swtpm \
         --ctrl type=unixio,path=/run/story-kernel-swtpm/ctrl \
-        --server type=unixio,path=/run/story-kernel-swtpm/server \
         --flags not-need-init,startup-clear \
         --vtpm-proxy
 Restart=no
@@ -61,8 +62,8 @@ RestrictRealtime=yes
 RestrictSUIDSGID=yes
 MemoryDenyWriteExecute=yes
 LockPersonality=yes
-CapabilityBoundingSet=
-AmbientCapabilities=
+CapabilityBoundingSet=CAP_SYS_ADMIN
+AmbientCapabilities=CAP_SYS_ADMIN
 
 [Install]
-WantedBy=basic.target
+WantedBy=

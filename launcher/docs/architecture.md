@@ -60,14 +60,20 @@ covers structure.
 2. Bootloader              →  extends RTMR1 (kernel + cmdline)
 3. Kernel                  →  loads dm-verity, mounts verified rootfs
 4. systemd starts
-5. swtpm service           →  in-TD vTPM up (PCRs zeroed)
+5. swtpm service           →  in-TD vTPM (NON-GCP only; neutralized on GCP,
+                              which exposes a built-in CVM vTPM at /dev/tpm0)
 6. measure-binary service  →  PCR 12 ← SHA-256(story-kernel ELF)
 7. rtmr3-extend service    →  RTMR3 ← SHA-384(story-kernel ELF)
-8. story-kernel service    →  attests, registers, joins committee
+8. story-kernel service    →  ExecStartPre: fetch light-client config from
+                              instance metadata into tmpfs (§4 gcp-tdx-deployment)
+                           →  start: attest, register, join committee
 ```
 
 Steps 5–7 are enforced by systemd `Requires=`/`Before=` ordering.
-Step 8 cannot start until step 7 has completed successfully (fail-closed).
+Step 8 cannot start until step 7 has completed successfully (fail-closed). The
+config fetched in step 8 selects which chain to follow; it is operator-supplied
+and is **not** measured into any RTMR/PCR (it does not affect the commitments or
+the seal policy — see `threat-model.md` (C)).
 
 ## Component responsibilities
 

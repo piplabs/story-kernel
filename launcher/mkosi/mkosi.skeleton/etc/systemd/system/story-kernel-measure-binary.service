@@ -9,13 +9,16 @@
 [Unit]
 Description=Extend PCR 12 with story-kernel ELF measurement
 DefaultDependencies=no
-After=story-kernel-swtpm.service
 Before=story-kernel-rtmr3-extend.service story-kernel.service
-Requires=story-kernel-swtpm.service
 AssertPathExists=/usr/local/bin/story-kernel
-AssertPathExists=/dev/tpmrm0
 
 [Service]
+User=story-kernel
+Group=story-kernel
+PrivateDevices=no
+DeviceAllow=char-tpm rw
+StandardOutput=journal+console
+StandardError=journal+console
 Type=oneshot
 RemainAfterExit=yes
 # No TPM2TOOLS_TCTI: tpm2-tools auto-detects /dev/tpmrm0, the same kernel

@@ -19,3 +19,5 @@ single canonical statement of *what we protect against and why*, every
 sub-component drifts (image hardening, attestation choice,
 platform_commitment scope, etc.). `threat-model.md` is the source of
 truth that every other component justifies itself against.
+
+- [gcp-tdx-deployment.md](gcp-tdx-deployment.md) — reproducible kernel, GCP TDX boot fixes, measured-boot chain, in-TD swtpm vs GCP vTPM decision, remaining DKG work

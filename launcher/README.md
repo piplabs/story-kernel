@@ -7,17 +7,26 @@ verify, and operate a production-grade TDX node lives under this directory.
 ## What it provides
 
 - **Reproducible image build** via `mkosi` — same source produces a
-  byte-identical rootfs across machines and time
-- **In-TD vTPM (`swtpm`)** — sealing primitives live inside the TD's
-  encrypted memory rather than on the untrusted host
-- **Binary-bound sealing** — `PolicyPCR` with PCR 12 ties sealed key
-  shares to the exact story-kernel ELF that produced them
+  byte-identical rootfs (and deterministic `code_commitment`) across
+  machines and time
+- **Keyless reproducible kernel** — the custom TDX kernel is built with
+  `CONFIG_MODULE_SIG=n` (`kernel/`), so anyone can rebuild it byte-identically
+  with **no private signing key** and independently verify `platform_commitment`
+- **Boot-bound sealing** — `PolicyPCR(PCR 7, 11, 12)` ties sealed key
+  shares to the exact Secure-Boot policy, dm-verity rootfs, and
+  story-kernel ELF that produced them. On GCP confidential VMs the seal
+  uses the CVM's measured vTPM (`/dev/tpmrm0`); an in-TD `swtpm` path is
+  kept for non-GCP targets (see `docs/gcp-tdx-deployment.md` §3)
 - **`dm-verity` rootfs** — block-level integrity for the booted image;
   any tampering after boot crashes the kernel
-- **OS hardening** — no SSH, ptrace disabled, `/dev/mem` unavailable,
-  immutable initrd, no shell after handoff
+- **OS hardening** — no SSH, root locked, all getty masked, ptrace
+  disabled, `/dev/mem` unavailable, no shell after handoff
 - **RTMR3 self-extend** — story-kernel binary identity is baked into
   the TDX attestation chain before any DKG work begins
+- **External config injection** — the light-client config (which chain to
+  follow) is fetched at boot from cloud instance metadata into tmpfs, not
+  baked into the rootfs, so `code_commitment`/`platform_commitment` stay
+  stable across chains and resets (see `docs/gcp-tdx-deployment.md` §4)
 - **Platform & code commitment extraction tooling** — operators and
   auditors derive both on-chain governance values from a real quote
   (`attestation/verify-platform.sh`, `attestation/verify-rtmr3.sh`)
@@ -39,6 +48,7 @@ integrity actually hold in deployed environments.
 
 | Subdirectory | Purpose |
 |---|---|
+| `kernel/` | Keyless reproducible custom TDX kernel: pinned `.config` + `build-kernel.sh` |
 | `mkosi/` | Reproducible image build configuration |
 | `initrd/` | Custom initrd: in-TD swtpm setup + PCR 12 measurement |
 | `boot/` | Boot artifacts: kernel cmdline, dm-verity setup |

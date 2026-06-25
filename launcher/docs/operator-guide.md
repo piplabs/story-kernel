@@ -42,18 +42,41 @@ every artifact byte-for-byte:
 > (bare-metal / IBM / etc.) are planned but not yet validated for the
 > launcher image — use GCP confidential VMs (Intel TDX) for now.
 
-On GCP confidential compute with TDX:
+On GCP confidential compute with TDX. The node's light-client config is
+**injected via instance metadata** (`story-kernel-config`) — it is *not* baked
+into the image, which keeps `code_commitment` and `platform_commitment` stable
+across chains and resets (see `gcp-tdx-deployment.md` §4):
 
 ```sh
+# config.toml: which chain the node follows (NO keys — those are sealed at runtime)
+cat > config.toml <<'TOML'
+log-level = "info"
+[grpc]
+listen_addr = ":50051"
+[light_client]
+chain_id      = "<chain-id>"
+rpc_addr      = "http://<chain-rpc>:26657"
+primary_addr  = "http://<chain-rpc>:26657"
+witness_addrs = ["http://<witness-1>:26657", "http://<witness-2>:26657"]  # >= 2
+trusted_height = <height>
+trusted_hash   = "<hash>"
+TOML
+
 gcloud compute instances create story-kernel-validator-N \
     --machine-type=c3-standard-4 \
     --confidential-compute-type=TDX \
+    --maintenance-policy=TERMINATE \
+    --no-shielded-secure-boot \
     --image-project=<your-image-project> \
     --image=<imported-story-kernel-image> \
-    --metadata=story-kernel-data-dir=/var/lib/story-kernel \
-    --create-disk=name=story-kernel-data,size=100GB \
+    --metadata-from-file=story-kernel-config=config.toml \
     --zone=<zone>
 ```
+
+`story-kernel.service` fetches `story-kernel-config` from the metadata server at
+boot into tmpfs (`/run/story-kernel/home/config`). To re-point an existing
+validator at a different chain, update the metadata and recreate the VM — no
+image rebuild and no re-whitelist (the commitments are unchanged).
 
 ## Step 4: verify on first boot
 

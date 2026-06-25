@@ -1,3 +1,8 @@
+console=ttyS0,115200
+earlyprintk=ttyS0,115200
+loglevel=7
+ignore_loglevel
+random.trust_cpu=on
 # launcher/boot/kernel-cmdline — canonical kernel command line.
 #
 # This file documents the exact cmdline string that ends up measured
@@ -13,33 +18,14 @@
 # string into RTMR1; reordering produces a different measurement.
 
 # === Behavior ===
-quiet
-selinux=0
-audit=0
-console=null
-loglevel=3
-systemd.show_status=false
-rd.systemd.show_status=false
-rd.udev.log_priority=3
 
 # === Randomness ===
-random.trust_cpu=on
 
 # === Failure mode ===
-oops=panic
-panic=10
 
 # === Memory hardening ===
-slab_nomerge
-page_alloc.shuffle=1
-init_on_alloc=1
-init_on_free=1
-randomize_kstack_offset=on
 
 # === Attack-surface reduction ===
-vsyscall=none
-debugfs=off
-lockdown=confidentiality
 
 # === Rootfs (filled in by build pipeline; see boot/dm-verity-build.sh) ===
 # root=PARTUUID=...
