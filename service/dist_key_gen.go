@@ -185,6 +185,15 @@ func (s *DKGServer) GetResharingPrevDKG(
 	fromRound := latest.GetRound()
 
 	if dkgInst, ok := s.ResharingPrevCache.Get(fromRound, toRound); ok {
+		// DEBUG (re-addition cascade): a cache hit means this caller reuses a
+		// prev-DKG instance built earlier this round by another handler — so the
+		// branch decision (and committee size) was fixed by whoever built first.
+		log.WithFields(log.Fields{
+			"code_commitment": codeCommitmentHex,
+			"from_round":      fromRound,
+			"to_round":        toRound,
+		}).Debug("GetResharingPrevDKG: ResharingPrevCache hit (reusing earlier-built instance)")
+
 		return dkgInst, nil
 	}
 
@@ -193,6 +202,15 @@ func (s *DKGServer) GetResharingPrevDKG(
 	defer mu.Unlock()
 
 	if dkgInst, ok := s.ResharingPrevCache.Get(fromRound, toRound); ok {
+		// DEBUG (re-addition cascade): a cache hit means this caller reuses a
+		// prev-DKG instance built earlier this round by another handler — so the
+		// branch decision (and committee size) was fixed by whoever built first.
+		log.WithFields(log.Fields{
+			"code_commitment": codeCommitmentHex,
+			"from_round":      fromRound,
+			"to_round":        toRound,
+		}).Debug("GetResharingPrevDKG: ResharingPrevCache hit (reusing earlier-built instance)")
+
 		return dkgInst, nil
 	}
 
@@ -206,6 +224,27 @@ func (s *DKGServer) GetResharingPrevDKG(
 	if err != nil {
 		return nil, err
 	}
+
+	// DEBUG (re-addition cascade): this is the decisive prev-committee branch.
+	// store-rebuild (existsPrev && existsNext) uses the node's LOCAL sealed
+	// committee (NOT filtered -> can still include an on-chain INVALIDATED
+	// member); chain-fetch (the else) uses the filtered authoritative committee.
+	// existsNext flips to true once any round-`toRound` GetResharing*DKG else
+	// branch has persisted state(toRound), so the branch a node hits depends on
+	// the order its round-`toRound` handlers ran. Logging the two booleans makes
+	// "why did this node store-rebuild vs chain-fetch" directly observable.
+	branchTrace := "chain-fetch (filtered, INVALIDATED dropped)"
+	if existsPrev && existsNext {
+		branchTrace = "store-rebuild (sealed PubKeys, NOT filtered)"
+	}
+	log.WithFields(log.Fields{
+		"code_commitment": codeCommitmentHex,
+		"from_round":      fromRound,
+		"to_round":        toRound,
+		"exists_prev":     existsPrev,
+		"exists_next":     existsNext,
+		"branch":          branchTrace,
+	}).Info("GetResharingPrevDKG: prev-committee branch decision")
 
 	var dkgInst *dkg.DistKeyGenerator
 
@@ -492,6 +531,24 @@ func (s *DKGServer) GetResharingNextDKG(
 	if err != nil {
 		return nil, err
 	}
+
+	// DEBUG (re-addition cascade): mirror of GetResharingPrevDKG's branch trace.
+	// rebuild uses local sealed state; the else re-fetches from chain and (in its
+	// body) persists state(round) — which is what later flips a sibling
+	// GetResharingPrevDKG's existsNext to true.
+	nextExistsNext := stNext.Threshold != 0 && len(stNext.PubKeys) != 0
+	branchTrace := "chain-fetch (filtered) + persist state(round)"
+	if nextExistsNext && existsPrev {
+		branchTrace = "store-rebuild (rebuildResharingNextDKG)"
+	}
+	log.WithFields(log.Fields{
+		"code_commitment": codeCommitmentHex,
+		"round":           round,
+		"from_round":      stNext.FromRound,
+		"exists_prev":     existsPrev,
+		"next_state_set":  nextExistsNext,
+		"branch":          branchTrace,
+	}).Info("GetResharingNextDKG: next-committee branch decision")
 
 	var dkgInst *dkg.DistKeyGenerator
 
