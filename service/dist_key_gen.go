@@ -690,7 +690,9 @@ func (s *DKGServer) fetchLatestPubKeysAndCoeffs(
 	codeCommitmentHex string,
 	latest *pb.DKGNetwork,
 ) ([]kyber.Point, []kyber.Point, error) {
-	prevRegs, err := s.QueryClient.GetAllParticipantDKGRegistrations(
+	// ALL registrations (any status) to preserve the previous committee's kyber indices when a
+	// member was invalidated. See GetAllRegisteredDKGRegistrations.
+	prevRegs, err := s.QueryClient.GetAllRegisteredDKGRegistrations(
 		context.Background(),
 		codeCommitmentHex,
 		latest.GetRound(),

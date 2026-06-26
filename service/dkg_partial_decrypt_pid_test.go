@@ -25,6 +25,10 @@ func (m *mockQueryClientForPID) GetAllParticipantDKGRegistrations(_ context.Cont
 	return nil, nil
 }
 
+func (m *mockQueryClientForPID) GetAllRegisteredDKGRegistrations(_ context.Context, _ string, _ uint32) ([]*pb.DKGRegistration, error) {
+	return nil, nil
+}
+
 func (m *mockQueryClientForPID) GetLatestActiveDKGNetwork(_ context.Context) (*pb.DKGNetwork, error) {
 	return m.latestNetwork, m.latestErr
 }
