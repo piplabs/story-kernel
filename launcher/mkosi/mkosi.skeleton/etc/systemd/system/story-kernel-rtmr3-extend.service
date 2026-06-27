@@ -19,6 +19,8 @@ AssertPathExists=/usr/local/bin/story-kernel
 AssertPathExists=/sys/devices/virtual/misc/tdx_guest/measurements/rtmr3:sha384
 
 [Service]
+StandardOutput=journal+console
+StandardError=journal+console
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/local/lib/story-kernel/extend-rtmr3.sh /usr/local/bin/story-kernel

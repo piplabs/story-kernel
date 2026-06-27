@@ -54,3 +54,30 @@ jobs:
 
       - name: Verify reproducible build (build twice, diff every artifact)
         run: ./launcher/build/verify-reproducible.sh
+
+  # The custom TDX kernel must be reproducible AND keyless (CONFIG_MODULE_SIG=n),
+  # so anyone can rebuild it byte-identically with no private signing key and
+  # independently rederive platform_commitment. Heavy (~full kernel build) — same
+  # release gate; move to a self-hosted runner if the hosted one is too slow.
+  kernel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Install kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libelf-dev \
+            libssl-dev dpkg-dev xz-utils kmod cpio
+
+      - name: Build kernel twice (keyless assertion + byte-identical determinism)
+        run: |
+          set -e
+          KERNEL_WORKDIR=/tmp/kbuild-a ./launcher/kernel/build-kernel.sh /tmp/kernel-a.deb
+          KERNEL_WORKDIR=/tmp/kbuild-b ./launcher/kernel/build-kernel.sh /tmp/kernel-b.deb
+          a=$(sha256sum /tmp/kernel-a.deb | awk '{print $1}')
+          b=$(sha256sum /tmp/kernel-b.deb | awk '{print $1}')
+          echo "build A: $a"; echo "build B: $b"
+          [ "$a" = "$b" ] || { echo "kernel build is NOT reproducible ($a != $b)"; exit 1; }
+          echo "kernel is reproducible + keyless (MODULE_SIG=n asserted in build-kernel.sh)"

@@ -29,11 +29,9 @@ covers structure.
                 │  ┌──▼──────────┐    ┌─────────────────────┐    │
                 │  │  initrd     │ →  │  rootfs (verity-ro) │    │
                 │  └─────────────┘    │  ┌───────────────┐  │    │
-                │                     │  │ swtpm (in-TD) │  │    │
-                │                     │  └──────┬────────┘  │    │
-                │                     │         │ PCR 12    │    │
-                │                     │  ┌──────▼────────┐  │    │
                 │                     │  │ measure-bin   │  │    │
+                │                     │  │ (CVM vTPM,    │  │    │
+                │                     │  │  PCR 12)      │  │    │
                 │                     │  └──────┬────────┘  │    │
                 │                     │         │ RTMR3     │    │
                 │                     │  ┌──────▼────────┐  │    │
@@ -60,14 +58,19 @@ covers structure.
 2. Bootloader              →  extends RTMR1 (kernel + cmdline)
 3. Kernel                  →  loads dm-verity, mounts verified rootfs
 4. systemd starts
-5. swtpm service           →  in-TD vTPM up (PCRs zeroed)
-6. measure-binary service  →  PCR 12 ← SHA-256(story-kernel ELF)
-7. rtmr3-extend service    →  RTMR3 ← SHA-384(story-kernel ELF)
-8. story-kernel service    →  attests, registers, joins committee
+5. measure-binary service  →  PCR 12 ← SHA-256(story-kernel ELF) on the GCP CVM vTPM
+6. rtmr3-extend service    →  RTMR3 ← SHA-384(story-kernel ELF)
+7. story-kernel service    →  ExecStartPre: fetch light-client config from
+                              instance metadata into tmpfs (operator-guide.md - Node config)
+                           →  start: attest, register, join committee
 ```
 
-Steps 5–7 are enforced by systemd `Requires=`/`Before=` ordering.
-Step 8 cannot start until step 7 has completed successfully (fail-closed).
+Steps 5–6 are enforced by systemd `Requires=`/`Before=` ordering. Step 7 cannot
+start until step 6 has completed successfully (fail-closed). Sealing and the PCR
+12 measurement use the GCP confidential-VM vTPM (`/dev/tpmrm0`). The config
+fetched in step 7 selects which chain to follow; it is operator-supplied and is
+**not** measured into any RTMR/PCR (it does not affect the commitments or the seal
+policy — see `threat-model.md` (C)).
 
 ## Component responsibilities
 

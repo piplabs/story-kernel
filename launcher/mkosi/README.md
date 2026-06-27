@@ -11,10 +11,12 @@ mkosi/
 ├── mkosi.conf            # Top-level mkosi configuration
 ├── mkosi.skeleton/       # Files baked verbatim into the image
 │   ├── etc/
-│   │   ├── systemd/system/          # units: swtpm, measure-binary, rtmr3-extend, story-kernel
+│   │   ├── systemd/system/          # units: measure-binary, rtmr3-extend, story-kernel
+│   │   ├── systemd/network/         # 20-wired.network (GVNIC DHCP)
 │   │   ├── tmpfiles.d/              # runtime dirs (the only rw paths)
 │   │   └── udev/rules.d/            # TPM device access for the story-kernel user
 │   └── usr/local/lib/story-kernel/  # in-image helpers (measure-binary.sh, extend-rtmr3.sh)
+├── mkosi.packages/       # the custom keyless kernel .deb (see ../kernel/)
 ├── mkosi.extra/          # build/build.sh drops the story-kernel ELF here
 └── mkosi.postinst        # Post-install hardening hook
 ```

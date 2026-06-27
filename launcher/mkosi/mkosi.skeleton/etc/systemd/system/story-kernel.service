@@ -8,8 +8,11 @@ Requires=story-kernel-rtmr3-extend.service
 Wants=network-online.target
 
 [Service]
+StandardOutput=journal+console
+StandardError=journal+console
 Type=simple
-ExecStart=/usr/local/bin/story-kernel
+ExecStartPre=/bin/sh -c 'rm -rf /run/story-kernel/home; if curl -sf -H "Metadata-Flavor: Google" "http://169.254.169.254/computeMetadata/v1/instance/attributes/story-kernel-config" -o /tmp/skcfg && test -s /tmp/skcfg; then mkdir -p /run/story-kernel/home && cp /tmp/skcfg /run/story-kernel/home/config && echo metadata-config; else /usr/local/bin/story-kernel init --home /run/story-kernel/home; fi'
+ExecStart=/usr/local/bin/story-kernel start --home /run/story-kernel/home
 Restart=on-failure
 RestartSec=5s
 # Drop all privileges the binary does not need.  story-kernel speaks gRPC
@@ -21,7 +24,7 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 ProtectKernelModules=yes
-ProtectKernelTunables=yes
+ProtectKernelTunables=no
 ProtectKernelLogs=yes
 ProtectControlGroups=yes
 ProtectClock=yes
@@ -36,8 +39,8 @@ MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources @mount @obsolete
-CapabilityBoundingSet=
-AmbientCapabilities=
+CapabilityBoundingSet=CAP_DAC_OVERRIDE
+AmbientCapabilities=CAP_DAC_OVERRIDE
 ReadWritePaths=/var/lib/story-kernel
 
 [Install]

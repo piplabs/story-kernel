@@ -41,17 +41,17 @@ setup-cbmpc:
 # Produces a binary that fail-closes on every TEE operation. Do NOT use for
 # devnet, mainnet, or any environment that performs DKG.
 build: setup-cbmpc
-	CGO_LDFLAGS_ALLOW=".*" ./scripts/go_with_cpp.sh $(CBMPC_PATH) $(GO) build -mod=readonly $(BUILD_FLAGS) -ldflags="-buildid= $(BUILDINFO_FLAGS) -extldflags=-Wl,-w" -o $(OUT_DIR)/$(BIN_NAME) ./
+	CGO_LDFLAGS_ALLOW=".*" ./scripts/go_with_cpp.sh $(CBMPC_PATH) $(GO) build -mod=readonly $(BUILD_FLAGS) -ldflags="-buildid= $(BUILDINFO_FLAGS)" -o $(OUT_DIR)/$(BIN_NAME) ./
 
 # build-sgx — production SGX/Gramine build with cb-mpc C++ library.
 # mr_enclave-stable across rebuilds.
 build-sgx: setup-cbmpc
-	CGO_LDFLAGS_ALLOW=".*" ./scripts/go_with_cpp.sh $(CBMPC_PATH) $(GO) build -mod=readonly -tags "sgx $(build_tags)" -ldflags="-buildid= $(BUILDINFO_FLAGS) -extldflags=-Wl,-w" -o $(OUT_DIR)/$(BIN_NAME) ./
+	CGO_LDFLAGS_ALLOW=".*" ./scripts/go_with_cpp.sh $(CBMPC_PATH) $(GO) build -mod=readonly -tags "sgx $(build_tags)" -ldflags="-buildid= $(BUILDINFO_FLAGS)" -o $(OUT_DIR)/$(BIN_NAME) ./
 
 # build-tdx — production TDX build with cb-mpc C++ library. CGO/cb-mpc
 # setup is identical to the SGX target.
 build-tdx: setup-cbmpc
-	CGO_LDFLAGS_ALLOW=".*" ./scripts/go_with_cpp.sh $(CBMPC_PATH) $(GO) build -mod=readonly -tags "tdx $(build_tags)" -ldflags="-buildid= $(BUILDINFO_FLAGS) -extldflags=-Wl,-w" -o $(OUT_DIR)/$(BIN_NAME) ./
+	CGO_LDFLAGS_ALLOW=".*" ./scripts/go_with_cpp.sh $(CBMPC_PATH) $(GO) build -mod=readonly -tags "tdx $(build_tags)" -ldflags="-buildid= $(BUILDINFO_FLAGS)" -o $(OUT_DIR)/$(BIN_NAME) ./
 
 # Run standard (non-SGX) binary
 run:

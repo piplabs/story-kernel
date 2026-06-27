@@ -14,15 +14,14 @@ bootloader  (systemd-boot via mkosi)
    │  loads kernel + initrd
    ▼
 kernel
-   │  loads dm_mod, dm_verity, tpm_vtpm_proxy from initrd
+   │  loads dm_mod, dm_verity from initrd
    ▼
 initrd  (dracut)
    │  sets up dm-verity rootfs
    │  switch_root
    ▼
 systemd on the verity-protected rootfs
-   │  story-kernel-swtpm.service          ← in-TD vTPM up
-   │  story-kernel-measure-binary.service ← PCR 12 = SHA256(story-kernel ELF)
+   │  story-kernel-measure-binary.service ← PCR 12 = SHA256(story-kernel ELF) on the GCP CVM vTPM
    │  story-kernel-rtmr3-extend.service   ← RTMR3 = binary identity
    │  story-kernel.service                ← DKG node runs
 ```
