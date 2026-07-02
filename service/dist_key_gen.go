@@ -506,6 +506,20 @@ func (s *DKGServer) GetResharingNextDKG(
 			return nil, err
 		}
 
+		// Persist the prev committee's public state so a new-committee node
+		// (brand-new joiner or upgraded enclave) has a self-contained store;
+		// without it rebuildResharingNextDKG can't load the prev round after a
+		// restart and deadlocks. Mirrors GetResharingPrevDKG's build branch.
+		if err := s.DKGStore.SetPrevDKGState(
+			codeCommitmentHex,
+			latest.GetRound(),
+			latest.GetThreshold(),
+			prevPubs,
+			publicCoeffs,
+		); err != nil {
+			return nil, err
+		}
+
 		if err := s.DKGStore.SetNextDKGState(
 			codeCommitmentHex,
 			latest.GetRound(),
@@ -676,7 +690,9 @@ func (s *DKGServer) fetchLatestPubKeysAndCoeffs(
 	codeCommitmentHex string,
 	latest *pb.DKGNetwork,
 ) ([]kyber.Point, []kyber.Point, error) {
-	prevRegs, err := s.QueryClient.GetAllParticipantDKGRegistrations(
+	// ALL registrations (any status) to preserve the previous committee's kyber indices when a
+	// member was invalidated. See GetAllRegisteredDKGRegistrations.
+	prevRegs, err := s.QueryClient.GetAllRegisteredDKGRegistrations(
 		context.Background(),
 		codeCommitmentHex,
 		latest.GetRound(),

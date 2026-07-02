@@ -77,6 +77,11 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 		}
 	}
 
+	// Enable the timeout so DealCertified tolerates up to n-t absent verifier responses,
+	// restoring the configured threshold's fault tolerance; without it a single absent
+	// verifier fails the whole round. SetTimeout propagates to every verifier's aggregator.
+	distKeyGen.SetTimeout()
+
 	// Generate Distributed Key Share
 	distKeyShare, err := distKeyGen.DistKeyShare()
 	if err != nil {

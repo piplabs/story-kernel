@@ -2588,6 +2588,73 @@ func TestGetAllParticipantDKGRegistrations_NoVerifiedRegistrations(t *testing.T)
 	mockLC.AssertExpectations(t)
 }
 
+// TestGetAllRegisteredDKGRegistrations_IncludesInvalidated verifies that the resharing query
+// keeps an INVALIDATED registration (so its committee slot is preserved), whereas the
+// participant query drops it.
+func TestGetAllRegisteredDKGRegistrations_IncludesInvalidated(t *testing.T) {
+	cdc := MakeCodec()
+	queryHeight := int64(100)
+
+	network := &pb.DKGNetwork{
+		Round:        1,
+		ActiveValSet: []string{"val1"},
+		Total:        1,
+		Threshold:    1,
+	}
+	encodedNetwork, err := cdc.Marshal(network)
+	require.NoError(t, err)
+
+	// A registration that was invalidated after dealing — must still be returned.
+	reg := &pb.DKGRegistration{
+		Round:     1,
+		Index:     1,
+		DkgPubKey: []byte("pk1"),
+		Status:    pb.DKGRegStatus_DKG_REG_STATUS_INVALIDATED,
+	}
+	encodedReg, _ := cdc.Marshal(reg)
+
+	networkKey := GetDKGNetworkKey("test_cc", 1)
+	regKey := GetDKGRegistrationKey("test_cc", 1, "val1")
+
+	networkResult, networkAppHash := makeVerifiedABCIResult(networkKey, encodedNetwork, queryHeight, StoreKey)
+	regResult, regAppHash := makeVerifiedABCIResult(regKey, encodedReg, queryHeight, StoreKey)
+
+	mockRPC := new(MockRPCClient)
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.MatchedBy(func(data cmtbytes.HexBytes) bool {
+		return bytes.Equal(data, cmtbytes.HexBytes(networkKey))
+	}), mock.Anything).Return(networkResult, nil).Once()
+	mockRPC.On("ABCIQueryWithOptions", mock.Anything, mock.Anything, mock.MatchedBy(func(data cmtbytes.HexBytes) bool {
+		return bytes.Equal(data, cmtbytes.HexBytes(regKey))
+	}), mock.Anything).Return(regResult, nil).Once()
+
+	mockLC := new(MockLightClient)
+	networkLB := &cmttypes.LightBlock{SignedHeader: &cmttypes.SignedHeader{Header: &cmttypes.Header{Height: queryHeight + 1, AppHash: cmtbytes.HexBytes(networkAppHash)}}}
+	regLB := &cmttypes.LightBlock{SignedHeader: &cmttypes.SignedHeader{Header: &cmttypes.Header{Height: queryHeight + 1, AppHash: cmtbytes.HexBytes(regAppHash)}}}
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).Return(networkLB, nil).Once()
+	mockLC.On("VerifyLightBlockAtHeight", mock.Anything, queryHeight+1, mock.Anything).Return(regLB, nil).Once()
+
+	client := &VerifiedQueryClient{
+		cfg: &config.Config{
+			LightClient: config.LightClientConfig{
+				MaxBlockWaitRetries: 1,
+				BlockWaitRetryDelay: 1 * time.Millisecond,
+			},
+		},
+		rpcClient:   mockRPC,
+		lightClient: mockLC,
+		mutex:       &sync.Mutex{},
+		cdc:         cdc,
+	}
+	client.cachedLastBlockHeight.Store(queryHeight)
+
+	regs, err := client.GetAllRegisteredDKGRegistrations(t.Context(), "test_cc", 1)
+	require.NoError(t, err, "invalidated registration must be kept to preserve its committee slot")
+	require.Len(t, regs, 1)
+	assert.Equal(t, pb.DKGRegStatus_DKG_REG_STATUS_INVALIDATED, regs[0].GetStatus())
+	mockRPC.AssertExpectations(t)
+	mockLC.AssertExpectations(t)
+}
+
 func TestGetAllParticipantDKGRegistrations_RegistrationQueryFails(t *testing.T) {
 	cdc := MakeCodec()
 	queryHeight := int64(100)
