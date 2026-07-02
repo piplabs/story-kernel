@@ -26,7 +26,8 @@ PROTO_OUT_DIR=./
 
 .PHONY: build build-sgx build-tdx clean proto-gen test test-cover test-noop \
         test-tdx run setup-deps gramine-manifest gramine-sign \
-        gramine-enclave-info all-sgx all-tdx setup-cbmpc lint lint-noop lint-tdx
+        gramine-enclave-info all-sgx all-tdx setup-cbmpc lint lint-noop lint-tdx \
+        build-with-cpp all-gramine
 
 # Clone cb-mpc if not present; the C++ build is handled by go_with_cpp.sh
 setup-cbmpc:
@@ -52,6 +53,12 @@ build-sgx: setup-cbmpc
 # setup is identical to the SGX target.
 build-tdx: setup-cbmpc
 	CGO_LDFLAGS_ALLOW=".*" ./scripts/go_with_cpp.sh $(CBMPC_PATH) $(GO) build -mod=readonly -tags "tdx $(build_tags)" -ldflags="-buildid= $(BUILDINFO_FLAGS)" -o $(OUT_DIR)/$(BIN_NAME) ./
+
+# Back-compat aliases for the pre-#68 runbook target names (scripts/runbook/setup_devnet.sh
+# still calls `build-with-cpp` / `all-gramine`). Temporary shim on this integration branch
+# until setup_devnet.sh is updated to the new `build-sgx` / `all-sgx` names.
+build-with-cpp: build-sgx
+all-gramine: all-sgx
 
 # Run standard (non-SGX) binary
 run:
