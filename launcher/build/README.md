@@ -26,11 +26,9 @@ from source and obtain byte-identical artifacts.
 | File | Description |
 |---|---|
 | `story-kernel` | The Go binary (sha256 in manifest) |
-| `*.raw` | Rootfs image produced by mkosi |
-| `rootfs.verity` | dm-verity hash tree |
-| `root-hash.txt` | dm-verity root hash (goes into kernel cmdline) |
+| `*.raw` | Image produced by mkosi (dm-verity hash tree embedded as a partition) |
 | `code_commitment.txt` | Expected `code_commitment` (keccak256(RTMR3 after one extend)) |
-| `manifest.json` | All of the above + their sha256 hashes |
+| `manifest.json` | All of the above + their sha256 hashes + dm-verity `root_hash` |
 
 ## Auditor workflow
 

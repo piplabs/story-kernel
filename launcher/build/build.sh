@@ -10,11 +10,9 @@
 #
 # Output, all under ./out/:
 #   story-kernel             — the Go binary (sha256 captured)
-#   rootfs.raw               — the image rootfs
-#   rootfs.verity            — dm-verity hash tree for rootfs.raw
-#   root-hash.txt            — dm-verity root hash
+#   *.raw                    — the image (dm-verity hash tree embedded as a partition)
 #   code_commitment.txt    — expected code_commitment value
-#   manifest.json            — every artifact + its sha256 + build inputs
+#   manifest.json            — every artifact + its sha256 + build inputs (incl. dm-verity root_hash)
 #
 # Reproducibility:
 #   - SOURCE_DATE_EPOCH is set from the story-kernel commit timestamp.
@@ -177,16 +175,47 @@ if [ -z "$ROOTFS_IMG" ] || [ ! -r "$ROOTFS_IMG" ]; then
 fi
 echo "build: rootfs = $ROOTFS_IMG"
 
-# === Step 6: dm-verity ===
-sh "$LAUNCHER_DIR/boot/dm-verity-build.sh" \
-    "$ROOTFS_IMG" \
-    "$OUT_DIR/rootfs.verity" \
-    "$OUT_DIR/root-hash.txt"
+# === Step 6: verify the dm-verity roothash is in the MEASURED UKI cmdline ===
+# dm-verity is built by mkosi from the root + root-verity partitions defined in
+# mkosi.repart/. mkosi computes the roothash and injects it as roothash=<hash>
+# into the UKI kernel command line, which the TDX firmware measures into RTMR1
+# and thus binds into platform_commitment. We read that authoritative roothash
+# from the UKI's .cmdline section (the exact bytes that get measured), never a
+# recomputed value.
+#
+# Fail-closed guard: if the UKI cmdline has no roothash=, dm-verity is NOT wired
+# into the boot — the rootfs would mount writable, defeating the integrity model
+# (and the seal's PCR 11 bind). Refuse to emit a manifest in that case.
+ESP_IMG=$(find "$OUT_DIR" -maxdepth 1 -name '*.esp.raw' -print -quit)
+if [ -z "$ESP_IMG" ] || [ ! -r "$ESP_IMG" ]; then
+    echo "build: ERROR — no ESP image in $OUT_DIR; cannot verify the verity roothash." >&2
+    exit 1
+fi
+ESP_MNT=$(mktemp -d)
+UKI_CMDLINE=""
+if sudo mount -o loop,ro "$ESP_IMG" "$ESP_MNT" 2>/dev/null; then
+    UKI=$(sudo find "$ESP_MNT" -iname '*.efi' -print -quit)
+    if [ -n "$UKI" ]; then
+        sudo objcopy -O binary --only-section=.cmdline "$UKI" "$OUT_DIR/.uki-cmdline" 2>/dev/null || true
+    fi
+    sudo umount "$ESP_MNT" 2>/dev/null || true
+fi
+rmdir "$ESP_MNT" 2>/dev/null || true
+if [ -r "$OUT_DIR/.uki-cmdline" ]; then
+    UKI_CMDLINE=$(tr -d '\0' < "$OUT_DIR/.uki-cmdline")
+    rm -f "$OUT_DIR/.uki-cmdline"
+fi
+ROOT_HASH=$(printf '%s' "$UKI_CMDLINE" | grep -oE 'roothash=[0-9a-f]+' | head -1 | cut -d= -f2)
+if [ -z "$ROOT_HASH" ]; then
+    echo "build: ERROR — no roothash= in the measured UKI cmdline; dm-verity is not" >&2
+    echo "build:   wired into the boot (check mkosi.repart/ verity partitions)." >&2
+    echo "build:   Refusing to emit a manifest for a non-integrity-protected image." >&2
+    exit 1
+fi
+echo "build: dm-verity roothash (from measured UKI cmdline) = $ROOT_HASH"
 
 # === Step 7: emit manifest ===
-ROOTFS_SHA=$(sha256sum "$ROOTFS_IMG"           | awk '{print $1}')
-VERITY_SHA=$(sha256sum "$OUT_DIR/rootfs.verity" | awk '{print $1}')
-ROOT_HASH=$(cat "$OUT_DIR/root-hash.txt")
+ROOTFS_SHA=$(sha256sum "$ROOTFS_IMG" | awk '{print $1}')
 
 cat > "$OUT_DIR/manifest.json" <<EOF
 {
@@ -200,7 +229,6 @@ cat > "$OUT_DIR/manifest.json" <<EOF
         "sha256": "$ROOTFS_SHA"
     },
     "verity": {
-        "hashtree_sha256": "$VERITY_SHA",
         "root_hash": "$ROOT_HASH"
     },
     "code_commitment": "$EXPECTED_BIN_COMMIT"

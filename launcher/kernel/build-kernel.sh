@@ -23,11 +23,39 @@ OUT="${1:-$HERE/linux-image-${VER}-storytdx.deb}"
 WORK="${KERNEL_WORKDIR:-/tmp/storytdx-kbuild}"
 SRC="$WORK/linux-$VER"
 
+# Pin the upstream tarball hash so a poisoned mirror or MITM cannot substitute
+# a different "reproducible" kernel (which would still build deterministically,
+# just from attacker-chosen source). Value taken from the GPG-signed
+# https://cdn.kernel.org/pub/linux/kernel/v6.x/sha256sums.asc and verified
+# against the "Kernel.org checksum autosigner <autosigner@kernel.org>" key
+# (fpr B8868C80BA62A1FFFAF5FDA9632D3A06589DA6B1) for linux-6.18.35.tar.xz.
+KERNEL_TARBALL_SHA256="${KERNEL_TARBALL_SHA256:-f78602932219125e211c5f5bfd84edcfd4ec5ce88fc944f8248413f665bef236}"
+
 mkdir -p "$WORK"
+# Always start from a clean source tree so the pinned-hash verification below
+# can never be skipped by a stale or tampered workdir: a reused $SRC (e.g. on a
+# long-lived builder) would otherwise bypass the sha256 check entirely.
+rm -rf "$SRC"
 if [ ! -d "$SRC" ]; then
     echo "build-kernel: fetching linux-$VER"
-    curl -sSL "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$VER.tar.xz" -o "$WORK/linux-$VER.tar.xz"
-    tar -C "$WORK" -xf "$WORK/linux-$VER.tar.xz"
+    TARBALL="$WORK/linux-$VER.tar.xz"
+    curl -sSL "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$VER.tar.xz" -o "$TARBALL"
+    if [ "$KERNEL_TARBALL_SHA256" = "PLACEHOLDER_REPLACE_AT_RELEASE_CUT" ]; then
+        if [ "${ALLOW_UNPINNED_KERNEL:-0}" = "1" ]; then
+            echo "build-kernel: WARNING — kernel tarball hash is unpinned; source is not verified." >&2
+        else
+            echo "build-kernel: ERROR — KERNEL_TARBALL_SHA256 is unpinned." >&2
+            echo "build-kernel:   Pin it to the GPG-verified upstream sha256, or set" >&2
+            echo "build-kernel:   ALLOW_UNPINNED_KERNEL=1 for a non-verified dev build." >&2
+            exit 1
+        fi
+    else
+        echo "${KERNEL_TARBALL_SHA256}  ${TARBALL}" | sha256sum -c - || {
+            echo "build-kernel: ERROR — kernel tarball sha256 mismatch (poisoned mirror?)." >&2
+            exit 1
+        }
+    fi
+    tar -C "$WORK" -xf "$TARBALL"
 fi
 cd "$SRC"
 
@@ -52,12 +80,22 @@ rm -rf debian; make clean >/dev/null 2>&1; rm -f .version
 make -j"$(nproc)" KBUILD_BUILD_VERSION=1 </dev/null
 make bindeb-pkg -j"$(nproc)" KBUILD_BUILD_VERSION=1 </dev/null
 
-DEB=$(ls -t "$WORK"/linux-image-*_amd64.deb | grep -v dbg | head -1)
+# Pick the non-debug linux-image .deb via a glob (no ls|grep).
+DEB=""
+for f in "$WORK"/linux-image-*_amd64.deb; do
+    case "$f" in *dbg*) continue ;; esac
+    [ -f "$f" ] && DEB="$f"
+done
+if [ -z "$DEB" ]; then
+    echo "build-kernel: ABORT — no linux-image .deb produced" >&2
+    exit 1
+fi
 
 # ASSERT the PRODUCED .deb is genuinely keyless + correctly named (do not trust
 # the pre-build .config; the deb-pkg flow is what ends up in the image).
 tmp=$(mktemp -d); dpkg-deb -x "$DEB" "$tmp"
-dc=$(ls "$tmp"/boot/config-* | head -1)
+set -- "$tmp"/boot/config-*
+dc=$1
 grep -q "^CONFIG_MODULE_SIG=y" "$dc" && { echo "build-kernel: ASSERT FAIL — built kernel has MODULE_SIG=y" >&2; exit 2; }
 [ "$(dpkg-deb -f "$DEB" Package)" = "linux-image-${VER}-storytdx" ] || { echo "build-kernel: ASSERT FAIL — package name mismatch" >&2; exit 3; }
 rm -rf "$tmp"

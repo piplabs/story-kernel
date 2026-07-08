@@ -60,7 +60,10 @@ trap cleanup EXIT
 $SUDO rmdir "$REPORT_PATH/req" 2>/dev/null || true
 $SUDO mkdir "$REPORT_PATH/req"
 $SUDO dd if=/dev/zero of="$REPORT_PATH/req/inblob" bs=64 count=1 2>/dev/null
-$SUDO dd if="$REPORT_PATH/req/outblob" of="$TMPQUOTE" bs=1 count=8192 2>/dev/null
+# Read the WHOLE quote (no count= cap): a full PCK-chain quote can exceed any
+# fixed cap, and a short read would silently yield truncated/empty measurement
+# fields. Redirect (not dd of=) works around AppArmor on GCP Ubuntu.
+$SUDO dd if="$REPORT_PATH/req/outblob" bs=64k 2>/dev/null > "$TMPQUOTE"
 
 # Absolute offsets into the V4/V5 quote (header 48 + body) — same as
 # contracts/src/protocol/TDXValidationHook.sol OFFSET_* constants.
@@ -75,11 +78,24 @@ rtmr0=$(xxd -p -s "$RTMR0_OFF" -l "$MEAS_LEN" "$TMPQUOTE" | tr -d '\n')
 rtmr1=$(xxd -p -s "$RTMR1_OFF" -l "$MEAS_LEN" "$TMPQUOTE" | tr -d '\n')
 rtmr2=$(xxd -p -s "$RTMR2_OFF" -l "$MEAS_LEN" "$TMPQUOTE" | tr -d '\n')
 
-platform=$("$PYTHON" -c "
+# Fail closed on a short/empty read: each measurement must be exactly 48 bytes
+# (96 hex chars). Without this, a truncated quote would print a confident but
+# wrong platform_commitment with exit 0.
+for pair in "MRTD:$mrtd" "RTMR0:$rtmr0" "RTMR1:$rtmr1" "RTMR2:$rtmr2"; do
+    name=${pair%%:*}
+    val=${pair#*:}
+    if [ "${#val}" -ne 96 ]; then
+        echo "verify-platform: $name is ${#val} hex chars, expected 96 — quote read too short?" >&2
+        exit 1
+    fi
+done
+
+# Pass the concatenation as argv, not interpolated into the Python source.
+platform=$("$PYTHON" -c '
+import sys
 from eth_utils import keccak
-buf = bytes.fromhex('${mrtd}${rtmr0}${rtmr1}${rtmr2}')
-print(keccak(buf).hex())
-")
+print(keccak(bytes.fromhex(sys.argv[1])).hex())
+' "${mrtd}${rtmr0}${rtmr1}${rtmr2}")
 
 cat <<EOF
 === TDX measurement fields (V4/V5 quote, absolute offsets) ===

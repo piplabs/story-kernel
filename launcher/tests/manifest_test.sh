@@ -29,7 +29,6 @@ cat > "$WORKDIR/manifest.json" <<'JSON'
         "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
     },
     "verity": {
-        "hashtree_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
         "root_hash": "3333333333333333333333333333333333333333333333333333333333333333"
     },
     "code_commitment": "4444444444444444444444444444444444444444444444444444444444444444"
@@ -56,8 +55,6 @@ assert "has .rootfs.path (string)" \
     'jq -e ".rootfs.path | type == \"string\"" '"$WORKDIR/manifest.json"
 assert "has .rootfs.sha256 (64-char hex)" \
     'jq -e ".rootfs.sha256 | test(\"^[0-9a-f]{64}$\")" '"$WORKDIR/manifest.json"
-assert "has .verity.hashtree_sha256 (64-char hex)" \
-    'jq -e ".verity.hashtree_sha256 | test(\"^[0-9a-f]{64}$\")" '"$WORKDIR/manifest.json"
 assert "has .verity.root_hash (64-char hex)" \
     'jq -e ".verity.root_hash | test(\"^[0-9a-f]{64}$\")" '"$WORKDIR/manifest.json"
 assert "has .code_commitment (64-char hex)" \

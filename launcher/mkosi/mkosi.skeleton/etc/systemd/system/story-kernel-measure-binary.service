@@ -1,16 +1,21 @@
 # story-kernel-measure-binary.service — extend PCR 12 with the SHA-256 of
-# the story-kernel ELF.  Must run BEFORE story-kernel itself and AFTER swtpm.
+# the story-kernel ELF.  Must run BEFORE story-kernel itself.
 #
 # This is the binding step for PolicyPCR-based sealing: the kernel binary
 # can only unseal material that was originally sealed against the exact
 # PCR 12 value its hash produces.  Operators swapping in a modified ELF
 # at runtime will see PCR 12 mismatch and sealing will fail closed.
+#
+# Sealing targets the platform vTPM at /dev/tpmrm0 (on GCP confidential VMs
+# the firmware-backed vTPM that also populates PCR 7/11); AssertPathExists
+# makes the unit fail loud on a host without it rather than measure nothing.
 
 [Unit]
 Description=Extend PCR 12 with story-kernel ELF measurement
 DefaultDependencies=no
 Before=story-kernel-rtmr3-extend.service story-kernel.service
 AssertPathExists=/usr/local/bin/story-kernel
+AssertPathExists=/dev/tpmrm0
 
 [Service]
 User=story-kernel
@@ -21,11 +26,9 @@ StandardOutput=journal+console
 StandardError=journal+console
 Type=oneshot
 RemainAfterExit=yes
-# No TPM2TOOLS_TCTI: tpm2-tools auto-detects /dev/tpmrm0, the same kernel
-# vtpm-proxy device story-kernel seals against (enclave/tdx/seal.go). swtpm
-# runs in --vtpm-proxy mode, so the proxy device — not swtpm's data socket —
-# is the canonical TPM channel; extending PCR 12 over the socket could leave
-# the kernel device with a divergent PCR view and break PolicyPCR sealing.
+# No TPM2TOOLS_TCTI: tpm2-tools auto-detects /dev/tpmrm0, the same kernel TPM
+# device story-kernel seals against (enclave/tdx/seal.go). Extending PCR 12 on
+# that device (not a side channel) is what keeps the sealing PCR view coherent.
 ExecStart=/usr/local/lib/story-kernel/measure-binary.sh /usr/local/bin/story-kernel 12
 # If the measurement fails we MUST NOT proceed.  The story-kernel binary
 # is only safe to run if PCR 12 reflects its identity.

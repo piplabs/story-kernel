@@ -2,16 +2,15 @@
 # launcher/boot/dm-verity-build.sh — generate dm-verity hash tree and
 # root hash for a given rootfs.raw.
 #
-# Two callers:
-#   1. build/build.sh after mkosi produces rootfs.raw — bakes the hash
-#      tree into the final image artifact.
-#   2. Auditors who want to independently re-derive the root hash from
-#      a published rootfs.raw to confirm it matches the on-chain value.
+# Authoritative dm-verity for the booted image is built by mkosi from the
+# root + root-verity partitions in mkosi/mkosi.repart/, and its roothash is
+# injected into the measured UKI command line. build/build.sh reads that
+# roothash — it does NOT call this script.
 #
-# mkosi natively supports verity via SplitArtifacts=roothash, so under
-# normal use this script is invoked by build/build.sh as a final
-# verification step rather than as the primary generator.  It still
-# works standalone for the auditor case.
+# This script remains a STANDALONE auditor tool: given a published rootfs
+# partition image, it re-derives the roothash so an auditor can confirm it
+# matches the on-chain platform approval. It must use the same veritysetup
+# parameters mkosi uses, or the recomputed roothash will not match.
 set -eu
 
 ROOTFS=${1:?dm-verity-build: rootfs path required}

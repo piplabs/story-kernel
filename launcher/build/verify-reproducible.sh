@@ -22,7 +22,7 @@ diff -u "$WORKDIR/out-a/manifest.json" "$WORKDIR/out-b/manifest.json" || {
     exit 1
 }
 
-for f in story-kernel rootfs.verity root-hash.txt code_commitment.txt; do
+for f in story-kernel code_commitment.txt; do
     A_SHA=$(sha256sum "$WORKDIR/out-a/$f" | awk '{print $1}')
     B_SHA=$(sha256sum "$WORKDIR/out-b/$f" | awk '{print $1}')
     if [ "$A_SHA" != "$B_SHA" ]; then

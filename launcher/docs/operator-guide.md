@@ -29,13 +29,13 @@ The image is reproducible and builds on any Linux host with Docker:
 
 This builds the story-kernel Go binary, stages the **keyless custom kernel**
 (`launcher/kernel/`, see [Reference](#keyless-reproducible-kernel)) into
-`mkosi/mkosi.packages/`, runs mkosi in a pinned builder container, builds the
-dm-verity tree, and writes `launcher/out/` — the TD `.raw` image,
-`rootfs.verity`, `root-hash.txt`, and `manifest.json` (sha256/sha384 of every
-artifact + the derived `code_commitment`).
+`mkosi/mkosi.packages/`, runs mkosi in a pinned builder container (which embeds
+the dm-verity hash tree as a partition inside the image), and writes
+`launcher/out/` — the TD `.raw` image, `code_commitment.txt`, and
+`manifest.json` (sha256/sha384 of every artifact + the dm-verity `root_hash` +
+the derived `code_commitment`).
 
-Optionally confirm determinism (rebuild + diff every artifact, and rebuild the
-kernel twice for byte-identical):
+Optionally confirm determinism (rebuild + diff every artifact):
 
 ```sh
 ./launcher/build/verify-reproducible.sh
@@ -213,17 +213,21 @@ Boot order (systemd `Requires=`/`Before=`, fail-closed):
 TDX firmware → RTMR0..RTMR2          (platform_commitment)
 bootloader (systemd-boot/UKI) → kernel + initrd
 kernel → dm-verity verified rootfs → systemd
-  → measure-binary  : PCR 12 ← SHA-256(story-kernel ELF)
-  → rtmr3-extend    : RTMR3   ← SHA-384(story-kernel ELF) via tdx_guest sysfs
-  → story-kernel    : fetch config from metadata, then attest + run
+  → measure-binary   : PCR 12 ← SHA-256(story-kernel ELF)
+  → rtmr3-extend     : RTMR3   ← SHA-384(story-kernel ELF) via tdx_guest sysfs
+  → lockdown-modules : kernel.modules_disabled=1 (no more module loads)
+  → story-kernel     : fetch config from metadata, then attest + run
 ```
 
 Sealing and the PCR 12 measurement use the **GCP confidential-VM vTPM**
 (`/dev/tpmrm0`); the key share is sealed under `PolicyPCR(PCR 7, 11, 12)` (Secure
 Boot policy, UKI/dm-verity rootfs, story-kernel ELF), so it unseals only in that
 exact measured boot. The TDX modules (`tdx-guest`, `tsm`) are loaded via
-`modules-load.d`, and `systemd-firstboot` is masked with a stable
-`/etc/machine-id` so boot reaches `multi-user.target` unattended.
+`modules-load.d`; once boot completes, `lockdown-modules` latches
+`kernel.modules_disabled=1` so no further kernel module can be loaded, and
+`story-kernel.service` hard-requires that latch (fail-closed) before it starts.
+`systemd-firstboot` is masked with a stable `/etc/machine-id` so boot reaches
+`multi-user.target` unattended.
 
 ## Node config — external injection
 

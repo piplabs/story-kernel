@@ -30,7 +30,7 @@ a threat listed here, it should be removed.
 
 **Attack:** GCP, AWS, Azure, etc. snapshot the TD's RAM during a live migration or read it via SMM/DMA paths. Plaintext key shares fall out.
 
-**Defense:** TDX memory encryption (hardware). Inherited from the TDX architecture — the launcher does not add anything specific here, but image hardening prevents accidental egress paths (no swap, no core dumps, no `/dev/mem`).
+**Defense:** TDX memory encryption (hardware). Inherited from the TDX architecture — the launcher does not add anything specific here, but image hardening prevents accidental egress paths (no swap, no core dumps, `/dev/mem` restricted by `CONFIG_STRICT_DEVMEM`).
 
 **Tested by:** N/A at launcher level — TDX hardware guarantee.
 
@@ -41,19 +41,25 @@ a threat listed here, it should be removed.
 **Defenses:**
 - `dm-verity` makes the rootfs read-only and integrity-checked at block-read time — any write triggers kernel panic.
 - `kernel.yama.ptrace_scope=3` blocks all ptrace (no `gdb` attach).
-- No SSH daemon, no serial console after early boot, all getty units masked.
-- `/dev/mem`, `/dev/kmem`, `/dev/port` unavailable.
+- No SSH daemon, all getty units masked, root account locked.
+- `kernel.modules_disabled=1` is set after boot, so no process (even root) can
+  load a kernel module to read another process's memory.
+- Device memory is restricted: `/dev/mem` is gated by `CONFIG_STRICT_DEVMEM` (RAM
+  not readable through it); `/dev/kmem` and `/dev/port` are not built.
 - The `story-kernel` user has `nologin` and no writable paths outside `/var/lib/story-kernel`.
 
 > **Note on `lockdown`/module-signing:** the custom kernel is built keyless
 > (`CONFIG_MODULE_SIG=n`, `SECURITY_LOCKDOWN_LSM` disabled) for reproducibility
 > without a private key (see `operator-guide.md` (Keyless reproducible kernel) and `../kernel/`). This is
-> not load-bearing for (B): the gap between operator-root and the sealed key is
-> closed by **no root entry path** (no sshd/getty, root locked) + dm-verity + the
-> PCR-bound seal — not by lockdown or signed modules, which only restrict an
-> *already-root* process that cannot be reached here.
+> not the primary defense for (B): the gap between operator-root and the sealed
+> key is closed by **no root entry path** (no sshd/getty, root locked) + dm-verity
+> + the PCR-bound seal. As a second wall behind that, `kernel.modules_disabled=1`
+> (set post-boot, keyless, reproducibility-neutral) blocks the module-load path
+> that would otherwise let an *already-root* process read process memory.
 
-**Tested by:** `launcher/tests/hardening_test.sh` (on a booted image).
+**Tested by:** `launcher/tests/systemd-unit_test.sh` (boot-chain enable/ordering
+invariants) + `shellcheck_test.sh`; runtime hardening (ptrace, getty, root lock,
+module lockdown) is verified manually on a booted image.
 
 ### (B') t-of-n validator off-chain collusion
 
@@ -66,7 +72,10 @@ a threat listed here, it should be removed.
 
 **Why this is the most important defense:** (B') is the canonical APT against Story CDR. Every other security property only matters if (B') is blocked. **The entire launcher infrastructure exists primarily to make (B') impossible.**
 
-**Tested by:** `launcher/tests/sealing_test.sh` (requires real TDX hardware).
+**Tested by:** `launcher/attestation/test/` (PCR-12 bind detects a binary swap,
+using a container swtpm) + `verify-pcr12.sh`; the full `PolicyPCR` seal/unseal
+against a real vTPM is validated end-to-end on TDX hardware (devnet), not by an
+automated unit test.
 
 ### (C) Fork-chain spoofing of the light client
 

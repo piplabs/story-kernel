@@ -43,8 +43,15 @@ done < "$HERE/users.conf"
 
 echo "hardening: removing SSH if present"
 # We do not ship openssh-server but a transitively-pulled package might.
-# Strip anything resembling SSH.
-rm -rf "$ROOTFS/etc/ssh" "$ROOTFS/usr/sbin/sshd" "$ROOTFS/usr/bin/ssh" 2>/dev/null || true
+# Strip anything resembling SSH, then assert none survived — a partially
+# hardened image (a stray sshd) must fail the build, not ship silently.
+rm -rf "$ROOTFS/etc/ssh" "$ROOTFS/usr/sbin/sshd" "$ROOTFS/usr/bin/ssh"
+for leftover in "$ROOTFS/usr/sbin/sshd" "$ROOTFS/usr/bin/ssh" "$ROOTFS/etc/ssh"; do
+    if [ -e "$leftover" ]; then
+        echo "hardening: ERROR — SSH artifact survived removal: $leftover" >&2
+        exit 1
+    fi
+done
 
 echo "hardening: disabling getty on all consoles"
 # We boot with console=null but defense in depth: mask the getty units so
@@ -57,9 +64,9 @@ echo "hardening: enabling story-kernel services"
 # Wire the boot chain via static enable links.  This is more deterministic
 # than `systemctl enable --root=` which reads installer-injected drop-ins.
 for unit in \
-    story-kernel-swtpm.service \
     story-kernel-measure-binary.service \
     story-kernel-rtmr3-extend.service \
+    story-kernel-lockdown-modules.service \
     story-kernel.service; do
     src="/etc/systemd/system/${unit}"
     dst="$ROOTFS/etc/systemd/system/multi-user.target.wants/${unit}"
@@ -68,7 +75,13 @@ for unit in \
 done
 
 echo "hardening: locking root account"
-# Root must not be able to log in even via console.  Lock the account.
-sed -i 's/^root:[^:]*:/root:*:/' "$ROOTFS/etc/shadow" 2>/dev/null || true
+# Root must not be able to log in even via console.  Lock the account, then
+# assert it took — an unlocked root would defeat the "no interactive entry"
+# property, so fail the build rather than ship it.
+sed -i 's/^root:[^:]*:/root:*:/' "$ROOTFS/etc/shadow"
+if ! grep -q '^root:[*!]' "$ROOTFS/etc/shadow"; then
+    echo "hardening: ERROR — root account is not locked in $ROOTFS/etc/shadow" >&2
+    exit 1
+fi
 
 echo "hardening: install.sh complete"

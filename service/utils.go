@@ -25,15 +25,16 @@ const (
 )
 
 // calculateReportData computes the TEE attestation report data for DKG registration.
-// It produces keccak256(abi.encode(EnclaveInstanceData)) matching the Solidity struct:
+// It produces keccak256 over the tightly packed (abi.encodePacked, no ABI
+// offset/length words) concatenation of, in order:
 //
-//	struct EnclaveInstanceData {
-//	    uint32 round;
-//	    address validatorAddr;
-//	    bytes32 enclaveType;
-//	    bytes enclaveCommKey;
-//	    bytes dkgPubKey;
-//	}
+//	validatorAddr(20) || round(4, big-endian) || startBlockHeight(8, big-endian)
+//	  || startBlockHash(32) || dkgPubKey(32) || enclaveCommKey(64)
+//
+// The two trailing dynamic fields are length-pinned (see dkgPubKeySize /
+// enclaveCommKeySize) so the packed preimage is injective. This must match the
+// on-chain DKG.register report-data reconstruction byte-for-byte; a golden
+// vector shared with DKG.sol guards against drift.
 func calculateReportData(validatorAddr string, round uint32, startBlockHeight uint64, startBlockHash []byte, dkgPubKey, enclaveCommKey []byte) ([]byte, error) {
 	addr := strings.TrimPrefix(validatorAddr, "0x")
 

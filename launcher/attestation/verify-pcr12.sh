@@ -15,11 +15,11 @@
 #     running PCR 12.
 #
 # Env overrides (optional):
-#   STORY_KERNEL_ELF   path to the ELF (default: /opt/story-kernel/bin/story-kernel)
+#   STORY_KERNEL_ELF   path to the ELF (default: /usr/local/bin/story-kernel)
 #   TPM2TOOLS_TCTI     tpm2-tools transport (default: auto-detect)
 set -eu
 
-ELF_PATH="${STORY_KERNEL_ELF:-/opt/story-kernel/bin/story-kernel}"
+ELF_PATH="${STORY_KERNEL_ELF:-/usr/local/bin/story-kernel}"
 
 if [ ! -f "$ELF_PATH" ]; then
     echo "verify-pcr12: ELF not found at $ELF_PATH" >&2
