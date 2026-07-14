@@ -50,6 +50,10 @@ func (s *stubQueryClient) GetAllParticipantDKGRegistrations(_ context.Context, _
 	return s.registrations[i], nil
 }
 
+func (s *stubQueryClient) GetAllRegisteredDKGRegistrations(ctx context.Context, cc string, round uint32) ([]*pb.DKGRegistration, error) {
+	return s.GetAllParticipantDKGRegistrations(ctx, cc, round)
+}
+
 // Unused interface methods — panic loudly if accidentally invoked.
 func (*stubQueryClient) GetLatestActiveDKGNetwork(_ context.Context) (*pb.DKGNetwork, error) {
 	panic("stubQueryClient.GetLatestActiveDKGNetwork: not implemented for round_context tests")

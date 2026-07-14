@@ -45,6 +45,10 @@ func (q *upgradeStubQC) GetAllParticipantDKGRegistrations(context.Context, strin
 	return q.regs, nil
 }
 
+func (q *upgradeStubQC) GetAllRegisteredDKGRegistrations(context.Context, string, uint32) ([]*pb.DKGRegistration, error) {
+	return q.regs, nil
+}
+
 func (q *upgradeStubQC) GetDKGNetwork(context.Context, string, uint32) (*pb.DKGNetwork, error) {
 	return q.latest, nil
 }
