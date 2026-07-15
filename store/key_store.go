@@ -29,6 +29,9 @@ func (s *DKGStore) secp256k1Path(codeCommitmentHex string, round uint32) string 
 }
 
 func (s *DKGStore) LoadOrGenerateEd25519Key(codeCommitmentHex string, round uint32) (kyber.Scalar, kyber.Point, error) {
+	s.keyGenMu.Lock()
+	defer s.keyGenMu.Unlock()
+
 	var (
 		edPriv kyber.Scalar
 		edPub  kyber.Point
@@ -84,6 +87,9 @@ func (s *DKGStore) LoadSealedEd25519Key(codeCommitmentHex string, round uint32) 
 }
 
 func (s *DKGStore) LoadOrGenerateSecp256k1Key(codeCommitmentHex string, round uint32) (*ecdsa.PrivateKey, *ecdsa.PublicKey, error) {
+	s.keyGenMu.Lock()
+	defer s.keyGenMu.Unlock()
+
 	var (
 		secpPriv *ecdsa.PrivateKey
 		secpPub  *ecdsa.PublicKey

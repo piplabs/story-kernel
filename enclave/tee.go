@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 
 	cmtdb "github.com/cometbft/cometbft-db"
@@ -155,16 +156,42 @@ func ValidateCodeCommitment(codeCommitment []byte) error {
 }
 
 // SealToFile seals data with the running enclave's sealing key and writes the
-// sealed blob to filePath with mode 0600. The write is NOT atomic; concurrent
-// readers may observe a partially written file during the write window.
+// sealed blob to filePath with mode 0600. The write is atomic: the ciphertext
+// is written to a temp file in the same directory and renamed into place, so a
+// concurrent reader never observes a partially written file and a crash mid-
+// write leaves the previous blob intact.
 func SealToFile(data []byte, filePath string) error {
 	sealed, err := Default().Seal(data)
 	if err != nil {
 		return fmt.Errorf("failed to seal data: %w", err)
 	}
 
-	if err := os.WriteFile(filePath, sealed, 0600); err != nil {
-		return fmt.Errorf("failed to write %s: %w", filePath, err)
+	dir := filepath.Dir(filePath)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(filePath)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file in %s: %w", dir, err)
+	}
+	tmpName := tmp.Name()
+	// Best-effort cleanup if we bail before the rename succeeds.
+	defer func() { _ = os.Remove(tmpName) }()
+
+	if err := tmp.Chmod(0600); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("failed to chmod temp file: %w", err)
+	}
+	if _, err := tmp.Write(sealed); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("failed to sync temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
+	if err := os.Rename(tmpName, filePath); err != nil {
+		return fmt.Errorf("failed to rename temp file to %s: %w", filePath, err)
 	}
 	log.Infof("%s is sealed and written successfully", filePath)
 

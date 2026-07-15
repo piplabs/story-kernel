@@ -45,11 +45,14 @@ type ProviderPolicy struct {
 
 // supportedProviders defines the PolicyOR branches used for sealing.
 //
-// IMPORTANT: PolicyOR digest computation is order-sensitive. Reordering or
-// removing entries invalidates ALL existing sealed blobs that were written
-// against the prior order; affected operators must re-seal. New entries
-// appended at the end are forward-compatible (existing blobs continue to
-// unseal as long as their original entries remain present in the same order).
+// IMPORTANT: the sealed object's authPolicy is fixed at seal time — a
+// single-provider blob binds a bare PolicyPCR digest, a multi-provider blob a
+// PolicyOR-over-PolicyPCR digest. Unseal reconstructs the policy from the
+// CURRENT supportedProviders, so ANY change to this slice — including appending
+// a new entry — changes the reconstructed digest and makes every previously
+// sealed blob fail to unseal (fail-closed, but a data-loss trap). Appending is
+// NOT forward-compatible: adding a firmware vintage requires re-sealing, or a
+// wire-format bump with multi-policy unseal support.
 //
 // supportedProviders is the canonical list of PCR-extension states under
 // which we will agree to unseal data. ANY change requires a code edit and a

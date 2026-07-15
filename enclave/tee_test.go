@@ -211,19 +211,24 @@ func TestSealToFile_SealError(t *testing.T) {
 	require.False(t, exists, "SealToFile must not create the destination file when Seal fails")
 }
 
-// TestSealToFile_WriteError covers the os.WriteFile-failure branch. Asking
-// the OS to write into a path under a non-existent directory triggers a real
-// write error that we can assert is propagated as a wrapped error.
+// TestSealToFile_WriteError covers the write-failure branch. The atomic write
+// creates a temp file in the destination's directory first; a non-existent
+// directory makes that step fail with ENOENT, which must be propagated as a
+// wrapped error and must not leave any file behind.
 func TestSealToFile_WriteError(t *testing.T) {
 	restore := enclave.SwapDefault(fakeBackend{name: "fake"})
 	defer restore()
 
-	// Path under a non-existent subdirectory; os.WriteFile returns ENOENT.
+	// Path under a non-existent subdirectory; the temp-file create returns ENOENT.
 	dst := filepath.Join(t.TempDir(), "no-such-subdir", "out.bin")
 
 	err := enclave.SealToFile([]byte("payload"), dst)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "failed to write")
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	exists, statFailed := dirEntryExists(dst)
+	require.False(t, statFailed, "stat returned a non-ENOENT error")
+	require.False(t, exists, "SealToFile must not leave the destination file on failure")
 }
 
 // TestUnsealFromFile_UnsealError covers the Unseal-failure branch of

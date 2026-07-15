@@ -313,6 +313,11 @@ func registerAllServices(svr *grpc.Server, cfg *config.Config, queryClient story
 	if err != nil {
 		log.Fatalf("Failed to create nonce-binding sealer: %v", err)
 	}
+	// Additionally bind each sealed file to its logical slot
+	// ({round}/{codeCommitment}/{file}) so a host with write access to the DKG
+	// data partition cannot relocate a sealed blob to another slot or replay a
+	// stale round's blob into the current one.
+	slotSealer := store.NewPathBindingSealer(nonceSealer)
 
 	pb.RegisterKernelServiceServer(svr, &service.DKGServer{
 		Cfg:                cfg,
@@ -323,7 +328,7 @@ func registerAllServices(svr *grpc.Server, cfg *config.Config, queryClient story
 		ResharingPrevCache: store.NewResharingDKGCache(),
 		ResharingNextCache: store.NewDKGCache(),
 		DistKeyShareCache:  store.NewDistKeyShareCache(),
-		DKGStore:           store.NewDKGStoreWithSealer(cfg.GetKeysDir(), cfg.GetDKGStateDir(), suite, nonceSealer),
+		DKGStore:           store.NewDKGStoreWithSealer(cfg.GetKeysDir(), cfg.GetDKGStateDir(), suite, slotSealer),
 		PIDCache:           store.NewPIDCache(),
 	})
 }
