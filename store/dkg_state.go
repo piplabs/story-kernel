@@ -31,12 +31,14 @@ type DKGState struct {
 	Justifications []dkg.Justification
 	PublicCoeffs   []kyber.Point
 
-	// FromRound indicates the original round from which this DKG state was derived.
-	// It is mainly used for resharing: when a new round is created based on the
-	// public information (pub keys, threshold, public coefficients) of a previous
-	// committee, the previous round number is stored here for recovery.
-	// For initial round (round == 1), it is set to be 0
+	// FromRound is the round this state was derived from (resharing recovery);
+	// 0 for an initial round.
 	FromRound uint32
+
+	// Emitted* hold artifacts this node produced and returned to the CL, kept so
+	// a retried RPC re-emits them instead of losing them. Not replayed on rebuild
+	// (separate from the received Deals/Responses/Justifications above).
+	EmittedResponses []dkg.Response
 }
 
 type dkgStateDisk struct {
@@ -47,6 +49,7 @@ type dkgStateDisk struct {
 	Justifications     []justificationDisk `json:"justifications,omitempty"`
 	FromRound          uint32              `json:"from_round,omitempty"`
 	PublicCoeffsBase64 []string            `json:"public_coeffs_base_64,omitempty"`
+	EmittedResponses   []dkg.Response      `json:"emitted_responses,omitempty"`
 }
 
 // justificationDisk is the JSON-serializable representation of dkg.Justification.
@@ -257,9 +260,13 @@ func (s *DKGStore) privateCoeffsPath(codeCommitmentHex string, round uint32) str
 	return filepath.Join(s.stateDir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex, PrivateCoeffsFile)
 }
 
-func (s *DKGStore) AddDeals(codeCommitmentHex string, round uint32, deals []dkg.Deal) error {
+// AddProcessedDeals appends processed deals and the responses this node
+// generated for them in a single atomic write, so a retried ProcessDeals can
+// re-emit the responses from EmittedResponses.
+func (s *DKGStore) AddProcessedDeals(codeCommitmentHex string, round uint32, deals []dkg.Deal, emittedResps []dkg.Response) error {
 	return s.updateState(codeCommitmentHex, round, func(st *DKGState) {
 		st.Deals = append(st.Deals, deals...)
+		st.EmittedResponses = append(st.EmittedResponses, emittedResps...)
 	})
 }
 
@@ -282,12 +289,13 @@ func (s *DKGStore) toDisk(st *DKGState) (*dkgStateDisk, error) {
 	}
 
 	d := &dkgStateDisk{
-		Threshold:      st.Threshold,
-		Deals:          st.Deals,
-		Responses:      st.Responses,
-		Justifications: justDisk,
-		FromRound:      st.FromRound,
-		PubKeysBase64:  make([]string, len(st.PubKeys)),
+		Threshold:        st.Threshold,
+		Deals:            st.Deals,
+		Responses:        st.Responses,
+		Justifications:   justDisk,
+		FromRound:        st.FromRound,
+		EmittedResponses: st.EmittedResponses,
+		PubKeysBase64:    make([]string, len(st.PubKeys)),
 	}
 
 	for i, p := range st.PubKeys {
@@ -320,12 +328,13 @@ func (s *DKGStore) fromDisk(d *dkgStateDisk) (*DKGState, error) {
 	}
 
 	st := &DKGState{
-		Threshold:      d.Threshold,
-		Deals:          d.Deals,
-		Responses:      d.Responses,
-		Justifications: justs,
-		FromRound:      d.FromRound,
-		PubKeys:        make([]kyber.Point, len(d.PubKeysBase64)),
+		Threshold:        d.Threshold,
+		Deals:            d.Deals,
+		Responses:        d.Responses,
+		Justifications:   justs,
+		FromRound:        d.FromRound,
+		EmittedResponses: d.EmittedResponses,
+		PubKeys:          make([]kyber.Point, len(d.PubKeysBase64)),
 	}
 
 	for i, enc := range d.PubKeysBase64 {

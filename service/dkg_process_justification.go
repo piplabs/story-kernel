@@ -119,6 +119,12 @@ func (s *DKGServer) ProcessJustification(_ context.Context, req *pb.ProcessJusti
 		justs    []dkg.Justification
 		rejected []*pb.Justification
 	)
+
+	// Serialize the shared DistKeyGenerator mutation with the other DKG-mutating
+	// RPCs for this round (see dkgMutationMu). Persist runs after the loop under
+	// its own store lock, so only the kyber mutation needs covering here.
+	mu := s.getDKGMutationMu(req.GetRound())
+	mu.Lock()
 	for _, j := range req.GetJustifications() {
 		justification, err := types.ConvertToJustification(j)
 		if err != nil {
@@ -201,6 +207,7 @@ func (s *DKGServer) ProcessJustification(_ context.Context, req *pb.ProcessJusti
 			"dealer_index":    justification.Index,
 		}).Info("Justification processed successfully, DKG state restored for the deal")
 	}
+	mu.Unlock()
 
 	// Persist successfully processed justifications for recovery replay
 	if len(justs) > 0 {

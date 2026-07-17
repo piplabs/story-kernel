@@ -127,12 +127,69 @@ func (s *DKGServer) ProcessDeals(_ context.Context, req *pb.ProcessDealsRequest)
 		}
 	}
 
+	// Serialize with any concurrent DKG-mutating RPC for this round: a client
+	// timeout leaves the abandoned server handler running, and its retry (or an
+	// adjacent ProcessResponses/Justification) must not mutate the shared
+	// DistKeyGenerator at the same time. Held across process+persist so the
+	// retry sees a fully persisted state and re-emits deterministically.
+	mu := s.getDKGMutationMu(req.GetRound())
+	mu.Lock()
+	pbResps, persisted, rejected, err := s.applyDeals(distKeyGen, codeCommitmentHex, req.GetRound(), dealerCount, req.GetDeals())
+	mu.Unlock()
+	if err != nil {
+		log.Errorf("failed to persist processed deals: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to persist processed deals")
+	}
+
+	// responses = total emitted this call (incl. re-emitted on retry);
+	// persisted_deals = deals newly stored this call (0 on a pure retry).
+	log.WithFields(log.Fields{
+		"code_commitment": codeCommitmentHex,
+		"round":           req.GetRound(),
+		"responses":       len(pbResps),
+		"persisted_deals": persisted,
+		"rejected":        len(rejected),
+	}).Info("Processed deals")
+
+	return &pb.ProcessDealsResponse{
+		CodeCommitment: req.GetCodeCommitment(),
+		Round:          req.GetRound(),
+		Responses:      pbResps,
+		RejectedDeals:  rejected,
+	}, nil
+}
+
+// applyDeals runs each incoming deal through the cached DistKeyGenerator,
+// persisting each deal with the response it generated. On a retried deal that
+// kyber already absorbed, it re-emits the stored response instead of losing the
+// verifier's approval.
+func (s *DKGServer) applyDeals(
+	distKeyGen *dkg.DistKeyGenerator,
+	codeCommitmentHex string,
+	round uint32,
+	dealerCount int,
+	reqDeals []*pb.Deal,
+) ([]*pb.Response, int, []*pb.Deal, error) {
 	var (
-		pbResps  []*pb.Response
-		deals    []dkg.Deal
-		rejected []*pb.Deal
+		pbResps      []*pb.Response
+		deals        []dkg.Deal
+		emittedResps []dkg.Response
+		rejected     []*pb.Deal
 	)
-	for _, d := range req.GetDeals() {
+
+	// EmittedResponses are loaded from disk at most once, and only if a retried
+	// deal actually needs one — a normal call never reads state back.
+	storedEmitted := &lazy[[]dkg.Response]{load: func() ([]dkg.Response, error) {
+		st, err := s.DKGStore.LoadDKGState(codeCommitmentHex, round)
+		if err != nil {
+			return nil, err
+		}
+
+		return st.EmittedResponses, nil
+	}}
+
+	for _, d := range reqDeals {
 		deal := types.ConvertToDeal(d)
 
 		// Defence in depth: bounds-check the dealer index before kyber.
@@ -147,57 +204,68 @@ func (s *DKGServer) ProcessDeals(_ context.Context, req *pb.ProcessDealsRequest)
 		}
 
 		resp, err := distKeyGen.ProcessDeal(deal)
-		if err != nil {
-			// Idempotent re-submission: the cached DistKeyGenerator has already
-			// absorbed this deal. Silent skip — do NOT include in rejected_deals
-			// so the client does not retry an artifact kyber will keep rejecting.
-			if isAlreadyProcessedErr(err) {
+		switch {
+		case err == nil:
+			pbResps = append(pbResps, types.ConvertToRespProto(resp))
+			deals = append(deals, *deal)
+			emittedResps = append(emittedResps, *resp)
+
+		case isAlreadyProcessedErr(err):
+			// Retried deal kyber already absorbed: re-emit the response stored
+			// for it so the verifier's approval is not lost. Never rejected.
+			pbResp, rerr := reEmitResponse(storedEmitted, deal.Index)
+			if rerr != nil {
+				return nil, 0, nil, rerr
+			}
+			if pbResp != nil {
+				pbResps = append(pbResps, pbResp)
+			} else {
+				// No stored response (e.g. crash between processing and persist).
 				log.WithFields(log.Fields{
-					"round":           req.GetRound(),
+					"round":           round,
 					"code_commitment": codeCommitmentHex,
 					"sender_index":    deal.Index,
-				}).Debugf("deal already stored on cached generator; skipping silently: %v", err)
-
-				continue
+				}).Warn("deal already processed but no stored response to re-emit; skipping")
 			}
 
+		default:
 			log.WithFields(log.Fields{
-				"round":           req.GetRound(),
+				"round":           round,
 				"code_commitment": codeCommitmentHex,
 				"sender_index":    deal.Index,
 			}).Errorf("failed to process the deal: %v", err)
 
 			rejected = append(rejected, d)
-
-			continue
 		}
-
-		pbResp := types.ConvertToRespProto(resp)
-		pbResps = append(pbResps, pbResp)
-		deals = append(deals, *deal)
 	}
 
+	// Persist deals and their generated responses atomically so a retry after a
+	// dropped connection can re-emit the responses instead of losing them.
 	if len(deals) > 0 {
-		if err := s.DKGStore.AddDeals(codeCommitmentHex, req.GetRound(), deals); err != nil {
-			log.Errorf("failed to add deals to the DKG state: %v", err)
-
-			return nil, status.Errorf(codes.Internal, "failed to add deals to the DKG state")
+		if err := s.DKGStore.AddProcessedDeals(codeCommitmentHex, round, deals, emittedResps); err != nil {
+			return nil, 0, nil, err
 		}
 	}
 
-	log.WithFields(log.Fields{
-		"code_commitment": codeCommitmentHex,
-		"round":           req.GetRound(),
-		"processed":       len(deals),
-		"rejected":        len(rejected),
-	}).Info("Processed deals")
+	return pbResps, len(deals), rejected, nil
+}
 
-	return &pb.ProcessDealsResponse{
-		CodeCommitment: req.GetCodeCommitment(),
-		Round:          req.GetRound(),
-		Responses:      pbResps,
-		RejectedDeals:  rejected,
-	}, nil
+// reEmitResponse returns the response this node persisted for dealerIndex on a
+// prior call so a retried deal recovers it, or nil if none was stored (keyed by
+// dealer index, at most one per index).
+func reEmitResponse(stored *lazy[[]dkg.Response], dealerIndex uint32) (*pb.Response, error) {
+	emitted, err := stored.Get()
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range emitted {
+		if emitted[i].Index == dealerIndex {
+			return types.ConvertToRespProto(&emitted[i]), nil
+		}
+	}
+
+	return nil, nil
 }
 
 func validateProcessDealsRequest(req *pb.ProcessDealsRequest) error {
