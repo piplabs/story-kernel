@@ -210,7 +210,7 @@ func (s *DKGServer) GetResharingPrevDKG(
 	var dkgInst *dkg.DistKeyGenerator
 
 	if existsPrev && existsNext {
-		dkgInst, err = s.rebuildResharingPrevDKG(codeCommitmentHex, fromRound, toRound)
+		dkgInst, err = s.rebuildResharingPrevDKG(codeCommitmentHex, fromRound, toRound, latest.GetIsResharing())
 		if err != nil {
 			return nil, err
 		}
@@ -287,33 +287,9 @@ func (s *DKGServer) buildResharingPrevDKG(
 		return nil, err
 	}
 
-	var (
-		existing *dkg.DistKeyGenerator
-		ok       bool
-	)
-
-	// NOTE:
-	// This function may reuse an existing in-memory DKG instance if available.
-	// The cache lookup here is NOT an optimization, but a semantic check to reuse
-	// an already-built DKG execution context when possible.
-	if !isResharing {
-		existing, ok = s.InitDKGCache.Get(fromRound)
-		if !ok {
-			existing, err = s.rebuildInitDKG(codeCommitmentHex, fromRound)
-			if err != nil {
-				return nil, err
-			}
-		}
-		s.InitDKGCache.Set(fromRound, existing)
-	} else {
-		existing, ok = s.ResharingNextCache.Get(fromRound)
-		if !ok {
-			existing, err = s.rebuildResharingNextDKG(codeCommitmentHex, fromRound)
-			if err != nil {
-				return nil, err
-			}
-		}
-		s.ResharingNextCache.Set(fromRound, existing)
+	existing, err := s.getOrRebuildFromRoundDKG(codeCommitmentHex, fromRound, isResharing)
+	if err != nil {
+		return nil, err
 	}
 
 	share, err := existing.DistKeyShare()
@@ -332,10 +308,68 @@ func (s *DKGServer) buildResharingPrevDKG(
 	})
 }
 
+// getOrRebuildFromRoundDKG returns the DKG instance that produced the fromRound
+// share, rebuilding it from persisted state on a cache miss. isResharing tells
+// whether fromRound itself was a resharing round: an initial round lives in
+// InitDKGCache and must be rebuilt via rebuildInitDKG (which restores the sealed
+// dealer polynomial and self-deal); routing it through rebuildResharingNextDKG
+// would load the non-existent round-0 state and build a malformed handler.
+//
+// NOTE:
+// The cache lookup here is NOT an optimization, but a semantic check to reuse
+// an already-built DKG execution context when possible.
+func (s *DKGServer) getOrRebuildFromRoundDKG(
+	codeCommitmentHex string,
+	fromRound uint32,
+	isResharing bool,
+) (*dkg.DistKeyGenerator, error) {
+	if !isResharing {
+		// Serialize with GetInitDKG's per-round mutex: without it, a concurrent
+		// build/rebuild of the same round could cache two differently-randomized
+		// instances, and deals already broadcast from one would fail session-ID
+		// verification against the other.
+		mu := s.getInitDKGMu(fromRound)
+		mu.Lock()
+		defer mu.Unlock()
+
+		existing, ok := s.InitDKGCache.Get(fromRound)
+		if !ok {
+			var err error
+			existing, err = s.rebuildInitDKG(codeCommitmentHex, fromRound)
+			if err != nil {
+				return nil, err
+			}
+		}
+		s.InitDKGCache.Set(fromRound, existing)
+
+		return existing, nil
+	}
+
+	// Same reasoning as above, against GetResharingNextDKG's per-round mutex.
+	mu := s.getReshareNextMu(fromRound)
+	mu.Lock()
+	defer mu.Unlock()
+
+	existing, ok := s.ResharingNextCache.Get(fromRound)
+	if !ok {
+		var err error
+		existing, err = s.rebuildResharingNextDKG(codeCommitmentHex, fromRound)
+		if err != nil {
+			return nil, err
+		}
+	}
+	s.ResharingNextCache.Set(fromRound, existing)
+
+	return existing, nil
+}
+
 // rebuildResharingPrevDKG reconstructs the previous-committee DKG from state.
+// isResharing refers to fromRound (whether the latest active round was itself
+// created by resharing), mirroring buildResharingPrevDKG.
 func (s *DKGServer) rebuildResharingPrevDKG(
 	codeCommitmentHex string,
 	fromRound, toRound uint32,
+	isResharing bool,
 ) (*dkg.DistKeyGenerator, error) {
 	longterm, err := s.DKGStore.LoadSealedEd25519Key(codeCommitmentHex, fromRound)
 	if err != nil {
@@ -352,22 +386,9 @@ func (s *DKGServer) rebuildResharingPrevDKG(
 		return nil, err
 	}
 
-	var (
-		existing *dkg.DistKeyGenerator
-		ok       bool
-	)
-
-	// NOTE:
-	// This function may reuse an existing in-memory DKG instance if available.
-	// The cache lookup here is NOT an optimization, but a semantic check to reuse
-	// an already-built DKG execution context when possible.
-	existing, ok = s.ResharingNextCache.Get(fromRound)
-	if !ok {
-		existing, err = s.rebuildResharingNextDKG(codeCommitmentHex, fromRound)
-		if err != nil {
-			return nil, err
-		}
-		s.ResharingNextCache.Set(fromRound, existing)
+	existing, err := s.getOrRebuildFromRoundDKG(codeCommitmentHex, fromRound, isResharing)
+	if err != nil {
+		return nil, err
 	}
 
 	share, err := existing.DistKeyShare()
@@ -595,6 +616,18 @@ func (s *DKGServer) rebuildResharingNextDKG(
 	prevState, err := s.DKGStore.LoadDKGState(codeCommitmentHex, nextState.FromRound)
 	if err != nil {
 		return nil, err
+	}
+
+	// LoadDKGState returns an empty state (not an error) for a missing file. An
+	// empty prev state means toRound has no resharing lineage (e.g. FromRound=0
+	// for an initial round). PublicCoeffs must be checked too: Share is always
+	// nil here, so kyber decides resharing-ness solely on PublicCoeffs — without
+	// them it would silently build a fresh DKG handler with a new random
+	// polynomial instead of a resharing one.
+	if prevState.Threshold == 0 || len(prevState.PubKeys) == 0 || len(prevState.PublicCoeffs) == 0 {
+		return nil, errors.Errorf(
+			"rebuildResharingNextDKG: missing or incomplete prev state (toRound=%d, fromRound=%d); toRound is not a rebuildable resharing round",
+			toRound, nextState.FromRound)
 	}
 
 	dkgInst, err := dkg.NewDistKeyHandler(&dkg.Config{
