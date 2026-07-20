@@ -287,12 +287,7 @@ func (s *DKGServer) buildResharingPrevDKG(
 		return nil, err
 	}
 
-	existing, err := s.getOrRebuildFromRoundDKG(codeCommitmentHex, fromRound, isResharing)
-	if err != nil {
-		return nil, err
-	}
-
-	share, err := existing.DistKeyShare()
+	share, err := s.loadFromRoundShare(codeCommitmentHex, fromRound, isResharing)
 	if err != nil {
 		return nil, err
 	}
@@ -306,6 +301,43 @@ func (s *DKGServer) buildResharingPrevDKG(
 		Threshold:    int(nextT),
 		OldThreshold: int(prevT),
 	})
+}
+
+// loadFromRoundShare returns this node's fromRound DistKeyShare, preferring the
+// share sealed at finalization (cache -> sealed store -> live recompute fallback).
+// Dealing from the sealed share keeps the dealt share on the same polynomial as the
+// on-chain coeffs; a live recompute can land on a different one (kyber interpolates
+// the QUAL at call time), which makes every verifier complain.
+func (s *DKGServer) loadFromRoundShare(
+	codeCommitmentHex string,
+	fromRound uint32,
+	isResharing bool,
+) (*dkg.DistKeyShare, error) {
+	if share, ok := s.DistKeyShareCache.Get(fromRound); ok {
+		return share, nil
+	}
+
+	share, err := s.DKGStore.LoadDistKeyShare(codeCommitmentHex, fromRound)
+	if err == nil {
+		s.DistKeyShareCache.Set(fromRound, share)
+
+		return share, nil
+	}
+
+	// Fallback for a wiped disk or a pre-fix round: recompute from the live fromRound
+	// instance. Only this path still needs the fromRound DKG instance, and the recomputed
+	// share may diverge from the on-chain coeffs if the QUAL changed since finalization.
+	log.WithFields(log.Fields{
+		"from_round": fromRound,
+		"error":      err,
+	}).Warn("sealed finalize-time share missing; recomputing live share (polynomial divergence risk)")
+
+	existing, err := s.getOrRebuildFromRoundDKG(codeCommitmentHex, fromRound, isResharing)
+	if err != nil {
+		return nil, err
+	}
+
+	return existing.DistKeyShare()
 }
 
 // getOrRebuildFromRoundDKG returns the DKG instance that produced the fromRound
@@ -386,12 +418,7 @@ func (s *DKGServer) rebuildResharingPrevDKG(
 		return nil, err
 	}
 
-	existing, err := s.getOrRebuildFromRoundDKG(codeCommitmentHex, fromRound, isResharing)
-	if err != nil {
-		return nil, err
-	}
-
-	share, err := existing.DistKeyShare()
+	share, err := s.loadFromRoundShare(codeCommitmentHex, fromRound, isResharing)
 	if err != nil {
 		return nil, err
 	}

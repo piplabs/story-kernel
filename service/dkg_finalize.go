@@ -77,6 +77,30 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 		}
 	}
 
+	// Calculate participants root from the post-invalidation participant set. The chain
+	// flips the round to the finalization stage, invalidates dealers that submitted no deal,
+	// and emits BeginDKGFinalization in the same block, so we must wait until the light
+	// client has observed that block before reading registrations. Otherwise a lagging
+	// trusted height may still report an invalidated dealer as VERIFIED, producing a
+	// participants root that disagrees with the set the chain agreed on.
+	//
+	// Snapshotting the share only after this wait also lets more of the response feed drain,
+	// so DistKeyShare() interpolates over a fuller QUAL; that same share is sealed and later
+	// used for dealing (loadFromRoundShare), keeping deals and on-chain coeffs consistent.
+	registrations, err := s.waitForFinalizationRegistrations(codeCommitmentHex, req.GetRound())
+	if err != nil {
+		log.Errorf("failed to get finalization DKG registrations: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to get finalization DKG registrations")
+	}
+
+	participantsRoot, err := calculateParticipantsRoot(registrations)
+	if err != nil {
+		log.Errorf("failed to calculate participants root: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to calculate participants root")
+	}
+
 	// Enable the timeout so DealCertified tolerates up to n-t absent verifier responses,
 	// restoring the configured threshold's fault tolerance; without it a single absent
 	// verifier fails the whole round. SetTimeout propagates to every verifier's aggregator.
@@ -133,26 +157,6 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 		log.Errorf("failed to marshal public coeffs: %v", err)
 
 		return nil, status.Errorf(codes.Internal, "failed to marshal public coeffs")
-	}
-
-	// Calculate participants root from the post-invalidation participant set. The chain
-	// flips the round to the finalization stage, invalidates dealers that submitted no deal,
-	// and emits BeginDKGFinalization in the same block, so we must wait until the light
-	// client has observed that block before reading registrations. Otherwise a lagging
-	// trusted height may still report an invalidated dealer as VERIFIED, producing a
-	// participants root that disagrees with the set the chain agreed on.
-	registrations, err := s.waitForFinalizationRegistrations(codeCommitmentHex, req.GetRound())
-	if err != nil {
-		log.Errorf("failed to get finalization DKG registrations: %v", err)
-
-		return nil, status.Errorf(codes.Internal, "failed to get finalization DKG registrations")
-	}
-
-	participantsRoot, err := calculateParticipantsRoot(registrations)
-	if err != nil {
-		log.Errorf("failed to calculate participants root: %v", err)
-
-		return nil, status.Errorf(codes.Internal, "failed to calculate participants root")
 	}
 
 	// Hash response message
