@@ -92,25 +92,24 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 		return nil, status.Errorf(codes.Internal, "failed to generate encrypted deals")
 	}
 
-	// Persist dealer polynomial coefficients for restart recovery.
-	// If GenerateDeals succeeds but the kernel restarts before FinalizeDKG,
-	// the rebuild functions (rebuildInitDKG, rebuildResharingPrevDKG) need the
-	// original polynomial to restore the dealer state (session ID, commitments)
-	// correctly. Without this, a new random polynomial would be generated,
-	// causing session ID mismatches with peers who already received the original
-	// deals.
-	//
-	// This covers both initial and resharing rounds. In resharing, only the
-	// secret coefficient (Share.V) is deterministic — the remaining t-1
-	// polynomial coefficients are still random, producing different commitments
-	// and session ID on each NewDistKeyHandler call.
-	coeffs, extractErr := extractDealerPolyCoeffs(distKeyGen, s.Suite)
-	if extractErr == nil && len(coeffs) > 0 {
-		if persistErr := s.DKGStore.SetPrivateCoeffs(codeCommitmentHex, req.GetRound(), coeffs); persistErr != nil {
-			log.Warnf("failed to persist dealer polynomial coefficients: %v", persistErr)
+	// Persist the dealer polynomial (sealed) so a restart before FinalizeDKG restores the
+	// same polynomial instead of a fresh random one, which would break the session ID and
+	// evict this node from QUAL. Seal must succeed before returning: on error the CL retries
+	// with the same cached generator, so deals are never broadcast without recoverable coeffs.
+	coeffs, err := extractDealerPolyCoeffs(distKeyGen, s.Suite)
+	if err != nil {
+		log.Errorf("failed to extract dealer polynomial coefficients: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to extract dealer polynomial coefficients")
+	}
+
+	// A non-dealer legitimately has no coefficients (len==0, no error): skip persist.
+	if len(coeffs) > 0 {
+		if err := s.DKGStore.SetPrivateCoeffs(codeCommitmentHex, req.GetRound(), coeffs); err != nil {
+			log.Errorf("failed to persist dealer polynomial coefficients: %v", err)
+
+			return nil, status.Errorf(codes.Internal, "failed to persist dealer polynomial coefficients")
 		}
-	} else if extractErr != nil {
-		log.Warnf("failed to extract dealer polynomial coefficients: %v", extractErr)
 	}
 
 	log.Info("Succeed to generate deals", "code_commitment", codeCommitmentHex, "round", req.GetRound())

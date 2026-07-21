@@ -50,27 +50,44 @@ func ExtractDealerPolyCoeffs(dkgInst *dkg.DistKeyGenerator, suite *edwards25519.
 		return nil, errors.New("dealer has nil private polynomial")
 	}
 
+	// Coefficients() returns the generator's live shared polynomial, not a copy, so
+	// extraction stays read-only: zeroing it would corrupt the cached instance and make
+	// retries re-extract zeros.
 	coeffs := poly.Coefficients()
-	defer func() {
-		// Zero secret scalar coefficients to prevent heap residue
-		for _, c := range coeffs {
-			c.Zero()
-		}
-	}()
 	if len(coeffs) == 0 {
 		return nil, errors.New("dealer polynomial has no coefficients")
 	}
 
 	result := make([][]byte, len(coeffs))
+	allZero := true
 	for i, c := range coeffs {
 		bz, err := c.MarshalBinary()
 		if err != nil {
 			return nil, errors.Wrapf(err, "marshal coefficient[%d]", i)
 		}
+		if !isAllZeroBytes(bz) {
+			allZero = false
+		}
 		result[i] = bz
 	}
 
+	// A real dealer polynomial's random coefficients are never all zero; an
+	// all-zero set means corruption. Reject it before it can be sealed.
+	if allZero {
+		return nil, errors.New("dealer polynomial coefficients are all zero")
+	}
+
 	return result, nil
+}
+
+// isAllZeroBytes reports whether every byte in b is zero.
+func isAllZeroBytes(b []byte) bool {
+	for _, x := range b {
+		if x != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // RestoreDealerPoly replaces the dealer's internal polynomial state in a
@@ -108,16 +125,9 @@ func RestoreDealerPoly(suite *edwards25519.SuiteEd25519, dkgInst *dkg.DistKeyGen
 		return errors.New("dkg instance has no dealer")
 	}
 
-	// Unmarshal scalar coefficients
+	// These become the restored dealer's live polynomial (CoefficientsToPriPoly stores the
+	// slice by reference), so they must not be zeroed — that would corrupt the restored poly.
 	coeffs := make([]kyber.Scalar, len(coeffBytes))
-	defer func() {
-		// Zero secret scalar coefficients to prevent heap residue
-		for _, c := range coeffs {
-			if c != nil {
-				c.Zero()
-			}
-		}
-	}()
 	for i, bz := range coeffBytes {
 		s := suite.Scalar()
 		if err := s.UnmarshalBinary(bz); err != nil {
