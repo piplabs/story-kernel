@@ -381,6 +381,13 @@ func (s *DKGServer) signJustificationIfNeeded(
 		return false
 	}
 
+	// Confirm this node signed a resharing justification with its prev-committee key.
+	log.WithFields(log.Fields{
+		"round":               round,
+		"code_commitment":     codeCommitmentHex,
+		"justification_index": j.Index,
+	}).Info("signed resharing justification")
+
 	return true
 }
 
