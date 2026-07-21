@@ -9,6 +9,7 @@ import (
 
 	"go.dedis.ch/kyber/v4"
 	"go.dedis.ch/kyber/v4/group/edwards25519"
+	"go.dedis.ch/kyber/v4/share"
 	dkg "go.dedis.ch/kyber/v4/share/dkg/pedersen"
 
 	"github.com/piplabs/story-kernel/store"
@@ -195,6 +196,7 @@ func TestGetResharingPrevDKG_FirstReshareAfterInitialDKG_RebuildPath(t *testing.
 				InitDKGCache:       store.NewDKGCache(),
 				ResharingPrevCache: store.NewResharingDKGCache(),
 				ResharingNextCache: store.NewDKGCache(),
+				DistKeyShareCache:  store.NewDistKeyShareCache(),
 			}
 			if tc.warmCache {
 				// The initial round lives in InitDKGCache (never in
@@ -270,9 +272,12 @@ func TestGetResharingPrevDKG_FirstReshareAfterInitialDKG_BuildPath(t *testing.T)
 		InitDKGCache:       store.NewDKGCache(),
 		ResharingPrevCache: store.NewResharingDKGCache(),
 		ResharingNextCache: store.NewDKGCache(),
+		DistKeyShareCache:  store.NewDistKeyShareCache(),
 	}
 	s.InitDKGCache.Set(fromRound, c.gens[self])
 
+	// No sealed fromRound share exists here, so loadFromRoundShare must fall back to
+	// recomputing the share from the live fromRound instance and still build a dealer.
 	dkgInst, err := s.GetResharingPrevDKG(cc, toRound, threshold, nextPubs, latest)
 	require.NoError(t, err)
 	require.NotNil(t, dkgInst)
@@ -285,6 +290,88 @@ func TestGetResharingPrevDKG_FirstReshareAfterInitialDKG_BuildPath(t *testing.T)
 	hasNext, err := st.HasDKGState(cc, toRound)
 	require.NoError(t, err)
 	require.True(t, hasNext, "build path must persist the toRound state")
+}
+
+// TestGetResharingPrevDKG_PrefersSealedFinalizeShare is the regression test for
+// issue #86: the resharing dealer must deal from the share sealed at fromRound's
+// finalization, not a share recomputed live. kyber's DistKeyShare() interpolates
+// the first oldT QUAL members at call time, so a live recomputation on a QUAL that
+// filled up after finalization yields a share on a different polynomial than the
+// on-chain coeffs, and every verifier complains. We seal a KNOWN share whose secret
+// differs from the live one and assert the dealer's polynomial secret (coeff[0])
+// equals the sealed value, proving the sealed share wins.
+func TestGetResharingPrevDKG_PrefersSealedFinalizeShare(t *testing.T) {
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+
+	const (
+		cc        = "cc-sealed-share"
+		fromRound = uint32(3)
+		toRound   = uint32(4)
+		threshold = 2
+	)
+
+	c := runCertifiedInitialDKG(t, 3, threshold)
+	self := 0
+
+	st := newInitialReshareStore(t, c, self, cc, fromRound, threshold)
+
+	liveShare, err := c.gens[self].DistKeyShare()
+	require.NoError(t, err)
+	coeffsBz, err := MarshalPoints(liveShare.Commitments())
+	require.NoError(t, err)
+
+	// Seal a share for fromRound whose secret differs from the live one. Reusing the
+	// live Commits keeps the blob well-formed; only Share.V drives the dealer secret.
+	knownV := suite.Scalar().SetInt64(987654321)
+	require.False(t, knownV.Equal(liveShare.PriShare().V), "sanity: known secret must differ from live")
+	sealed := &dkg.DistKeyShare{
+		Commits: liveShare.Commitments(),
+		Share:   &share.PriShare{I: liveShare.PriShare().I, V: knownV},
+	}
+	require.NoError(t, st.SealAndStoreDistKeyShare(sealed, cc, fromRound))
+
+	regs := make([]*pb.DKGRegistration, len(c.pubs))
+	for i, p := range c.pubs {
+		bz, err := p.MarshalBinary()
+		require.NoError(t, err)
+		regs[i] = &pb.DKGRegistration{Index: uint32(i + 1), Round: fromRound, DkgPubKey: bz}
+	}
+
+	point := func(seed int64) kyber.Point {
+		return suite.Point().Mul(suite.Scalar().SetInt64(seed), nil)
+	}
+	nextPubs := []kyber.Point{point(61), point(62), point(63)}
+
+	latest := &pb.DKGNetwork{Round: fromRound, Threshold: threshold, IsResharing: false, PublicCoeffs: coeffsBz}
+
+	s := &DKGServer{
+		QueryClient:        &upgradeStubQC{latest: latest, regs: regs},
+		Suite:              suite,
+		DKGStore:           st,
+		InitDKGCache:       store.NewDKGCache(),
+		ResharingPrevCache: store.NewResharingDKGCache(),
+		ResharingNextCache: store.NewDKGCache(),
+		DistKeyShareCache:  store.NewDistKeyShareCache(),
+	}
+	s.InitDKGCache.Set(fromRound, c.gens[self])
+
+	dkgInst, err := s.GetResharingPrevDKG(cc, toRound, threshold, nextPubs, latest)
+	require.NoError(t, err)
+	require.NotNil(t, dkgInst)
+
+	// The dealer polynomial's free coefficient is the secret it deals; kyber sets it
+	// to Config.Share.Share.V. It must equal the SEALED secret, not the live one.
+	polyCoeffs, err := extractDealerPolyCoeffs(dkgInst, suite)
+	require.NoError(t, err)
+	require.NotEmpty(t, polyCoeffs)
+
+	knownVBz, err := knownV.MarshalBinary()
+	require.NoError(t, err)
+	require.Equal(t, knownVBz, polyCoeffs[0], "dealer must deal from the sealed finalize-time secret")
+
+	liveVBz, err := liveShare.PriShare().V.MarshalBinary()
+	require.NoError(t, err)
+	require.NotEqual(t, liveVBz, polyCoeffs[0], "dealer must NOT deal from a live-recomputed secret")
 }
 
 // TestGetOrRebuildFromRoundDKG_ResharingRouting pins the isResharing=true
