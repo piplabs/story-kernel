@@ -84,9 +84,14 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 		}
 	}
 
-	// Generate deals
+	// Deals() mutates the shared cached generator (self-deal) and coeff extraction
+	// reads it, so serialize with the other DKG-mutating RPCs for this round. The
+	// store write below uses only the extracted coeffs and stays outside the lock.
+	mu := s.getDKGMutationMu(req.GetRound())
+	mu.Lock()
 	deals, err := distKeyGen.Deals()
 	if err != nil {
+		mu.Unlock()
 		log.Errorf("failed to generate encrypted deals: %v", err)
 
 		return nil, status.Errorf(codes.Internal, "failed to generate encrypted deals")
@@ -105,6 +110,8 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 	// polynomial coefficients are still random, producing different commitments
 	// and session ID on each NewDistKeyHandler call.
 	coeffs, extractErr := extractDealerPolyCoeffs(distKeyGen, s.Suite)
+	mu.Unlock()
+
 	if extractErr == nil && len(coeffs) > 0 {
 		if persistErr := s.DKGStore.SetPrivateCoeffs(codeCommitmentHex, req.GetRound(), coeffs); persistErr != nil {
 			log.Warnf("failed to persist dealer polynomial coefficients: %v", persistErr)
