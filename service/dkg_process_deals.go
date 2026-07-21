@@ -218,6 +218,13 @@ func (s *DKGServer) applyDeals(
 				return nil, 0, nil, rerr
 			}
 			if pbResp != nil {
+				// Recovery path: confirm the stored response was recovered on retry.
+				log.WithFields(log.Fields{
+					"round":           round,
+					"code_commitment": codeCommitmentHex,
+					"sender_index":    deal.Index,
+				}).Info("re-emitted stored response for retried deal")
+
 				pbResps = append(pbResps, pbResp)
 			} else {
 				// No stored response (e.g. crash between processing and persist).
