@@ -320,6 +320,7 @@ func (s *DKGServer) loadFromRoundShare(
 	share, err := s.DKGStore.LoadDistKeyShare(codeCommitmentHex, fromRound)
 	if err == nil {
 		s.DistKeyShareCache.Set(fromRound, share)
+		log.WithField("from_round", fromRound).Info("loaded from-round share from the sealed store")
 
 		return share, nil
 	}
