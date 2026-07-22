@@ -128,97 +128,102 @@ func (s *DKGServer) ProcessResponses(_ context.Context, req *pb.ProcessResponses
 
 	// Serialize the shared DistKeyGenerator mutation with the other DKG-mutating
 	// RPCs for this round (see dkgMutationMu). Persist runs after the loop under
-	// its own store lock, so only the kyber mutation needs covering here.
+	// its own store lock, so only the kyber mutation needs covering here. The
+	// loop runs in a closure so a panic still releases the lock via defer,
+	// without widening the critical section to the store IO below.
 	mu := s.getDKGMutationMu(req.GetRound())
-	mu.Lock()
-	for _, response := range req.GetResponses() {
-		resp := types.ConvertToVSSResp(response)
+	func() {
+		mu.Lock()
+		defer mu.Unlock()
 
-		// Defence in depth: bounds-check the dealer AND complainer indices
-		// before kyber. processResharingResponse lazily inserts aggregators
-		// keyed by resp.Index without validation, so an out-of-range index
-		// could grow the aggregators map inside the enclave. In resharing,
-		// dealers are old-committee members and complainers are new-committee
-		// members.
-		if int(resp.Index) >= dealerCount {
-			rejected = append(rejected, response)
+		for _, response := range req.GetResponses() {
+			resp := types.ConvertToVSSResp(response)
 
-			continue
-		}
-		if resp.Response != nil && int(resp.Response.Index) >= complainerCount {
-			rejected = append(rejected, response)
+			// Defence in depth: bounds-check the dealer AND complainer indices
+			// before kyber. processResharingResponse lazily inserts aggregators
+			// keyed by resp.Index without validation, so an out-of-range index
+			// could grow the aggregators map inside the enclave. In resharing,
+			// dealers are old-committee members and complainers are new-committee
+			// members.
+			if int(resp.Index) >= dealerCount {
+				rejected = append(rejected, response)
 
-			continue
-		}
+				continue
+			}
+			if resp.Response != nil && int(resp.Response.Index) >= complainerCount {
+				rejected = append(rejected, response)
 
-		// processed: at least one DistKeyGenerator applied the response (real
-		// success or idempotent re-submission). In resharing (prev + next),
-		// only one generator typically owns a given response — the others
-		// may return real errors ("unknown dealer" etc.) without indicating
-		// rejection. Reject only when EVERY generator returned a real
-		// (non-idempotent) error.
-		processed := false
-		for _, distKeyGen := range distKeyGens {
-			j, err := distKeyGen.ProcessResponse(resp)
-			if err != nil {
-				// Log only indices to match the dealing/justification handlers'
-				// hygiene; avoids dumping the full VSSResponse struct into logs
-				// in case future kyber/proto evolution adds fields not safe to
-				// expose verbatim.
-				log.WithFields(log.Fields{
-					"round":            req.GetRound(),
-					"code_commitment":  codeCommitmentHex,
-					"dealer_index":     response.GetIndex(),
-					"complainer_index": response.GetVssResponse().GetIndex(),
-				}).Errorf("failed to process the response: %v", err)
+				continue
+			}
 
-				if isAlreadyProcessedErr(err) {
-					processed = true
+			// processed: at least one DistKeyGenerator applied the response (real
+			// success or idempotent re-submission). In resharing (prev + next),
+			// only one generator typically owns a given response — the others
+			// may return real errors ("unknown dealer" etc.) without indicating
+			// rejection. Reject only when EVERY generator returned a real
+			// (non-idempotent) error.
+			processed := false
+			for _, distKeyGen := range distKeyGens {
+				j, err := distKeyGen.ProcessResponse(resp)
+				if err != nil {
+					// Log only indices to match the dealing/justification handlers'
+					// hygiene; avoids dumping the full VSSResponse struct into logs
+					// in case future kyber/proto evolution adds fields not safe to
+					// expose verbatim.
+					log.WithFields(log.Fields{
+						"round":            req.GetRound(),
+						"code_commitment":  codeCommitmentHex,
+						"dealer_index":     response.GetIndex(),
+						"complainer_index": response.GetVssResponse().GetIndex(),
+					}).Errorf("failed to process the response: %v", err)
+
+					if isAlreadyProcessedErr(err) {
+						processed = true
+					}
+
+					continue
 				}
 
+				processed = true
+
+				if j == nil {
+					continue
+				}
+
+				justification, convErr := types.ConvertToJustificationProto(j)
+				if convErr != nil {
+					// kyber already absorbed `resp`; retry would hit the idempotent
+					// guard (j == nil) and never re-derive the justification.
+					// Putting `response` in rejected_responses would mislead the CL
+					// into retrying a permanently-lost artifact, and failing the
+					// whole RPC would also discard valid justifications already
+					// converted in this batch. Drop only this justification — the
+					// response itself is still added to resps below so kyber's
+					// in-memory state and DKGStore stay consistent.
+					// (Effectively unreachable on Ed25519 — kept for future suite changes.)
+					// Log only the index to avoid leaking SecShare from PlainDeal.
+					log.WithFields(log.Fields{
+						"round":               req.GetRound(),
+						"code_commitment":     codeCommitmentHex,
+						"justification_index": j.Index,
+					}).Errorf("failed to convert generated justification to proto; "+
+						"justification dropped: %v", convErr)
+
+					continue
+				}
+
+				justifications = append(justifications, justification)
+			}
+
+			if !processed {
+				rejected = append(rejected, response)
+
 				continue
 			}
 
-			processed = true
-
-			if j == nil {
-				continue
-			}
-
-			justification, convErr := types.ConvertToJustificationProto(j)
-			if convErr != nil {
-				// kyber already absorbed `resp`; retry would hit the idempotent
-				// guard (j == nil) and never re-derive the justification.
-				// Putting `response` in rejected_responses would mislead the CL
-				// into retrying a permanently-lost artifact, and failing the
-				// whole RPC would also discard valid justifications already
-				// converted in this batch. Drop only this justification — the
-				// response itself is still added to resps below so kyber's
-				// in-memory state and DKGStore stay consistent.
-				// (Effectively unreachable on Ed25519 — kept for future suite changes.)
-				// Log only the index to avoid leaking SecShare from PlainDeal.
-				log.WithFields(log.Fields{
-					"round":               req.GetRound(),
-					"code_commitment":     codeCommitmentHex,
-					"justification_index": j.Index,
-				}).Errorf("failed to convert generated justification to proto; "+
-					"justification dropped: %v", convErr)
-
-				continue
-			}
-
-			justifications = append(justifications, justification)
+			resps = append(resps, *resp)
 		}
-
-		if !processed {
-			rejected = append(rejected, response)
-
-			continue
-		}
-
-		resps = append(resps, *resp)
-	}
-	mu.Unlock()
+	}()
 
 	if len(resps) > 0 {
 		if err := s.DKGStore.AddResponses(codeCommitmentHex, req.GetRound(), resps); err != nil {

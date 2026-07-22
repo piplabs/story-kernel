@@ -83,13 +83,16 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 	// SetTimeout + DistKeyShare mutate/read the shared cached generator, so
 	// serialize with the other DKG-mutating RPCs for this round. Sealing/store IO
 	// below uses only the computed share and stays outside the lock.
+	// Run under a closure so a panic still releases the lock via defer.
 	mu := s.getDKGMutationMu(req.GetRound())
-	mu.Lock()
-	distKeyGen.SetTimeout()
+	distKeyShare, err := func() (*dkg.DistKeyShare, error) {
+		mu.Lock()
+		defer mu.Unlock()
 
-	// Generate Distributed Key Share
-	distKeyShare, err := distKeyGen.DistKeyShare()
-	mu.Unlock()
+		distKeyGen.SetTimeout()
+
+		return distKeyGen.DistKeyShare()
+	}()
 	if err != nil {
 		log.Errorf("failed to compute distributed key share: %v", err)
 

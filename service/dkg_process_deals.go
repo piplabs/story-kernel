@@ -132,10 +132,15 @@ func (s *DKGServer) ProcessDeals(_ context.Context, req *pb.ProcessDealsRequest)
 	// adjacent ProcessResponses/Justification) must not mutate the shared
 	// DistKeyGenerator at the same time. Held across process+persist so the
 	// retry sees a fully persisted state and re-emits deterministically.
+	// Locked closure so the mutex is released even if applyDeals panics; a
+	// missed Unlock would permanently poison this round's mutation lock.
 	mu := s.getDKGMutationMu(req.GetRound())
-	mu.Lock()
-	pbResps, persisted, rejected, err := s.applyDeals(distKeyGen, codeCommitmentHex, req.GetRound(), dealerCount, req.GetDeals())
-	mu.Unlock()
+	pbResps, persisted, rejected, err := func() ([]*pb.Response, int, []*pb.Deal, error) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		return s.applyDeals(distKeyGen, codeCommitmentHex, req.GetRound(), dealerCount, req.GetDeals())
+	}()
 	if err != nil {
 		log.Errorf("failed to persist processed deals: %v", err)
 
