@@ -84,29 +84,63 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 		}
 	}
 
-	// Generate deals
-	deals, err := distKeyGen.Deals()
-	if err != nil {
-		log.Errorf("failed to generate encrypted deals: %v", err)
+	// Deals() mutates the shared cached generator (self-deal) and coeff extraction
+	// reads it, so serialize with the other DKG-mutating RPCs for this round. The
+	// store write below uses only the extracted coeffs and stays outside the lock.
+	// Run under a closure so a panic still releases the lock via defer.
+	mu := s.getDKGMutationMu(req.GetRound())
+	var (
+		deals      map[int]*dkg.Deal
+		coeffs     [][]byte
+		extractErr error
+	)
+	dealsErr := func() error {
+		mu.Lock()
+		defer mu.Unlock()
+
+		var err error
+		deals, err = distKeyGen.Deals()
+		if err != nil {
+			return err
+		}
+
+		// Persist dealer polynomial coefficients for restart recovery (extracted
+		// here under the lock; the store write happens after the closure returns).
+		coeffs, extractErr = extractDealerPolyCoeffs(distKeyGen, s.Suite)
+
+		return nil
+	}()
+	if dealsErr != nil {
+		log.Errorf("failed to generate encrypted deals: %v", dealsErr)
 
 		return nil, status.Errorf(codes.Internal, "failed to generate encrypted deals")
 	}
 
-	// Persist the dealer polynomial (sealed) so a restart before FinalizeDKG restores the
-	// same polynomial instead of a fresh random one, which would break the session ID and
-	// evict this node from QUAL. Seal must succeed before returning: on error the CL retries
-	// with the same cached generator, so deals are never broadcast without recoverable coeffs.
-	coeffs, err := extractDealerPolyCoeffs(distKeyGen, s.Suite)
-	if err != nil {
-		log.Errorf("failed to extract dealer polynomial coefficients: %v", err)
+	// Persist dealer polynomial coefficients for restart recovery.
+	// If GenerateDeals succeeds but the kernel restarts before FinalizeDKG,
+	// the rebuild functions (rebuildInitDKG, rebuildResharingPrevDKG) need the
+	// original polynomial to restore the dealer state (session ID, commitments)
+	// correctly. Without this, a new random polynomial would be generated,
+	// causing session ID mismatches with peers who already received the original
+	// deals.
+	//
+	// This covers both initial and resharing rounds. In resharing, only the
+	// secret coefficient (Share.V) is deterministic — the remaining t-1
+	// polynomial coefficients are still random, producing different commitments
+	// and session ID on each NewDistKeyHandler call.
+	// #90 fail-fast: the seal must succeed before returning. On extract or seal
+	// error the CL retries with the same cached generator, so deals are never
+	// broadcast without recoverable coefficients (a fresh random polynomial on
+	// restart would break the session ID and evict this node from QUAL).
+	if extractErr != nil {
+		log.Errorf("failed to extract dealer polynomial coefficients: %v", extractErr)
 
 		return nil, status.Errorf(codes.Internal, "failed to extract dealer polynomial coefficients")
 	}
-
 	// A non-dealer legitimately has no coefficients (len==0, no error): skip persist.
 	if len(coeffs) > 0 {
-		if err := s.DKGStore.SetPrivateCoeffs(codeCommitmentHex, req.GetRound(), coeffs); err != nil {
-			log.Errorf("failed to persist dealer polynomial coefficients: %v", err)
+		if persistErr := s.DKGStore.SetPrivateCoeffs(codeCommitmentHex, req.GetRound(), coeffs); persistErr != nil {
+			log.Errorf("failed to persist dealer polynomial coefficients: %v", persistErr)
 
 			return nil, status.Errorf(codes.Internal, "failed to persist dealer polynomial coefficients")
 		}

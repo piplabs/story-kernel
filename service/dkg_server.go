@@ -33,7 +33,8 @@ type DKGServer struct {
 	reshareNextMu sync.Map // map[uint32]*sync.Mutex
 
 	// dkgMutationMu serializes the DKG-mutating RPCs (ProcessDeals,
-	// ProcessResponses, ProcessJustification) for a round. The cached
+	// ProcessResponses, ProcessJustification, GenerateDeals, FinalizeDKG) for a
+	// round. The cached
 	// DistKeyGenerator is unsynchronized; a client timeout does not stop the
 	// server handler, so a retry — or an adjacent mutating RPC — can run
 	// concurrently with the abandoned call and corrupt the shared instance.
