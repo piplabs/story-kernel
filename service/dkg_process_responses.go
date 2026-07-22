@@ -219,7 +219,15 @@ func (s *DKGServer) applyResponses(
 			continue
 		}
 
-		res := s.processResponse(distKeyGens, resp, isResharing, dealerKey, round, codeCommitmentHex)
+		res, err := s.processResponse(distKeyGens, resp, isResharing, dealerKey, round, codeCommitmentHex)
+		if err != nil {
+			// Transient dealer-key-load failure. Return before AddProcessedResponses
+			// so nothing is persisted for this batch; the CL retries the whole call
+			// and the justification is re-generated and signed once the key is
+			// available (kyber's resharing-own-deal path re-emits on every call, so
+			// the in-memory generator mutation from this call is not lost on retry).
+			return nil, 0, nil, err
+		}
 		justifications = append(justifications, res.pbJusts...)
 		emittedJusts = append(emittedJusts, res.emitted...)
 
@@ -279,7 +287,9 @@ type responseResult struct {
 // processResponse runs resp through every generator, signs any fresh resharing
 // justification, and reports the outcome. Reject only when EVERY generator
 // returns a real (non-idempotent) error; in resharing (prev+next) only one
-// generator typically owns a given response.
+// generator typically owns a given response. Returns a non-nil error only for a
+// transient dealer-key-load failure, which must abort the batch so the CL retries
+// (see signJustificationIfNeeded); all other drops are folded into the result.
 func (s *DKGServer) processResponse(
 	distKeyGens []*dkg.DistKeyGenerator,
 	resp *dkg.Response,
@@ -287,7 +297,7 @@ func (s *DKGServer) processResponse(
 	dealerKey *lazy[kyber.Scalar],
 	round uint32,
 	codeCommitmentHex string,
-) responseResult {
+) (responseResult, error) {
 	var complainerIdx uint32
 	if resp.Response != nil {
 		complainerIdx = resp.Response.Index
@@ -318,7 +328,13 @@ func (s *DKGServer) processResponse(
 			continue
 		}
 
-		if !s.signJustificationIfNeeded(isResharing, dealerKey, j, round, codeCommitmentHex) {
+		signed, err := s.signJustificationIfNeeded(isResharing, dealerKey, j, round, codeCommitmentHex)
+		if err != nil {
+			// Transient key-load failure: abort so the caller returns an error and
+			// the CL retries. Nothing persisted yet, so the retry re-generates this.
+			return res, err
+		}
+		if !signed {
 			continue
 		}
 
@@ -342,43 +358,46 @@ func (s *DKGServer) processResponse(
 		res.freshJust = true
 	}
 
-	return res
+	return res, nil
 }
 
 // signJustificationIfNeeded signs an unsigned resharing justification with the
-// lazily-loaded dealer key. It returns false when the justification must be
-// dropped (key load or signing failed) rather than forwarded unsigned, which the
-// CL would reject. Initial-DKG justifications arrive kyber-signed and are left
-// untouched.
+// lazily-loaded dealer key and reports whether it was signed. A key-LOAD failure is
+// transient (sealer/TEE momentarily unavailable): it returns an error so the CL retries
+// and re-signs once the key loads. A signing failure on a loaded key is deterministic,
+// so it drops the justification (false, nil) instead of forwarding it unsigned.
+// Initial-DKG justifications arrive kyber-signed and are left untouched.
 func (s *DKGServer) signJustificationIfNeeded(
 	isResharing bool,
 	dealerKey *lazy[kyber.Scalar],
 	j *dkg.Justification,
 	round uint32,
 	codeCommitmentHex string,
-) bool {
+) (bool, error) {
 	if !isResharing || len(j.Justification.Signature) != 0 {
-		return true
+		return true, nil
 	}
 
 	key, err := dealerKey.Get()
 	if err != nil {
+		// Transient: surface so the CL retries instead of dropping the justification.
 		log.WithFields(log.Fields{
 			"round":           round,
 			"code_commitment": codeCommitmentHex,
-		}).Errorf("failed to load dealer key to sign resharing justification; dropping: %v", err)
+		}).Errorf("failed to load dealer key to sign resharing justification; retrying: %v", err)
 
-		return false
+		return false, errors.Wrap(err, "load dealer key to sign resharing justification")
 	}
 
 	if err := signResharingJustification(s.Suite, key, j); err != nil {
+		// Deterministic: retrying will not help, so drop this justification.
 		log.WithFields(log.Fields{
 			"round":               round,
 			"code_commitment":     codeCommitmentHex,
 			"justification_index": j.Index,
 		}).Errorf("failed to sign resharing justification; dropping: %v", err)
 
-		return false
+		return false, nil
 	}
 
 	// Confirm this node signed a resharing justification with its prev-committee key.
@@ -388,7 +407,7 @@ func (s *DKGServer) signJustificationIfNeeded(
 		"justification_index": j.Index,
 	}).Info("signed resharing justification")
 
-	return true
+	return true, nil
 }
 
 // shouldReEmitJustification reports whether a retried response needs its

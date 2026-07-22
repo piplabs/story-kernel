@@ -530,40 +530,71 @@ func TestApplyResponses_ResharingJustificationSignedViaWiring(t *testing.T) {
 	require.NoError(t, schnorr.Verify(suite, c.pubs[dealerIdx], kyberJ.Justification.Hash(suite), sig))
 }
 
-// TestApplyResponses_KeyLoadFailureDropsJustification asserts that when the dealer
-// key is absent (LoadSealedEd25519Key errors), applyResponses DROPS the
-// justification rather than forwarding an unsigned one the CL would reject — while
-// still persisting the underlying response so kyber's state stays consistent.
-func TestApplyResponses_KeyLoadFailureDropsJustification(t *testing.T) {
+// TestApplyResponses_KeyLoadFailureSurfacesRetryableError asserts that when the
+// dealer key is absent (LoadSealedEd25519Key errors) applyResponses surfaces a
+// retryable ERROR instead of silently dropping the justification, and persists
+// NOTHING for the batch — so the CL retries the whole ProcessResponses call on a
+// later block rather than letting the dealer be invalidated. A subsequent retry
+// with the key sealed (kyber's resharing-own-deal path re-generates on every
+// call) then signs and forwards the justification, proving the self-heal.
+func TestApplyResponses_KeyLoadFailureSurfacesRetryableError(t *testing.T) {
 	t.Parallel()
 
-	suite, _, dealer, resp, dealerIdx, dealerCount, complainerCount := buildUnsignedResharingJustification(t)
+	suite, c, dealer, resp, dealerIdx, dealerCount, complainerCount := buildUnsignedResharingJustification(t)
 
 	const (
-		cc          = "cc-apply-responses-drop"
+		cc          = "cc-apply-responses-retry"
 		round       = uint32(5)
 		dealerRound = uint32(4)
 	)
 
-	// Do NOT seal the dealer key under dealerRound, so the lazy load fails.
+	// First attempt: the dealer key is NOT sealed under dealerRound, so the lazy
+	// load fails. The failure must surface as an error and persist nothing.
 	st := newPlaintextDKGStore(t, suite)
-
 	s := &DKGServer{Suite: suite, DKGStore: st}
 
 	justs, processed, rejected, err := s.applyResponses(
 		[]*dkg.DistKeyGenerator{dealer}, true, cc, round, dealerRound,
 		dealerCount, complainerCount, []*pb.Response{resp},
 	)
-	require.NoError(t, err)
+	require.Error(t, err, "a transient key-load failure must surface as an error for the CL to retry")
+	require.Empty(t, justs)
+	require.Empty(t, rejected)
+	require.Zero(t, processed)
 
-	require.Empty(t, justs, "an unsignable justification must be dropped, not forwarded")
-	require.Empty(t, rejected, "a key-load failure is not a response rejection")
-	require.Equal(t, 1, processed, "the response must still be persisted for state consistency")
+	// Nothing must be persisted for the batch, so the retry starts clean.
+	has, err := st.HasDKGState(cc, round)
+	require.NoError(t, err)
+	require.False(t, has, "no state may be persisted on the failed attempt")
+
+	// Retry with the key now available (as it would be on a later block). Reuse the
+	// same in-memory generator to mirror the cached-generator reuse in production;
+	// the resharing-own-deal path re-generates the justification, so the retry
+	// succeeds despite the earlier mutation.
+	dealerBz, err := c.longterms[dealerIdx].MarshalBinary()
+	require.NoError(t, err)
+	require.NoError(t, st.SealAndStoreEd25519Key(cc, dealerRound, dealerBz))
+
+	justs, processed, rejected, err = s.applyResponses(
+		[]*dkg.DistKeyGenerator{dealer}, true, cc, round, dealerRound,
+		dealerCount, complainerCount, []*pb.Response{resp},
+	)
+	require.NoError(t, err, "the retry must succeed once the key is available")
+	require.Empty(t, rejected)
+	require.Equal(t, 1, processed, "the response is persisted on the successful retry")
+	require.Len(t, justs, 1, "the signed justification must be forwarded on the retry")
+
+	sig := justs[0].GetVssJustification().GetSignature()
+	require.NotEmpty(t, sig, "the retry must sign the resharing justification")
+	kyberJ, err := types.ConvertToJustification(justs[0])
+	require.NoError(t, err)
+	require.NoError(t, schnorr.Verify(suite, c.pubs[dealerIdx], kyberJ.Justification.Hash(suite), sig))
 
 	loaded, err := st.LoadDKGState(cc, round)
 	require.NoError(t, err)
 	require.Len(t, loaded.Responses, 1)
 	require.Equal(t, uint32(dealerIdx), loaded.Responses[0].Index)
+	require.Len(t, loaded.EmittedJustifications, 1, "exactly one justification is persisted (no double-persist)")
 }
 
 // buildSignedInitialJustification runs an initial (non-resharing) DKG far enough
