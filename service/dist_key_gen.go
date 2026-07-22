@@ -292,7 +292,13 @@ func (s *DKGServer) buildResharingPrevDKG(
 		return nil, err
 	}
 
+	// existing is fromRound's shared cached generator; DistKeyShare reads its
+	// aggregator state, so guard against a concurrent fromRound ProcessResponses
+	// with the same per-round mutex. Store IO below stays outside the lock.
+	mu := s.getDKGMutationMu(fromRound)
+	mu.Lock()
 	share, err := existing.DistKeyShare()
+	mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -391,7 +397,12 @@ func (s *DKGServer) rebuildResharingPrevDKG(
 		return nil, err
 	}
 
+	// Same serialization as buildResharingPrevDKG: guard the shared fromRound
+	// generator's DistKeyShare read with getDKGMutationMu(fromRound).
+	mu := s.getDKGMutationMu(fromRound)
+	mu.Lock()
 	share, err := existing.DistKeyShare()
+	mu.Unlock()
 	if err != nil {
 		return nil, err
 	}

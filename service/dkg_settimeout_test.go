@@ -361,3 +361,125 @@ func TestGenerateDealsRegion_SerializedWithProcessDeal(t *testing.T) {
 	require.NoError(t, gerr)
 	require.NotEmpty(t, coeffs)
 }
+
+// buildFullyCertifiedGensWithReplayResponse builds an n-of-t DKG where every deal
+// and every response is delivered everywhere, so gens[0] is ThresholdCertified and
+// DistKeyShare() succeeds with no SetTimeout — matching the fromRound generator the
+// resharing-prev path reads via existing.DistKeyShare(). It also returns one
+// already-delivered response so a test can replay it "late" (idempotent to kyber,
+// but still mutates aggregator state) concurrently with the read.
+func buildFullyCertifiedGensWithReplayResponse(t *testing.T, n, threshold int) ([]*dkg.DistKeyGenerator, *dkg.Response) {
+	t.Helper()
+
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+	longterms := make([]kyber.Scalar, n)
+	pubs := make([]kyber.Point, n)
+	for i := 0; i < n; i++ {
+		longterms[i] = suite.Scalar().Pick(suite.RandomStream())
+		pubs[i] = suite.Point().Mul(longterms[i], nil)
+	}
+
+	gens := make([]*dkg.DistKeyGenerator, n)
+	for i := 0; i < n; i++ {
+		g, err := dkg.NewDistKeyGenerator(suite, longterms[i], pubs, threshold)
+		require.NoError(t, err)
+		gens[i] = g
+	}
+
+	var all []*dkg.Response
+	for _, dealer := range gens {
+		deals, err := dealer.Deals()
+		require.NoError(t, err)
+		for vidx, deal := range deals {
+			resp, err := gens[vidx].ProcessDeal(deal)
+			require.NoError(t, err)
+			all = append(all, resp)
+		}
+	}
+
+	// Deliver every response to every other generator so all are certified.
+	var replay *dkg.Response
+	for _, resp := range all {
+		for vidx, g := range gens {
+			if int(resp.Response.Index) == vidx {
+				continue
+			}
+			_, err := g.ProcessResponse(resp)
+			require.NoError(t, err)
+			if replay == nil && vidx == 0 {
+				replay = resp
+			}
+		}
+	}
+	require.NotNil(t, replay, "must capture one response addressed to gens[0] for replay")
+
+	return gens, replay
+}
+
+// TestResharingDistKeyShareRead_SerializedWithLateResponse exercises the #87
+// mutex-coverage fix on the resharing-setup path: buildResharingPrevDKG /
+// rebuildResharingPrevDKG read the fromRound generator via existing.DistKeyShare()
+// (which reads aggregator state through ThresholdCertified), while a late/abandoned
+// ProcessResponses on that same shared fromRound instance mutates it. Both now take
+// getDKGMutationMu(fromRound), so they serialize with no data race (run with -race)
+// and the share still computes.
+func TestResharingDistKeyShareRead_SerializedWithLateResponse(t *testing.T) {
+	t.Parallel()
+
+	const (
+		n         = 4
+		threshold = 2
+		fromRound = uint32(11)
+	)
+
+	gens, replay := buildFullyCertifiedGensWithReplayResponse(t, n, threshold)
+	g := gens[0]
+	s := &DKGServer{}
+
+	var (
+		active  atomic.Int32
+		overlap atomic.Bool
+		wg      sync.WaitGroup
+		share   *dkg.DistKeyShare
+		readErr error
+	)
+	enter := func() {
+		if active.Add(1) > 1 {
+			overlap.Store(true)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	leave := func() { active.Add(-1) }
+
+	wg.Add(2)
+
+	// Resharing-prev read region: exactly what build/rebuildResharingPrevDKG now guards.
+	go func() {
+		defer wg.Done()
+		mu := s.getDKGMutationMu(fromRound)
+		mu.Lock()
+		defer mu.Unlock()
+		enter()
+		defer leave()
+		share, readErr = g.DistKeyShare()
+	}()
+
+	// A late/abandoned ProcessResponses retry on the same fromRound instance.
+	go func() {
+		defer wg.Done()
+		mu := s.getDKGMutationMu(fromRound)
+		mu.Lock()
+		defer mu.Unlock()
+		enter()
+		defer leave()
+		_, _ = g.ProcessResponse(replay)
+	}()
+
+	wg.Wait()
+
+	require.False(t, overlap.Load(),
+		"resharing DistKeyShare read and ProcessResponses must not overlap under the per-round mutex")
+	require.NoError(t, readErr)
+	require.NotNil(t, share)
+	require.NotNil(t, share.PriShare())
+}
