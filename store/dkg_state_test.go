@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -509,4 +510,39 @@ func TestSaveStateOverwrite(t *testing.T) {
 	st, err := store.LoadDKGState(codeCommitment, round)
 	require.NoError(t, err)
 	require.Equal(t, uint32(5), st.Threshold, "overwritten state should have new threshold")
+}
+
+// failingSealer is a test-only sealer whose SealToFile always fails, simulating
+// a sealed-storage write failure.
+type failingSealer struct{}
+
+func (failingSealer) SealToFile(_ []byte, _ string) error {
+	return errFailingSealer
+}
+
+func (failingSealer) UnsealFromFile(_ string) ([]byte, error) {
+	return nil, errFailingSealer
+}
+
+var errFailingSealer = errors.New("sealer failure")
+
+// TestSetPrivateCoeffs_SealFailureSurfacesError verifies that a sealing failure
+// surfaces as an error from SetPrivateCoeffs. GenerateDeals relies on this: it
+// must NOT return deals to the CL when the dealer polynomial cannot be durably
+// sealed, otherwise a restart would regenerate a fresh polynomial and evict the
+// node from QUAL.
+func TestSetPrivateCoeffs_SealFailureSurfacesError(t *testing.T) {
+	t.Parallel()
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+	dir := t.TempDir()
+	store := NewDKGStoreWithSealer(
+		filepath.Join(dir, "keys"),
+		filepath.Join(dir, "state"),
+		suite,
+		failingSealer{},
+	)
+
+	err := store.SetPrivateCoeffs("failseal", 1, [][]byte{{0x01}, {0x02}})
+	require.ErrorIs(t, err, errFailingSealer,
+		"a sealing failure must surface as an error, not be swallowed")
 }
