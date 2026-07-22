@@ -250,6 +250,14 @@ func (s *DKGServer) applyDeals(
 	// dropped connection can re-emit the responses instead of losing them.
 	if len(deals) > 0 {
 		if err := s.DKGStore.AddProcessedDeals(codeCommitmentHex, round, deals, emittedResps); err != nil {
+			// Persist failed after kyber absorbed the deals in memory. Evict the
+			// round's cached generator so the retry rebuilds from persisted state
+			// (which lacks these deals) and re-processes cleanly. The generator is
+			// in InitDKGCache or ResharingNextCache (both round-keyed; Delete is a
+			// no-op when absent, so evicting both is safe).
+			s.InitDKGCache.Delete(round)
+			s.ResharingNextCache.Delete(round)
+
 			return nil, 0, nil, err
 		}
 	}

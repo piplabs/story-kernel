@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -409,6 +410,63 @@ func TestApplyDeals_MissingEmittedResponsesSilentlySkips(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, resps, "no stored emitted responses means nothing to re-emit")
 	require.Empty(t, rej, "dedup must never reject")
+}
+
+// TestApplyDeals_EvictsCachedGeneratorOnPersistFailure is the regression test
+// for PR #87: when AddProcessedDeals fails after kyber has already absorbed the
+// deals in memory, applyDeals must evict the round's cached generator so the
+// next retry rebuilds a fresh one from persisted state (which lacks these
+// deals) and re-processes cleanly — rather than hitting kyber's
+// already-processed path with nothing on disk to re-emit.
+func TestApplyDeals_EvictsCachedGeneratorOnPersistFailure(t *testing.T) {
+	t.Parallel()
+
+	const (
+		cc        = "cc-persist-fail"
+		round     = uint32(1)
+		n         = 3
+		threshold = 2
+	)
+
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+	gens := freshDKGGens(t, suite, n, threshold)
+	self := 0
+	reqDeals := dealsAddressedTo(t, gens, self)
+
+	// Point the state directory at a regular file so every state read/write
+	// fails: this makes AddProcessedDeals return an error after kyber has
+	// already absorbed the deals in memory, reproducing the persist-fail case.
+	dir := t.TempDir()
+	stateAsFile := filepath.Join(dir, "state-as-file")
+	require.NoError(t, os.WriteFile(stateAsFile, []byte("x"), 0o600))
+
+	st := store.NewDKGStoreWithSealer(
+		filepath.Join(dir, "keys"),
+		stateAsFile,
+		suite,
+		upgradePlaintextSealer{},
+	)
+
+	s := &DKGServer{
+		Suite:              suite,
+		DKGStore:           st,
+		InitDKGCache:       store.NewDKGCache(),
+		ResharingNextCache: store.NewDKGCache(),
+	}
+
+	// Seed both round-keyed caches: an initial round lives in InitDKGCache and a
+	// resharing round in ResharingNextCache; applyDeals evicts both defensively.
+	s.InitDKGCache.Set(round, gens[self])
+	s.ResharingNextCache.Set(round, gens[self])
+
+	_, _, _, err := s.applyDeals(gens[self], cc, round, n, reqDeals)
+	require.Error(t, err, "persist failure must surface an error")
+
+	_, ok := s.InitDKGCache.Get(round)
+	require.False(t, ok, "InitDKGCache generator must be evicted after persist failure")
+
+	_, ok = s.ResharingNextCache.Get(round)
+	require.False(t, ok, "ResharingNextCache generator must be evicted after persist failure")
 }
 
 // TestProcessDeals_ConcurrentRoundSerialized reproduces the timeout-then-retry
