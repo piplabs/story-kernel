@@ -26,7 +26,8 @@ PROTO_OUT_DIR=./
 
 .PHONY: build build-sgx build-tdx clean proto-gen test test-cover test-noop \
         test-tdx run setup-deps gramine-manifest gramine-sign \
-        gramine-enclave-info all-sgx all-tdx setup-cbmpc lint lint-noop lint-tdx
+        gramine-enclave-info all-sgx all-tdx setup-cbmpc lint lint-noop lint-tdx \
+        build-with-cpp all-gramine
 
 # Clone cb-mpc if not present; the C++ build is handled by go_with_cpp.sh
 setup-cbmpc:
@@ -90,6 +91,15 @@ all-tdx: build-tdx
 	@echo "First-run note: bootstrap mode logs the measured PCR digest."
 	@echo "Paste it into supportedProviders[].ExpectedDigest in"
 	@echo "enclave/tdx/providers.go, rebuild, and redeploy for strict mode."
+
+# ============ Backward-compat aliases ============
+# story-cdr-e2e provisioning scripts (setup_devnet.sh, deploy_kernel_v2.sh,
+# kernel-upgrade-test.sh, deploy_sim.sh) call the pre-TDX-refactor target names.
+# Map them onto the SGX pipeline so the same scripts build this unified branch
+# unchanged. NOTE: build-with-cpp -> build-sgx (NOT build), so the binary keeps
+# the sgx backend; aliasing to the untagged `build` would fail-close all TEE ops.
+build-with-cpp: build-sgx
+all-gramine: all-sgx
 
 clean:
 	$(GO) clean
