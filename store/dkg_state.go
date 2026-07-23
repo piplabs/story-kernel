@@ -37,19 +37,22 @@ type DKGState struct {
 
 	// Emitted* hold artifacts this node produced and returned to the CL, kept so
 	// a retried RPC re-emits them instead of losing them. Not replayed on rebuild
-	// (separate from the received Deals/Responses/Justifications above).
-	EmittedResponses []dkg.Response
+	// (separate from the received Deals/Responses/Justifications above); replaying
+	// EmittedJustifications especially would double-apply into this node's generator.
+	EmittedResponses      []dkg.Response
+	EmittedJustifications []dkg.Justification
 }
 
 type dkgStateDisk struct {
-	PubKeysBase64      []string            `json:"pub_keys_base_64"`
-	Threshold          uint32              `json:"threshold"`
-	Deals              []dkg.Deal          `json:"deals"`
-	Responses          []dkg.Response      `json:"responses"`
-	Justifications     []justificationDisk `json:"justifications,omitempty"`
-	FromRound          uint32              `json:"from_round,omitempty"`
-	PublicCoeffsBase64 []string            `json:"public_coeffs_base_64,omitempty"`
-	EmittedResponses   []dkg.Response      `json:"emitted_responses,omitempty"`
+	PubKeysBase64         []string            `json:"pub_keys_base_64"`
+	Threshold             uint32              `json:"threshold"`
+	Deals                 []dkg.Deal          `json:"deals"`
+	Responses             []dkg.Response      `json:"responses"`
+	Justifications        []justificationDisk `json:"justifications,omitempty"`
+	FromRound             uint32              `json:"from_round,omitempty"`
+	PublicCoeffsBase64    []string            `json:"public_coeffs_base_64,omitempty"`
+	EmittedResponses      []dkg.Response      `json:"emitted_responses,omitempty"`
+	EmittedJustifications []justificationDisk `json:"emitted_justifications,omitempty"`
 }
 
 // justificationDisk is the JSON-serializable representation of dkg.Justification.
@@ -270,9 +273,13 @@ func (s *DKGStore) AddProcessedDeals(codeCommitmentHex string, round uint32, dea
 	})
 }
 
-func (s *DKGStore) AddResponses(codeCommitmentHex string, round uint32, resps []dkg.Response) error {
+// AddProcessedResponses appends processed responses and the justifications this
+// node generated (and signed) for them in a single atomic write, so a retried
+// ProcessResponses can re-emit the justifications from EmittedJustifications.
+func (s *DKGStore) AddProcessedResponses(codeCommitmentHex string, round uint32, resps []dkg.Response, emittedJusts []dkg.Justification) error {
 	return s.updateState(codeCommitmentHex, round, func(st *DKGState) {
 		st.Responses = append(st.Responses, resps...)
+		st.EmittedJustifications = append(st.EmittedJustifications, emittedJusts...)
 	})
 }
 
@@ -288,14 +295,20 @@ func (s *DKGStore) toDisk(st *DKGState) (*dkgStateDisk, error) {
 		return nil, errors.Wrap(err, "marshal justifications")
 	}
 
+	emittedJustDisk, err := justificationsToDisk(st.EmittedJustifications)
+	if err != nil {
+		return nil, errors.Wrap(err, "marshal emitted justifications")
+	}
+
 	d := &dkgStateDisk{
-		Threshold:        st.Threshold,
-		Deals:            st.Deals,
-		Responses:        st.Responses,
-		Justifications:   justDisk,
-		FromRound:        st.FromRound,
-		EmittedResponses: st.EmittedResponses,
-		PubKeysBase64:    make([]string, len(st.PubKeys)),
+		Threshold:             st.Threshold,
+		Deals:                 st.Deals,
+		Responses:             st.Responses,
+		Justifications:        justDisk,
+		FromRound:             st.FromRound,
+		EmittedResponses:      st.EmittedResponses,
+		EmittedJustifications: emittedJustDisk,
+		PubKeysBase64:         make([]string, len(st.PubKeys)),
 	}
 
 	for i, p := range st.PubKeys {
@@ -327,14 +340,20 @@ func (s *DKGStore) fromDisk(d *dkgStateDisk) (*DKGState, error) {
 		return nil, errors.Wrap(err, "unmarshal justifications")
 	}
 
+	emittedJusts, err := justificationsFromDisk(s.suite, d.EmittedJustifications)
+	if err != nil {
+		return nil, errors.Wrap(err, "unmarshal emitted justifications")
+	}
+
 	st := &DKGState{
-		Threshold:        d.Threshold,
-		Deals:            d.Deals,
-		Responses:        d.Responses,
-		Justifications:   justs,
-		FromRound:        d.FromRound,
-		EmittedResponses: d.EmittedResponses,
-		PubKeys:          make([]kyber.Point, len(d.PubKeysBase64)),
+		Threshold:             d.Threshold,
+		Deals:                 d.Deals,
+		Responses:             d.Responses,
+		Justifications:        justs,
+		FromRound:             d.FromRound,
+		EmittedResponses:      d.EmittedResponses,
+		EmittedJustifications: emittedJusts,
+		PubKeys:               make([]kyber.Point, len(d.PubKeysBase64)),
 	}
 
 	for i, enc := range d.PubKeysBase64 {
