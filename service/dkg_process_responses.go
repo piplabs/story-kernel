@@ -125,6 +125,12 @@ func (s *DKGServer) ProcessResponses(_ context.Context, req *pb.ProcessResponses
 		resps          []dkg.Response
 		rejected       []*pb.Response
 	)
+
+	// Serialize the shared DistKeyGenerator mutation with the other DKG-mutating
+	// RPCs for this round (see dkgMutationMu). Persist runs after the loop under
+	// its own store lock, so only the kyber mutation needs covering here.
+	mu := s.getDKGMutationMu(req.GetRound())
+	mu.Lock()
 	for _, response := range req.GetResponses() {
 		resp := types.ConvertToVSSResp(response)
 
@@ -212,6 +218,7 @@ func (s *DKGServer) ProcessResponses(_ context.Context, req *pb.ProcessResponses
 
 		resps = append(resps, *resp)
 	}
+	mu.Unlock()
 
 	if len(resps) > 0 {
 		if err := s.DKGStore.AddResponses(codeCommitmentHex, req.GetRound(), resps); err != nil {
