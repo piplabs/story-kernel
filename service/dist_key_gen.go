@@ -338,6 +338,14 @@ func (s *DKGServer) loadFromRoundShare(
 		return nil, err
 	}
 
+	// DistKeyShare() reads the shared fromRound generator's aggregator state, so serialize
+	// with that instance's other DKG-mutating RPCs, all keyed on fromRound. getOrRebuildFromRoundDKG
+	// already released its cache mutex via defer, so this stays a leaf lock. The closure releases
+	// via defer so a panic cannot poison it.
+	mu := s.getDKGMutationMu(fromRound)
+	mu.Lock()
+	defer mu.Unlock()
+
 	return existing.DistKeyShare()
 }
 
