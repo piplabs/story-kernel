@@ -31,6 +31,13 @@ type DKGServer struct {
 	initDKGMu     sync.Map // map[uint32]*sync.Mutex
 	resharePrevMu sync.Map // map[uint64]*sync.Mutex  (fromRound<<32 | toRound)
 	reshareNextMu sync.Map // map[uint32]*sync.Mutex
+
+	// dkgMutationMu serializes the DKG-mutating RPCs (ProcessDeals,
+	// ProcessResponses, ProcessJustification) for a round. The cached
+	// DistKeyGenerator is unsynchronized; a client timeout does not stop the
+	// server handler, so a retry — or an adjacent mutating RPC — can run
+	// concurrently with the abandoned call and corrupt the shared instance.
+	dkgMutationMu sync.Map // map[uint32]*sync.Mutex
 }
 
 func (s *DKGServer) getInitDKGMu(round uint32) *sync.Mutex {
@@ -41,6 +48,11 @@ func (s *DKGServer) getInitDKGMu(round uint32) *sync.Mutex {
 func (s *DKGServer) getResharePrevMu(fromRound, toRound uint32) *sync.Mutex {
 	key := uint64(fromRound)<<32 | uint64(toRound)
 	v, _ := s.resharePrevMu.LoadOrStore(key, &sync.Mutex{})
+	return v.(*sync.Mutex)
+}
+
+func (s *DKGServer) getDKGMutationMu(round uint32) *sync.Mutex {
+	v, _ := s.dkgMutationMu.LoadOrStore(round, &sync.Mutex{})
 	return v.(*sync.Mutex)
 }
 

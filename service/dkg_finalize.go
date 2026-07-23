@@ -77,8 +77,47 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 		}
 	}
 
-	// Generate Distributed Key Share
-	distKeyShare, err := distKeyGen.DistKeyShare()
+	// Calculate participants root from the post-invalidation participant set. The chain
+	// flips the round to the finalization stage, invalidates dealers that submitted no deal,
+	// and emits BeginDKGFinalization in the same block, so we must wait until the light
+	// client has observed that block before reading registrations. Otherwise a lagging
+	// trusted height may still report an invalidated dealer as VERIFIED, producing a
+	// participants root that disagrees with the set the chain agreed on.
+	//
+	// Snapshotting the share only after this wait also lets more of the response feed drain,
+	// so DistKeyShare() interpolates over a fuller QUAL; that same share is sealed and later
+	// used for dealing (loadFromRoundShare), keeping deals and on-chain coeffs consistent.
+	registrations, err := s.waitForFinalizationRegistrations(codeCommitmentHex, req.GetRound())
+	if err != nil {
+		log.Errorf("failed to get finalization DKG registrations: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to get finalization DKG registrations")
+	}
+
+	participantsRoot, err := calculateParticipantsRoot(registrations)
+	if err != nil {
+		log.Errorf("failed to calculate participants root: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to calculate participants root")
+	}
+
+	// Enable the timeout so DealCertified tolerates up to n-t absent verifier responses,
+	// restoring the configured threshold's fault tolerance; without it a single absent
+	// verifier fails the whole round. SetTimeout propagates to every verifier's aggregator.
+	//
+	// SetTimeout + DistKeyShare mutate/read the shared cached generator, so serialize
+	// with the other DKG-mutating RPCs for this round. The closure releases the lock via
+	// defer so a panic cannot poison it; sealing/store/cache IO below uses only the
+	// computed share and stays outside the lock.
+	mu := s.getDKGMutationMu(req.GetRound())
+	distKeyShare, err := func() (*dkg.DistKeyShare, error) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		distKeyGen.SetTimeout()
+
+		return distKeyGen.DistKeyShare()
+	}()
 	if err != nil {
 		log.Errorf("failed to compute distributed key share: %v", err)
 
@@ -128,26 +167,6 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 		log.Errorf("failed to marshal public coeffs: %v", err)
 
 		return nil, status.Errorf(codes.Internal, "failed to marshal public coeffs")
-	}
-
-	// Calculate participants root from the post-invalidation participant set. The chain
-	// flips the round to the finalization stage, invalidates dealers that submitted no deal,
-	// and emits BeginDKGFinalization in the same block, so we must wait until the light
-	// client has observed that block before reading registrations. Otherwise a lagging
-	// trusted height may still report an invalidated dealer as VERIFIED, producing a
-	// participants root that disagrees with the set the chain agreed on.
-	registrations, err := s.waitForFinalizationRegistrations(codeCommitmentHex, req.GetRound())
-	if err != nil {
-		log.Errorf("failed to get finalization DKG registrations: %v", err)
-
-		return nil, status.Errorf(codes.Internal, "failed to get finalization DKG registrations")
-	}
-
-	participantsRoot, err := calculateParticipantsRoot(registrations)
-	if err != nil {
-		log.Errorf("failed to calculate participants root: %v", err)
-
-		return nil, status.Errorf(codes.Internal, "failed to calculate participants root")
 	}
 
 	// Hash response message

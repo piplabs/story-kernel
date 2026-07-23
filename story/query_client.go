@@ -43,6 +43,7 @@ const (
 type QueryClient interface {
 	GetDKGNetwork(ctx context.Context, codeCommitmentHex string, round uint32) (*pb.DKGNetwork, error)
 	GetAllParticipantDKGRegistrations(ctx context.Context, codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error)
+	GetAllRegisteredDKGRegistrations(ctx context.Context, codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error)
 	GetLatestActiveDKGNetwork(ctx context.Context) (*pb.DKGNetwork, error)
 	HasDecryptRequest(ctx context.Context, round uint32, requesterPubKeyHex string, labelHex string, ciphertextHex string) (bool, error)
 	VerifyStartBlock(ctx context.Context, startBlockHeight int64, startBlockHash []byte) error
@@ -248,11 +249,22 @@ func (q *VerifiedQueryClient) GetDKGNetwork(ctx context.Context, codeCommitmentH
 	return &network, nil
 }
 
-// GetAllParticipantDKGRegistrations returns all DKG registrations that are part of
-// the active participant set (VERIFIED or FINALIZED status). Both statuses must be
-// included because validators finalize at different times — earlier finalizers
-// transition their status from VERIFIED to FINALIZED before later finalizers query.
+// GetAllParticipantDKGRegistrations returns the round's VERIFIED/FINALIZED registrations. Use
+// it where only currently-valid participants matter (e.g. finalization counting).
 func (q *VerifiedQueryClient) GetAllParticipantDKGRegistrations(ctx context.Context, codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error) {
+	return q.collectDKGRegistrations(ctx, codeCommitmentHex, round, true)
+}
+
+// GetAllRegisteredDKGRegistrations returns ALL of the round's registrations regardless of status
+// (skipping only validators that never registered). Resharing builds the previous committee from
+// this set so an invalidated member keeps its slot and the survivors' kyber indices are preserved.
+func (q *VerifiedQueryClient) GetAllRegisteredDKGRegistrations(ctx context.Context, codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error) {
+	return q.collectDKGRegistrations(ctx, codeCommitmentHex, round, false)
+}
+
+// collectDKGRegistrations queries each registered validator in the round's active set. When
+// onlyParticipants is true it keeps only VERIFIED/FINALIZED registrations.
+func (q *VerifiedQueryClient) collectDKGRegistrations(ctx context.Context, codeCommitmentHex string, round uint32, onlyParticipants bool) ([]*pb.DKGRegistration, error) {
 	// First get the network to know which validators are registered
 	network, err := q.GetDKGNetwork(ctx, codeCommitmentHex, round)
 	if err != nil {
@@ -280,10 +292,13 @@ func (q *VerifiedQueryClient) GetAllParticipantDKGRegistrations(ctx context.Cont
 			continue
 		}
 
-		if reg.GetStatus() == pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED ||
-			reg.GetStatus() == pb.DKGRegStatus_DKG_REG_STATUS_FINALIZED {
-			registrations = append(registrations, reg)
+		if onlyParticipants &&
+			reg.GetStatus() != pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED &&
+			reg.GetStatus() != pb.DKGRegStatus_DKG_REG_STATUS_FINALIZED {
+			continue
 		}
+
+		registrations = append(registrations, reg)
 	}
 
 	if len(registrations) == 0 {

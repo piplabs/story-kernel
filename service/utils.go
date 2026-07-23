@@ -99,3 +99,24 @@ func reverseBytes(in []byte) []byte {
 
 	return out
 }
+
+// lazy memoizes a value produced by load, running it at most once on the first
+// Get. It lets a request defer an expensive load (e.g. reading DKG state from
+// disk) so the normal path pays nothing, while a retry loads it exactly once and
+// reuses it for every subsequent item in the same call. Not safe for concurrent
+// use — intended for a single request goroutine.
+type lazy[T any] struct {
+	load   func() (T, error)
+	value  T
+	loaded bool
+	err    error
+}
+
+func (l *lazy[T]) Get() (T, error) {
+	if !l.loaded {
+		l.value, l.err = l.load()
+		l.loaded = true
+	}
+
+	return l.value, l.err
+}

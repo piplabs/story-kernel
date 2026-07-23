@@ -20,10 +20,14 @@ import (
 type stubQueryClient struct {
 	networks      []*pb.DKGNetwork
 	registrations [][]*pb.DKGRegistration
-	netCalls      atomic.Int32
-	regCalls      atomic.Int32
-	netErr        error
-	regErr        error
+	// allRegistrations, when set, is returned by GetAllRegisteredDKGRegistrations
+	// (ALL statuses). If nil, that method falls back to the VERIFIED-only set so
+	// existing tests keep both sets identical.
+	allRegistrations []*pb.DKGRegistration
+	netCalls         atomic.Int32
+	regCalls         atomic.Int32
+	netErr           error
+	regErr           error
 }
 
 var _ story.QueryClient = (*stubQueryClient)(nil)
@@ -48,6 +52,13 @@ func (s *stubQueryClient) GetAllParticipantDKGRegistrations(_ context.Context, _
 		i = len(s.registrations) - 1
 	}
 	return s.registrations[i], nil
+}
+
+func (s *stubQueryClient) GetAllRegisteredDKGRegistrations(ctx context.Context, cc string, round uint32) ([]*pb.DKGRegistration, error) {
+	if s.allRegistrations != nil {
+		return s.allRegistrations, nil
+	}
+	return s.GetAllParticipantDKGRegistrations(ctx, cc, round)
 }
 
 // Unused interface methods — panic loudly if accidentally invoked.
@@ -398,4 +409,89 @@ func TestGetOrLoadRoundContext_NonLagFetchErrorAborts(t *testing.T) {
 	require.Nil(t, rc)
 	require.ErrorIs(t, err, transportErr)
 	require.Equal(t, int32(1), stub.netCalls.Load(), "no retry on non-lag error")
+}
+
+// The initial-round kyber node list must preserve an invalidated member's slot.
+// A member invalidated mid-dealing is dropped from the VERIFIED-only set but kept
+// in the ALL-status set. Because extractSortedPubKeys assigns kyber positions as a
+// dense index after sorting by reg.Index, the node list must be built from the
+// ALL-status set so a late builder gets the same length and per-position keys as an
+// early builder (and as the all-verified case). Without this fix, dropping index 2
+// would shift index 3 into position 1, diverging late builders from peers.
+func TestFetchRoundContext_PreservesInvalidatedSlot(t *testing.T) {
+	suite := edwards25519.NewBlakeSHA256Ed25519()
+
+	// Three distinct, deterministic Ed25519 public keys, one per slot.
+	pubKeyBytes := make([][]byte, 3)
+	for i := range pubKeyBytes {
+		point := suite.Point().Mul(suite.Scalar().SetInt64(int64(i+1)), nil)
+		b, err := point.MarshalBinary()
+		require.NoError(t, err)
+		pubKeyBytes[i] = b
+	}
+
+	// Baseline: all three verified. network.Total counts the verified set.
+	allVerified := []*pb.DKGRegistration{
+		{Index: 1, Round: 5, ValidatorAddr: "0xaaa", DkgPubKey: pubKeyBytes[0], Status: pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED},
+		{Index: 2, Round: 5, ValidatorAddr: "0xbbb", DkgPubKey: pubKeyBytes[1], Status: pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED},
+		{Index: 3, Round: 5, ValidatorAddr: "0xccc", DkgPubKey: pubKeyBytes[2], Status: pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED},
+	}
+
+	baseStub := &stubQueryClient{
+		networks:      []*pb.DKGNetwork{{Total: 3, Threshold: 2, Round: 5}},
+		registrations: [][]*pb.DKGRegistration{allVerified},
+	}
+	baseSrv := &DKGServer{
+		QueryClient:   baseStub,
+		Suite:         suite,
+		RoundCtxCache: store.NewRoundContextCache(),
+	}
+	baseRC, err := baseSrv.GetOrLoadRoundContext("cc", 5)
+	require.NoError(t, err)
+	require.Len(t, baseRC.SortedPubKeys, 3)
+
+	// Invalidation scenario: index 2 is invalidated mid-dealing. network.Total is fixed
+	// at BeginDealing to the verified count (3) and is never decremented, so the ALL-status
+	// set keeps length 3 with the invalidated member in its slot. The VERIFIED-only set
+	// would shrink to 2 and fail the len==Total check (asserted separately below).
+	allStatuses := []*pb.DKGRegistration{
+		{Index: 1, Round: 5, ValidatorAddr: "0xaaa", DkgPubKey: pubKeyBytes[0], Status: pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED},
+		{Index: 2, Round: 5, ValidatorAddr: "0xbbb", DkgPubKey: pubKeyBytes[1], Status: pb.DKGRegStatus_DKG_REG_STATUS_INVALIDATED},
+		{Index: 3, Round: 5, ValidatorAddr: "0xccc", DkgPubKey: pubKeyBytes[2], Status: pb.DKGRegStatus_DKG_REG_STATUS_VERIFIED},
+	}
+
+	invStub := &stubQueryClient{
+		networks:         []*pb.DKGNetwork{{Total: 3, Threshold: 2, Round: 5}},
+		allRegistrations: allStatuses,
+	}
+	invSrv := &DKGServer{
+		QueryClient:   invStub,
+		Suite:         suite,
+		RoundCtxCache: store.NewRoundContextCache(),
+	}
+	invRC, err := invSrv.GetOrLoadRoundContext("cc", 5)
+	require.NoError(t, err)
+
+	// Slot preserved: same length and same per-position keys as the all-verified case.
+	require.Len(t, invRC.SortedPubKeys, 3, "invalidated member's slot must be preserved")
+	for i := range baseRC.SortedPubKeys {
+		require.True(t, baseRC.SortedPubKeys[i].Equal(invRC.SortedPubKeys[i]),
+			"kyber position %d must match the all-verified list", i)
+	}
+	// Registrations now carries all statuses; the invalidated member is retained.
+	require.Len(t, invRC.Registrations, 3)
+
+	// A VERIFIED-only view (2 of 3) would fail validateRegistrations against the
+	// unchanged network.Total=3 — the exact count mismatch the fix avoids.
+	shrunkStub := &stubQueryClient{
+		networks:         []*pb.DKGNetwork{{Total: 3, Threshold: 2, Round: 5}},
+		allRegistrations: []*pb.DKGRegistration{allStatuses[0], allStatuses[2]},
+	}
+	shrunkSrv := &DKGServer{
+		QueryClient:   shrunkStub,
+		Suite:         suite,
+		RoundCtxCache: store.NewRoundContextCache(),
+	}
+	_, err = shrunkSrv.GetOrLoadRoundContext("cc", 5)
+	require.Error(t, err, "shrinking to the VERIFIED-only set must fail the count check")
 }

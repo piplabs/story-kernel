@@ -177,6 +177,63 @@ func TestDKGCache_Concurrent(t *testing.T) {
 	wg.Wait()
 }
 
+// TestDKGCache_Delete verifies Delete removes a present entry and is a no-op
+// when the round is absent.
+func TestDKGCache_Delete(t *testing.T) {
+	t.Parallel()
+
+	c := NewDKGCache()
+
+	// Delete on an empty cache must be a safe no-op.
+	c.Delete(1)
+
+	c.Set(1, nil)
+	c.Set(2, nil)
+
+	c.Delete(1)
+	_, ok := c.Get(1)
+	assert.False(t, ok, "round 1 should have been deleted")
+
+	_, ok = c.Get(2)
+	assert.True(t, ok, "round 2 should remain")
+
+	// Deleting an absent round leaves the rest untouched.
+	c.Delete(99)
+	_, ok = c.Get(2)
+	assert.True(t, ok, "round 2 should still remain after no-op delete")
+
+	// order must be pruned so a later insert of the same key re-tracks it.
+	c.Set(1, nil)
+	_, ok = c.Get(1)
+	assert.True(t, ok, "round 1 should be re-insertable after deletion")
+}
+
+// TestResharingCache_Delete verifies Delete removes a present pair and is a
+// no-op when the pair is absent.
+func TestResharingCache_Delete(t *testing.T) {
+	t.Parallel()
+
+	c := NewResharingDKGCache()
+
+	// Delete on an empty cache must be a safe no-op.
+	c.Delete(1, 2)
+
+	c.Set(1, 2, nil)
+	c.Set(3, 4, nil)
+
+	c.Delete(1, 2)
+	_, ok := c.Get(1, 2)
+	assert.False(t, ok, "(1,2) should have been deleted")
+
+	_, ok = c.Get(3, 4)
+	assert.True(t, ok, "(3,4) should remain")
+
+	// Deleting an absent pair is a no-op.
+	c.Delete(9, 9)
+	_, ok = c.Get(3, 4)
+	assert.True(t, ok, "(3,4) should still remain after no-op delete")
+}
+
 // =============================================================================
 // ResharingCache tests
 // =============================================================================

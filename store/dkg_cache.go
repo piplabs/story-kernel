@@ -113,6 +113,25 @@ func (c *DKGCache) evictIfFull() {
 	}
 }
 
+// Delete removes the entry for round, if present. It is a safe no-op when the
+// round is absent, so callers may evict unconditionally.
+func (c *DKGCache) Delete(round uint32) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	key := strconv.FormatUint(uint64(round), 10)
+	if _, exists := c.cache[key]; !exists {
+		return
+	}
+	delete(c.cache, key)
+	for i, k := range c.order {
+		if k == key {
+			c.order = append(c.order[:i], c.order[i+1:]...)
+			break
+		}
+	}
+}
+
 type ResharingCache struct {
 	mu      sync.RWMutex
 	cache   map[string]*dkg.DistKeyGenerator
@@ -155,6 +174,25 @@ func (c *ResharingCache) evictIfFull() {
 		oldest := c.order[0]
 		c.order = c.order[1:]
 		delete(c.cache, oldest)
+	}
+}
+
+// Delete removes the entry for (fromRound, toRound), if present. It is a safe
+// no-op when the pair is absent, so callers may evict unconditionally.
+func (c *ResharingCache) Delete(fromRound, toRound uint32) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	key := fmt.Sprintf("%d_%d", fromRound, toRound)
+	if _, exists := c.cache[key]; !exists {
+		return
+	}
+	delete(c.cache, key)
+	for i, k := range c.order {
+		if k == key {
+			c.order = append(c.order[:i], c.order[i+1:]...)
+			break
+		}
 	}
 }
 

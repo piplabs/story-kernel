@@ -92,7 +92,11 @@ func (s *DKGServer) fetchRoundContext(
 		return nil, err
 	}
 
-	registrations, err := s.QueryClient.GetAllParticipantDKGRegistrations(
+	// Use ALL registrations (any status), like the resharing path: network.Total is fixed at
+	// BeginDealing and never decremented, so the all-status set keeps a stable length with
+	// every slot intact. The shrinking VERIFIED-only set would shift kyber indices and fail
+	// the count check on nodes that build after a mid-dealing invalidation.
+	registrations, err := s.QueryClient.GetAllRegisteredDKGRegistrations(
 		context.Background(),
 		codeCommitmentsHex,
 		round,

@@ -224,11 +224,11 @@ func TestSetPublicCoeffs_Overwrite(t *testing.T) {
 }
 
 // =============================================================================
-// AddDeals tests
+// AddProcessedDeals tests
 // =============================================================================
 
-// TestAddDeals_Basic verifies deals are appended to state.
-func TestAddDeals_Basic(t *testing.T) {
+// TestAddProcessedDeals_Basic verifies deals are appended to state.
+func TestAddProcessedDeals_Basic(t *testing.T) {
 	t.Parallel()
 	store := newTestDKGStore(t)
 	suite := edwards25519.NewBlakeSHA256Ed25519()
@@ -253,15 +253,15 @@ func TestAddDeals_Basic(t *testing.T) {
 		dealSlice = append(dealSlice, *d)
 	}
 
-	require.NoError(t, store.AddDeals(cc, round, dealSlice))
+	require.NoError(t, store.AddProcessedDeals(cc, round, dealSlice, nil))
 
 	st, err := store.LoadDKGState(cc, round)
 	require.NoError(t, err)
 	require.Len(t, st.Deals, len(dealSlice))
 }
 
-// TestAddDeals_Appends verifies subsequent calls append to existing deals.
-func TestAddDeals_Appends(t *testing.T) {
+// TestAddProcessedDeals_Appends verifies subsequent calls append to existing deals.
+func TestAddProcessedDeals_Appends(t *testing.T) {
 	t.Parallel()
 	store := newTestDKGStore(t)
 	suite := edwards25519.NewBlakeSHA256Ed25519()
@@ -286,8 +286,8 @@ func TestAddDeals_Appends(t *testing.T) {
 		dealSlice = append(dealSlice, *d)
 	}
 
-	require.NoError(t, store.AddDeals(cc, round, dealSlice))
-	require.NoError(t, store.AddDeals(cc, round, dealSlice))
+	require.NoError(t, store.AddProcessedDeals(cc, round, dealSlice, nil))
+	require.NoError(t, store.AddProcessedDeals(cc, round, dealSlice, nil))
 
 	st, err := store.LoadDKGState(cc, round)
 	require.NoError(t, err)
@@ -295,11 +295,11 @@ func TestAddDeals_Appends(t *testing.T) {
 }
 
 // =============================================================================
-// AddResponses tests
+// AddProcessedResponses tests
 // =============================================================================
 
-// TestAddResponses_Basic verifies responses are appended to state.
-func TestAddResponses_Basic(t *testing.T) {
+// TestAddProcessedResponses_Basic verifies responses are appended to state.
+func TestAddProcessedResponses_Basic(t *testing.T) {
 	t.Parallel()
 	store := newTestDKGStore(t)
 	suite := edwards25519.NewBlakeSHA256Ed25519()
@@ -331,15 +331,15 @@ func TestAddResponses_Basic(t *testing.T) {
 	}
 	require.NotNil(t, resp)
 
-	require.NoError(t, store.AddResponses(cc, round, []dkg.Response{*resp}))
+	require.NoError(t, store.AddProcessedResponses(cc, round, []dkg.Response{*resp}, nil))
 
 	st, err := store.LoadDKGState(cc, round)
 	require.NoError(t, err)
 	require.Len(t, st.Responses, 1)
 }
 
-// TestAddResponses_Appends verifies that subsequent calls append to existing responses.
-func TestAddResponses_Appends(t *testing.T) {
+// TestAddProcessedResponses_Appends verifies that subsequent calls append to existing responses.
+func TestAddProcessedResponses_Appends(t *testing.T) {
 	t.Parallel()
 	store := newTestDKGStore(t)
 	suite := edwards25519.NewBlakeSHA256Ed25519()
@@ -371,8 +371,8 @@ func TestAddResponses_Appends(t *testing.T) {
 	}
 	require.NotNil(t, resp)
 
-	require.NoError(t, store.AddResponses(cc, round, []dkg.Response{*resp}))
-	require.NoError(t, store.AddResponses(cc, round, []dkg.Response{*resp}))
+	require.NoError(t, store.AddProcessedResponses(cc, round, []dkg.Response{*resp}, nil))
+	require.NoError(t, store.AddProcessedResponses(cc, round, []dkg.Response{*resp}, nil))
 
 	st, err := store.LoadDKGState(cc, round)
 	require.NoError(t, err)
