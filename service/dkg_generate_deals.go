@@ -84,10 +84,32 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 		}
 	}
 
-	// Generate deals
-	deals, err := distKeyGen.Deals()
-	if err != nil {
-		log.Errorf("failed to generate encrypted deals: %v", err)
+	// Deals() mutates the shared cached generator (self-deal) and coeff extraction
+	// reads it, so serialize with the other DKG-mutating RPCs for this round. The
+	// closure releases the lock via defer so a panic cannot poison it; the store
+	// write below uses only the extracted coeffs and stays outside the lock.
+	mu := s.getDKGMutationMu(req.GetRound())
+	var (
+		deals      map[int]*dkg.Deal
+		coeffs     [][]byte
+		extractErr error
+	)
+	dealsErr := func() error {
+		mu.Lock()
+		defer mu.Unlock()
+
+		var err error
+		deals, err = distKeyGen.Deals()
+		if err != nil {
+			return err
+		}
+
+		coeffs, extractErr = extractDealerPolyCoeffs(distKeyGen, s.Suite)
+
+		return nil
+	}()
+	if dealsErr != nil {
+		log.Errorf("failed to generate encrypted deals: %v", dealsErr)
 
 		return nil, status.Errorf(codes.Internal, "failed to generate encrypted deals")
 	}
@@ -96,9 +118,8 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 	// same polynomial instead of a fresh random one, which would break the session ID and
 	// evict this node from QUAL. Seal must succeed before returning: on error the CL retries
 	// with the same cached generator, so deals are never broadcast without recoverable coeffs.
-	coeffs, err := extractDealerPolyCoeffs(distKeyGen, s.Suite)
-	if err != nil {
-		log.Errorf("failed to extract dealer polynomial coefficients: %v", err)
+	if extractErr != nil {
+		log.Errorf("failed to extract dealer polynomial coefficients: %v", extractErr)
 
 		return nil, status.Errorf(codes.Internal, "failed to extract dealer polynomial coefficients")
 	}
