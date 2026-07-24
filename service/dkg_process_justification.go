@@ -123,91 +123,92 @@ func (s *DKGServer) ProcessJustification(_ context.Context, req *pb.ProcessJusti
 	// Serialize the shared DistKeyGenerator mutation with the other DKG-mutating
 	// RPCs for this round (see dkgMutationMu). Persist runs after the loop under
 	// its own store lock, so only the kyber mutation needs covering here.
-	mu := s.getDKGMutationMu(req.GetRound())
-	mu.Lock()
-	for _, j := range req.GetJustifications() {
-		justification, err := types.ConvertToJustification(j)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"round":           req.GetRound(),
-				"code_commitment": codeCommitmentHex,
-			}).Errorf("failed to convert justification from proto: %v", err)
+	_ = s.withRoundMutation(req.GetRound(), func() error {
+		for _, j := range req.GetJustifications() {
+			justification, err := types.ConvertToJustification(j)
+			if err != nil {
+				log.WithFields(log.Fields{
+					"round":           req.GetRound(),
+					"code_commitment": codeCommitmentHex,
+				}).Errorf("failed to convert justification from proto: %v", err)
 
-			rejected = append(rejected, j)
+				rejected = append(rejected, j)
 
-			continue
-		}
+				continue
+			}
 
-		// Defence in depth: bounds-check both the dealer and the recipient
-		// index before kyber. In resharing the dealer is an old-committee
-		// member (range [0, dealerCount)) and the recipient is a new-committee
-		// member (range [0, recipientCount)).
-		if int(justification.Index) >= dealerCount ||
-			int(j.GetVssJustification().GetIndex()) >= recipientCount {
-			rejected = append(rejected, j)
+			// Defence in depth: bounds-check both the dealer and the recipient
+			// index before kyber. In resharing the dealer is an old-committee
+			// member (range [0, dealerCount)) and the recipient is a new-committee
+			// member (range [0, recipientCount)).
+			if int(justification.Index) >= dealerCount ||
+				int(j.GetVssJustification().GetIndex()) >= recipientCount {
+				rejected = append(rejected, j)
 
-			continue
-		}
+				continue
+			}
 
-		// applied:          at least one DistKeyGenerator successfully
-		//                   absorbed this justification on THIS call. Only
-		//                   then is it safe to persist for replay.
-		// alreadyProcessed: at least one DistKeyGenerator reported the
-		//                   justification was absorbed on a PRIOR call
-		//                   (idempotent re-submission). Silently skip — do
-		//                   not reject, do not persist. Persisting a
-		//                   duplicate would cause replayMessages (which
-		//                   does NOT suppress duplicate justification
-		//                   errors, unlike responses) to fail fatally on
-		//                   restart.
-		// Reject only when EVERY generator returned a real (non-idempotent)
-		// error.
-		applied := false
-		alreadyProcessed := false
-		for _, distKeyGen := range distKeyGens {
-			if err := distKeyGen.ProcessJustification(justification); err != nil {
+			// applied:          at least one DistKeyGenerator successfully
+			//                   absorbed this justification on THIS call. Only
+			//                   then is it safe to persist for replay.
+			// alreadyProcessed: at least one DistKeyGenerator reported the
+			//                   justification was absorbed on a PRIOR call
+			//                   (idempotent re-submission). Silently skip — do
+			//                   not reject, do not persist. Persisting a
+			//                   duplicate would cause replayMessages (which
+			//                   does NOT suppress duplicate justification
+			//                   errors, unlike responses) to fail fatally on
+			//                   restart.
+			// Reject only when EVERY generator returned a real (non-idempotent)
+			// error.
+			applied := false
+			alreadyProcessed := false
+			for _, distKeyGen := range distKeyGens {
+				if err := distKeyGen.ProcessJustification(justification); err != nil {
+					log.WithFields(log.Fields{
+						"round":           req.GetRound(),
+						"code_commitment": codeCommitmentHex,
+						"dealer_index":    justification.Index,
+					}).Errorf("failed to process justification: %v", err)
+
+					if isAlreadyProcessedErr(err) {
+						alreadyProcessed = true
+					}
+
+					continue
+				}
+				applied = true
+			}
+
+			if !applied && !alreadyProcessed {
+				rejected = append(rejected, j)
+
+				continue
+			}
+
+			if !applied {
+				// Idempotent re-submission only — do not persist. Logging at
+				// debug to mirror the dealing handler's silent-skip semantics.
 				log.WithFields(log.Fields{
 					"round":           req.GetRound(),
 					"code_commitment": codeCommitmentHex,
 					"dealer_index":    justification.Index,
-				}).Errorf("failed to process justification: %v", err)
-
-				if isAlreadyProcessedErr(err) {
-					alreadyProcessed = true
-				}
+				}).Debug("justification already stored on cached generator; skipping silently")
 
 				continue
 			}
-			applied = true
-		}
 
-		if !applied && !alreadyProcessed {
-			rejected = append(rejected, j)
+			justs = append(justs, *justification)
 
-			continue
-		}
-
-		if !applied {
-			// Idempotent re-submission only — do not persist. Logging at
-			// debug to mirror the dealing handler's silent-skip semantics.
 			log.WithFields(log.Fields{
 				"round":           req.GetRound(),
 				"code_commitment": codeCommitmentHex,
 				"dealer_index":    justification.Index,
-			}).Debug("justification already stored on cached generator; skipping silently")
-
-			continue
+			}).Info("Justification processed successfully, DKG state restored for the deal")
 		}
 
-		justs = append(justs, *justification)
-
-		log.WithFields(log.Fields{
-			"round":           req.GetRound(),
-			"code_commitment": codeCommitmentHex,
-			"dealer_index":    justification.Index,
-		}).Info("Justification processed successfully, DKG state restored for the deal")
-	}
-	mu.Unlock()
+		return nil
+	})
 
 	// Persist successfully processed justifications for recovery replay
 	if len(justs) > 0 {

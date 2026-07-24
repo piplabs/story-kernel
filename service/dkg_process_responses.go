@@ -133,14 +133,20 @@ func (s *DKGServer) ProcessResponses(_ context.Context, req *pb.ProcessResponses
 	// RPCs for this round (see dkgMutationMu). Held across process+persist so a
 	// retry sees a fully persisted state and re-emits its emitted justifications
 	// deterministically. Lock order dkgMutationMu -> stateMu stays one-directional.
-	mu := s.getDKGMutationMu(req.GetRound())
-	mu.Lock()
-	justifications, processed, rejected, err := s.applyResponses(
-		distKeyGens, req.GetIsResharing(), codeCommitmentHex, req.GetRound(),
-		latestActiveRound, dealerCount, complainerCount, req.GetResponses(),
+	var (
+		justifications []*pb.Justification
+		processed      int
+		rejected       []*pb.Response
 	)
-	mu.Unlock()
-	if err != nil {
+	if err := s.withRoundMutation(req.GetRound(), func() error {
+		var err error
+		justifications, processed, rejected, err = s.applyResponses(
+			distKeyGens, req.GetIsResharing(), codeCommitmentHex, req.GetRound(),
+			latestActiveRound, dealerCount, complainerCount, req.GetResponses(),
+		)
+
+		return err
+	}); err != nil {
 		log.Errorf("failed to add processed responses to the DKG state: %v", err)
 
 		return nil, status.Errorf(codes.Internal, "failed to add processed responses to the DKG state")

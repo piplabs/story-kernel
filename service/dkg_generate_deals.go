@@ -86,18 +86,13 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 
 	// Deals() mutates the shared cached generator (self-deal) and coeff extraction
 	// reads it, so serialize with the other DKG-mutating RPCs for this round. The
-	// closure releases the lock via defer so a panic cannot poison it; the store
-	// write below uses only the extracted coeffs and stays outside the lock.
-	mu := s.getDKGMutationMu(req.GetRound())
+	// store write below uses only the extracted coeffs and stays outside the lock.
 	var (
 		deals      map[int]*dkg.Deal
 		coeffs     [][]byte
 		extractErr error
 	)
-	dealsErr := func() error {
-		mu.Lock()
-		defer mu.Unlock()
-
+	dealsErr := s.withRoundMutation(req.GetRound(), func() error {
 		var err error
 		deals, err = distKeyGen.Deals()
 		if err != nil {
@@ -107,7 +102,7 @@ func (s *DKGServer) GenerateDeals(_ context.Context, req *pb.GenerateDealsReques
 		coeffs, extractErr = extractDealerPolyCoeffs(distKeyGen, s.Suite)
 
 		return nil
-	}()
+	})
 	if dealsErr != nil {
 		log.Errorf("failed to generate encrypted deals: %v", dealsErr)
 

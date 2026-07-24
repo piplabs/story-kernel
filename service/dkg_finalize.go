@@ -106,19 +106,17 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 	// verifier fails the whole round. SetTimeout propagates to every verifier's aggregator.
 	//
 	// SetTimeout + DistKeyShare mutate/read the shared cached generator, so serialize
-	// with the other DKG-mutating RPCs for this round. The closure releases the lock via
-	// defer so a panic cannot poison it; sealing/store/cache IO below uses only the
-	// computed share and stays outside the lock.
-	mu := s.getDKGMutationMu(req.GetRound())
-	distKeyShare, err := func() (*dkg.DistKeyShare, error) {
-		mu.Lock()
-		defer mu.Unlock()
-
+	// with the other DKG-mutating RPCs for this round. Sealing/store/cache IO below uses
+	// only the computed share and stays outside the lock.
+	var distKeyShare *dkg.DistKeyShare
+	if err := s.withRoundMutation(req.GetRound(), func() error {
 		distKeyGen.SetTimeout()
 
-		return distKeyGen.DistKeyShare()
-	}()
-	if err != nil {
+		var err error
+		distKeyShare, err = distKeyGen.DistKeyShare()
+
+		return err
+	}); err != nil {
 		log.Errorf("failed to compute distributed key share: %v", err)
 
 		return nil, status.Errorf(codes.Internal, "failed to compute distributed key share")
