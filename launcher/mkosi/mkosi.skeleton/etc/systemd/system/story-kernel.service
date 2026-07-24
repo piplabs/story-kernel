@@ -1,0 +1,50 @@
+# story-kernel.service — the DKG kernel itself.  Starts only after the full
+# measurement chain (measure-binary → PCR 12 → RTMR3) AND the module-loading
+# lockdown have completed.  Both are hard requirements: if either fails the
+# node must NOT start (fail-closed), otherwise a hardening wall would be
+# silently absent while the node holds unsealed key material.
+
+[Unit]
+Description=story-kernel DKG node
+After=story-kernel-rtmr3-extend.service story-kernel-lockdown-modules.service network-online.target
+Requires=story-kernel-rtmr3-extend.service story-kernel-lockdown-modules.service
+Wants=network-online.target
+
+[Service]
+StandardOutput=journal+console
+StandardError=journal+console
+Type=simple
+ExecStartPre=/bin/sh -c 'rm -rf /run/story-kernel/home; if curl -sf -H "Metadata-Flavor: Google" "http://169.254.169.254/computeMetadata/v1/instance/attributes/story-kernel-config" -o /tmp/skcfg && test -s /tmp/skcfg; then mkdir -p /run/story-kernel/home && cp /tmp/skcfg /run/story-kernel/home/config && echo metadata-config; else /usr/local/bin/story-kernel init --home /run/story-kernel/home; fi'
+ExecStart=/usr/local/bin/story-kernel start --home /run/story-kernel/home
+Restart=on-failure
+RestartSec=5s
+# Drop all privileges the binary does not need.  story-kernel speaks gRPC
+# over a unix socket to the consensus client; it does not need raw network
+# admin, module loading, or filesystem mutation outside its data dir.
+User=story-kernel
+Group=story-kernel
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=no
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+PrivateTmp=yes
+PrivateDevices=no
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount @obsolete
+CapabilityBoundingSet=CAP_DAC_OVERRIDE
+AmbientCapabilities=CAP_DAC_OVERRIDE
+ReadWritePaths=/var/lib/story-kernel
+
+[Install]
+WantedBy=multi-user.target

@@ -16,6 +16,10 @@ import (
 	"go.dedis.ch/kyber/v4"
 )
 
+// Both backends produce a 32-byte (64 hex char) code commitment that fits
+// directly in a Linux filename, so we use the hex string verbatim as the
+// per-round-per-commitment subdirectory name.
+
 func (s *DKGStore) ed25519Path(codeCommitmentHex string, round uint32) string {
 	return filepath.Join(s.keyDir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex, KeyEd25519File)
 }
@@ -25,6 +29,9 @@ func (s *DKGStore) secp256k1Path(codeCommitmentHex string, round uint32) string 
 }
 
 func (s *DKGStore) LoadOrGenerateEd25519Key(codeCommitmentHex string, round uint32) (kyber.Scalar, kyber.Point, error) {
+	s.keyGenMu.Lock()
+	defer s.keyGenMu.Unlock()
+
 	var (
 		edPriv kyber.Scalar
 		edPub  kyber.Point
@@ -80,6 +87,9 @@ func (s *DKGStore) LoadSealedEd25519Key(codeCommitmentHex string, round uint32) 
 }
 
 func (s *DKGStore) LoadOrGenerateSecp256k1Key(codeCommitmentHex string, round uint32) (*ecdsa.PrivateKey, *ecdsa.PublicKey, error) {
+	s.keyGenMu.Lock()
+	defer s.keyGenMu.Unlock()
+
 	var (
 		secpPriv *ecdsa.PrivateKey
 		secpPub  *ecdsa.PublicKey

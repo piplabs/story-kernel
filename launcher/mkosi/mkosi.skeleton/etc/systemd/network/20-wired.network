@@ -1,0 +1,7 @@
+[Match]
+Name=en* eth* gve* ens*
+[Network]
+DHCP=yes
+[DHCPv4]
+UseRoutes=yes
+UseDNS=yes

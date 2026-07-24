@@ -4,6 +4,9 @@
 
 # Build
 build/
+# launcher/build/ is the reproducible-image build pipeline (Dockerfile,
+# build.sh, etc.), not a build *output* — un-ignore it explicitly.
+!launcher/build/
 
 # cb-mpc C++ library (auto-downloaded)
 .cbmpc/

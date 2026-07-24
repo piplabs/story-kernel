@@ -10,6 +10,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// validDkgPubKey / validEnclaveCommKey return correctly-sized stand-in keys.
+// calculateReportData pins dkgPubKey to 32 bytes and enclaveCommKey to 64
+// bytes so the packed preimage stays injective; tests must therefore feed
+// real-length keys. The first byte is varied via the `seed` argument so a
+// caller can produce two distinct-but-valid keys.
+func validDkgPubKey(seed byte) []byte {
+	k := make([]byte, dkgPubKeySize)
+	for i := range k {
+		k[i] = byte(i)
+	}
+	k[0] = seed
+	return k
+}
+
+func validEnclaveCommKey(seed byte) []byte {
+	k := make([]byte, enclaveCommKeySize)
+	for i := range k {
+		k[i] = byte(i)
+	}
+	k[0] = seed
+	return k
+}
+
 func TestCalculateReportData(t *testing.T) {
 	validStartBlockHash := make([]byte, 32)
 	validStartBlockHash[0] = 0xab
@@ -31,8 +54,8 @@ func TestCalculateReportData(t *testing.T) {
 			round:            1,
 			startBlockHeight: 100,
 			startBlockHash:   validStartBlockHash,
-			dkgPubKey:        []byte{0x01, 0x02, 0x03},
-			enclaveCommKey:   []byte{0x04, 0x05, 0x06},
+			dkgPubKey:        validDkgPubKey(0x01),
+			enclaveCommKey:   validEnclaveCommKey(0x05),
 			wantErr:          false,
 		},
 		{
@@ -41,8 +64,8 @@ func TestCalculateReportData(t *testing.T) {
 			round:            100,
 			startBlockHeight: 200,
 			startBlockHash:   validStartBlockHash,
-			dkgPubKey:        []byte{0xaa},
-			enclaveCommKey:   []byte{0xbb},
+			dkgPubKey:        validDkgPubKey(0xaa),
+			enclaveCommKey:   validEnclaveCommKey(0xbb),
 			wantErr:          false,
 		},
 		{
@@ -51,8 +74,8 @@ func TestCalculateReportData(t *testing.T) {
 			round:            1,
 			startBlockHeight: 100,
 			startBlockHash:   validStartBlockHash,
-			dkgPubKey:        []byte{0x01},
-			enclaveCommKey:   []byte{0x02},
+			dkgPubKey:        validDkgPubKey(0x01),
+			enclaveCommKey:   validEnclaveCommKey(0x02),
 			wantErr:          true,
 			errContains:      "invalid address",
 		},
@@ -62,8 +85,8 @@ func TestCalculateReportData(t *testing.T) {
 			round:            1,
 			startBlockHeight: 100,
 			startBlockHash:   validStartBlockHash,
-			dkgPubKey:        []byte{0x01},
-			enclaveCommKey:   []byte{0x02},
+			dkgPubKey:        validDkgPubKey(0x01),
+			enclaveCommKey:   validEnclaveCommKey(0x02),
 			wantErr:          true,
 			errContains:      "invalid address",
 		},
@@ -73,10 +96,32 @@ func TestCalculateReportData(t *testing.T) {
 			round:            1,
 			startBlockHeight: 100,
 			startBlockHash:   []byte{0x01, 0x02},
-			dkgPubKey:        []byte{0x01},
-			enclaveCommKey:   []byte{0x02},
+			dkgPubKey:        validDkgPubKey(0x01),
+			enclaveCommKey:   validEnclaveCommKey(0x02),
 			wantErr:          true,
 			errContains:      "startBlockHash must be 32 bytes",
+		},
+		{
+			name:             "invalid dkgPubKey - too short",
+			validatorAddr:    "0x1234567890123456789012345678901234567890",
+			round:            1,
+			startBlockHeight: 100,
+			startBlockHash:   validStartBlockHash,
+			dkgPubKey:        []byte{0x01, 0x02, 0x03},
+			enclaveCommKey:   validEnclaveCommKey(0x05),
+			wantErr:          true,
+			errContains:      "dkgPubKey must be 32 bytes",
+		},
+		{
+			name:             "invalid enclaveCommKey - too long",
+			validatorAddr:    "0x1234567890123456789012345678901234567890",
+			round:            1,
+			startBlockHeight: 100,
+			startBlockHash:   validStartBlockHash,
+			dkgPubKey:        validDkgPubKey(0x01),
+			enclaveCommKey:   make([]byte, 66),
+			wantErr:          true,
+			errContains:      "enclaveCommKey must be 64 bytes",
 		},
 		{
 			name:             "large round number",
@@ -84,8 +129,8 @@ func TestCalculateReportData(t *testing.T) {
 			round:            4294967295,
 			startBlockHeight: 1000000,
 			startBlockHash:   validStartBlockHash,
-			dkgPubKey:        []byte{0x01},
-			enclaveCommKey:   []byte{0x02},
+			dkgPubKey:        validDkgPubKey(0x01),
+			enclaveCommKey:   validEnclaveCommKey(0x02),
 			wantErr:          false,
 		},
 	}
@@ -122,8 +167,8 @@ func TestCalculateReportDataDeterministic(t *testing.T) {
 	startBlockHeight := uint64(1000)
 	startBlockHash := make([]byte, 32)
 	startBlockHash[0] = 0xab
-	dkgPubKey := []byte{0xaa, 0xbb, 0xcc}
-	enclaveCommKey := []byte{0xdd, 0xee, 0xff}
+	dkgPubKey := validDkgPubKey(0xaa)
+	enclaveCommKey := validEnclaveCommKey(0xdd)
 
 	result1, err1 := calculateReportData(validatorAddr, round, startBlockHeight, startBlockHash, dkgPubKey, enclaveCommKey)
 	require.NoError(t, err1)
@@ -140,8 +185,8 @@ func TestCalculateReportDataMatchesSolidityABIEncodePacked(t *testing.T) {
 	startBlockHeight := uint64(1000)
 	startBlockHash := make([]byte, 32)
 	startBlockHash[0] = 0xab
-	dkgPubKey := []byte{0xaa, 0xbb}
-	enclaveCommKey := []byte{0xcc, 0xdd}
+	dkgPubKey := validDkgPubKey(0xaa)
+	enclaveCommKey := validEnclaveCommKey(0xcc)
 
 	reportData, err := calculateReportData(validatorAddr, round, startBlockHeight, startBlockHash, dkgPubKey, enclaveCommKey)
 	require.NoError(t, err)
@@ -172,8 +217,8 @@ func TestCalculateReportDataInputVariation(t *testing.T) {
 	baseHeight := uint64(1000)
 	baseHash := make([]byte, 32)
 	baseHash[0] = 0x01
-	baseDkgPub := []byte{0xaa}
-	baseCommKey := []byte{0xbb}
+	baseDkgPub := validDkgPubKey(0xaa)
+	baseCommKey := validEnclaveCommKey(0xbb)
 
 	baseResult, err := calculateReportData(baseAddr, baseRound, baseHeight, baseHash, baseDkgPub, baseCommKey)
 	require.NoError(t, err)
@@ -192,10 +237,10 @@ func TestCalculateReportDataInputVariation(t *testing.T) {
 	result4, _ := calculateReportData(baseAddr, baseRound, baseHeight, altHash, baseDkgPub, baseCommKey)
 	assert.NotEqual(t, baseResult, result4, "changing startBlockHash should change reportData")
 
-	result5, _ := calculateReportData(baseAddr, baseRound, baseHeight, baseHash, []byte{0xff}, baseCommKey)
+	result5, _ := calculateReportData(baseAddr, baseRound, baseHeight, baseHash, validDkgPubKey(0xff), baseCommKey)
 	assert.NotEqual(t, baseResult, result5, "changing dkgPubKey should change reportData")
 
-	result6, _ := calculateReportData(baseAddr, baseRound, baseHeight, baseHash, baseDkgPub, []byte{0xff})
+	result6, _ := calculateReportData(baseAddr, baseRound, baseHeight, baseHash, baseDkgPub, validEnclaveCommKey(0xff))
 	assert.NotEqual(t, baseResult, result6, "changing enclaveCommKey should change reportData")
 }
 
