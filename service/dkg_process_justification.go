@@ -122,7 +122,8 @@ func (s *DKGServer) ProcessJustification(_ context.Context, req *pb.ProcessJusti
 
 	// Serialize the shared DistKeyGenerator mutation with the other DKG-mutating
 	// RPCs for this round (see dkgMutationMu). Persist runs after the loop under
-	// its own store lock, so only the kyber mutation needs covering here.
+	// its own store lock, so only the kyber mutation needs covering here. The
+	// closure collects rejects rather than erroring, so it never returns non-nil.
 	_ = s.withRoundMutation(req.GetRound(), func() error {
 		for _, j := range req.GetJustifications() {
 			justification, err := types.ConvertToJustification(j)

@@ -9,6 +9,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/piplabs/story-kernel/enclave"
+	"github.com/piplabs/story-kernel/store"
 	"github.com/piplabs/story-kernel/types"
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
 
@@ -58,26 +59,24 @@ func isAlreadyProcessedErr(err error) bool {
 		strings.Contains(msg, errKyberJustificationOnApproval.Error())
 }
 
+// maxResolveDealsAttempts bounds the warm->lock->cache-get retry loop so a
+// persistent evict/re-warm cycle returns Unavailable instead of spinning.
+const maxResolveDealsAttempts = 3
+
+// processedDeals carries applyDeals' output out of the locked closure. A nil
+// result with a nil error signals an eviction, so the caller re-warms.
+type processedDeals struct {
+	resps     []*pb.Response
+	persisted int
+	rejected  []*pb.Deal
+}
+
 // ProcessDeals process the deals. It is assumed that the deal has been correctly delivered to the corresponding recipient index.
 func (s *DKGServer) ProcessDeals(_ context.Context, req *pb.ProcessDealsRequest) (*pb.ProcessDealsResponse, error) {
 	codeCommitmentHex := hex.EncodeToString(req.GetCodeCommitment())
 
-	// Validate request
-	if err := validateProcessDealsRequest(req); err != nil {
-		log.WithFields(log.Fields{
-			"round":           req.GetRound(),
-			"code_commitment": codeCommitmentHex,
-			"num_deals":       len(req.GetDeals()),
-		}).Errorf("invalid request: %v", err)
-
-		return nil, status.Errorf(codes.InvalidArgument, "invalid request")
-	}
-
-	// Validate code commitment
-	if err := enclave.ValidateCodeCommitment(req.GetCodeCommitment()); err != nil {
-		log.Errorf("failed to validate code commitment: %v", err)
-
-		return nil, status.Errorf(codes.InvalidArgument, "failed to validate code commitment")
+	if err := validateProcessDealsInput(req, codeCommitmentHex); err != nil {
+		return nil, err
 	}
 
 	rc, err := s.GetOrLoadRoundContext(codeCommitmentHex, req.GetRound())
@@ -90,56 +89,14 @@ func (s *DKGServer) ProcessDeals(_ context.Context, req *pb.ProcessDealsRequest)
 		return nil, status.Errorf(codes.Internal, "failed to get or load roundContext")
 	}
 
-	// dealerCount upper-bounds Deal.Index. Non-resharing has a single
-	// committee acting as dealers; resharing dealers are members of the
-	// PRIOR active committee (kyber's c.OldNodes inside the next-DKG).
-	var (
-		distKeyGen  *dkg.DistKeyGenerator
-		dealerCount int
-	)
-	if !req.GetIsResharing() {
-		dealerCount = len(rc.SortedPubKeys)
-
-		distKeyGen, err = s.GetInitDKG(codeCommitmentHex, req.GetRound(), rc.Network.GetThreshold(), rc.SortedPubKeys)
-		if err != nil {
-			log.Errorf("failed to load or rebuild initial distributed key generator: %v", err)
-
-			return nil, status.Errorf(codes.Internal, "failed to load or rebuild initial distributed key generator")
-		}
-	} else {
-		latest, err := s.QueryClient.GetLatestActiveDKGNetwork(context.Background())
-		if err != nil {
-			log.Errorf("failed to get the latest active round of DKG: %v", err)
-
-			return nil, status.Errorf(codes.Internal, "failed to get the latest active round of DKG")
-		}
-		if latest == nil || latest.GetTotal() == 0 {
-			return nil, status.Errorf(codes.FailedPrecondition,
-				"resharing requires an active prior DKG network")
-		}
-		dealerCount = int(latest.GetTotal())
-
-		distKeyGen, err = s.GetResharingNextDKG(codeCommitmentHex, req.GetRound(), rc.Network.GetThreshold(), rc.SortedPubKeys)
-		if err != nil {
-			log.Errorf("failed to load or rebuild the distributed key generator for resharing: %v", err)
-
-			return nil, status.Errorf(codes.Internal, "failed to load or rebuild the distributed key generator for resharing")
-		}
+	dealerCount, err := s.resolveDealerCount(rc, req)
+	if err != nil {
+		return nil, err
 	}
 
-	// Serialize with any concurrent DKG-mutating RPC for this round: a client
-	// timeout leaves the abandoned server handler running, and its retry (or an
-	// adjacent ProcessResponses/Justification) must not mutate the shared
-	// DistKeyGenerator at the same time. Held across process+persist so the
-	// retry sees a fully persisted state and re-emits deterministically.
-	mu := s.getDKGMutationMu(req.GetRound())
-	mu.Lock()
-	pbResps, persisted, rejected, err := s.applyDeals(distKeyGen, codeCommitmentHex, req.GetRound(), dealerCount, req.GetDeals())
-	mu.Unlock()
+	out, err := s.resolveAndApplyDeals(codeCommitmentHex, rc, req, dealerCount)
 	if err != nil {
-		log.Errorf("failed to persist processed deals: %v", err)
-
-		return nil, status.Errorf(codes.Internal, "failed to persist processed deals")
+		return nil, err
 	}
 
 	// responses = total emitted this call (incl. re-emitted on retry);
@@ -147,17 +104,157 @@ func (s *DKGServer) ProcessDeals(_ context.Context, req *pb.ProcessDealsRequest)
 	log.WithFields(log.Fields{
 		"code_commitment": codeCommitmentHex,
 		"round":           req.GetRound(),
-		"responses":       len(pbResps),
-		"persisted_deals": persisted,
-		"rejected":        len(rejected),
+		"responses":       len(out.resps),
+		"persisted_deals": out.persisted,
+		"rejected":        len(out.rejected),
 	}).Info("Processed deals")
 
 	return &pb.ProcessDealsResponse{
 		CodeCommitment: req.GetCodeCommitment(),
 		Round:          req.GetRound(),
-		Responses:      pbResps,
-		RejectedDeals:  rejected,
+		Responses:      out.resps,
+		RejectedDeals:  out.rejected,
 	}, nil
+}
+
+// validateProcessDealsInput runs the request and code-commitment checks,
+// returning a ready-to-return status error on failure.
+func validateProcessDealsInput(req *pb.ProcessDealsRequest, codeCommitmentHex string) error {
+	if err := validateProcessDealsRequest(req); err != nil {
+		log.WithFields(log.Fields{
+			"round":           req.GetRound(),
+			"code_commitment": codeCommitmentHex,
+			"num_deals":       len(req.GetDeals()),
+		}).Errorf("invalid request: %v", err)
+
+		return status.Errorf(codes.InvalidArgument, "invalid request")
+	}
+
+	if err := enclave.ValidateCodeCommitment(req.GetCodeCommitment()); err != nil {
+		log.Errorf("failed to validate code commitment: %v", err)
+
+		return status.Errorf(codes.InvalidArgument, "failed to validate code commitment")
+	}
+
+	return nil
+}
+
+// resolveDealerCount upper-bounds Deal.Index. Non-resharing has a single
+// committee acting as dealers; resharing dealers are members of the PRIOR
+// active committee (kyber's c.OldNodes inside the next-DKG).
+func (s *DKGServer) resolveDealerCount(rc *store.RoundContext, req *pb.ProcessDealsRequest) (int, error) {
+	if !req.GetIsResharing() {
+		return len(rc.SortedPubKeys), nil
+	}
+
+	latest, err := s.QueryClient.GetLatestActiveDKGNetwork(context.Background())
+	if err != nil {
+		log.Errorf("failed to get the latest active round of DKG: %v", err)
+
+		return 0, status.Errorf(codes.Internal, "failed to get the latest active round of DKG")
+	}
+	if latest == nil || latest.GetTotal() == 0 {
+		return 0, status.Errorf(codes.FailedPrecondition,
+			"resharing requires an active prior DKG network")
+	}
+
+	return int(latest.GetTotal()), nil
+}
+
+// resolveAndApplyDeals retries a warm+apply attempt until it yields deals or is
+// exhausted, re-warming on each eviction (the #94 warm-vs-lock race). Exhaustion
+// returns Unavailable.
+func (s *DKGServer) resolveAndApplyDeals(
+	codeCommitmentHex string,
+	rc *store.RoundContext,
+	req *pb.ProcessDealsRequest,
+	dealerCount int,
+) (*processedDeals, error) {
+	for attempt := 0; attempt < maxResolveDealsAttempts; attempt++ {
+		out, err := s.attemptDeals(codeCommitmentHex, rc, req, dealerCount)
+		if err != nil {
+			return nil, err
+		}
+		if out != nil {
+			return out, nil
+		}
+		// Evicted between warm and lock: re-warm outside M and retry.
+	}
+
+	log.Errorf("failed to resolve a live generator for round %d after %d attempts", req.GetRound(), maxResolveDealsAttempts)
+
+	return nil, status.Errorf(codes.Unavailable, "failed to resolve a live generator")
+}
+
+// attemptDeals runs one pass: warm the generator outside M, then apply the deals under M.
+// A nil result with a nil error means the round was evicted between the warm and the lock,
+// signalling the caller to retry.
+func (s *DKGServer) attemptDeals(
+	codeCommitmentHex string,
+	rc *store.RoundContext,
+	req *pb.ProcessDealsRequest,
+	dealerCount int,
+) (*processedDeals, error) {
+	if err := s.warmGenerator(codeCommitmentHex, rc, req); err != nil {
+		log.Errorf("failed to load or rebuild distributed key generator: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to load or rebuild distributed key generator")
+	}
+
+	out, err := s.applyDealsUnderLock(codeCommitmentHex, req, dealerCount)
+	if err != nil {
+		log.Errorf("failed to persist processed deals: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to persist processed deals")
+	}
+
+	return out, nil
+}
+
+// warmGenerator get-or-builds the round's generator OUTSIDE M (a cache-miss build does
+// light-client IO for resharing). The pointer is discarded so callers re-fetch it under
+// M via a pure cache-get, seeing an eviction instead of reusing a stale pointer.
+func (s *DKGServer) warmGenerator(codeCommitmentHex string, rc *store.RoundContext, req *pb.ProcessDealsRequest) error {
+	if !req.GetIsResharing() {
+		_, err := s.GetInitDKG(codeCommitmentHex, req.GetRound(), rc.Network.GetThreshold(), rc.SortedPubKeys)
+		return err
+	}
+
+	_, err := s.GetResharingNextDKG(codeCommitmentHex, req.GetRound(), rc.Network.GetThreshold(), rc.SortedPubKeys)
+
+	return err
+}
+
+// applyDealsUnderLock takes M(round), cache-gets the generator, and runs applyDeals.
+// A nil result with a nil error means the round was evicted between warm and lock, so
+// the caller re-warms. M stays a leaf: only a cache-get and applyDeals run under it.
+func (s *DKGServer) applyDealsUnderLock(codeCommitmentHex string, req *pb.ProcessDealsRequest, dealerCount int) (*processedDeals, error) {
+	var out *processedDeals
+	err := s.withRoundMutation(req.GetRound(), func() error {
+		// Pure cache-get under M (no build, no IO): a miss means the round was evicted.
+		var (
+			distKeyGen *dkg.DistKeyGenerator
+			ok         bool
+		)
+		if !req.GetIsResharing() {
+			distKeyGen, ok = s.InitDKGCache.Get(req.GetRound())
+		} else {
+			distKeyGen, ok = s.ResharingNextCache.Get(req.GetRound())
+		}
+		if !ok {
+			return nil // evicted; out stays nil so the caller re-warms
+		}
+
+		resps, persisted, rejected, err := s.applyDeals(distKeyGen, codeCommitmentHex, req.GetRound(), dealerCount, req.GetDeals())
+		if err != nil {
+			return err
+		}
+		out = &processedDeals{resps: resps, persisted: persisted, rejected: rejected}
+
+		return nil
+	})
+
+	return out, err
 }
 
 // applyDeals runs each incoming deal through the cached DistKeyGenerator,
