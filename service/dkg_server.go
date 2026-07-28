@@ -56,6 +56,18 @@ func (s *DKGServer) getDKGMutationMu(round uint32) *sync.Mutex {
 	return v.(*sync.Mutex)
 }
 
+// withRoundMutation runs fn while holding the round's DKG mutation lock M(round), which
+// serializes every DKG-mutating RPC for the round. M is a LEAF lock: fn must not build a
+// generator, do light-client IO, or acquire another round's M. Unlock is deferred so a
+// panic in fn cannot poison the lock.
+func (s *DKGServer) withRoundMutation(round uint32, fn func() error) error {
+	mu := s.getDKGMutationMu(round)
+	mu.Lock()
+	defer mu.Unlock()
+
+	return fn()
+}
+
 func (s *DKGServer) getReshareNextMu(round uint32) *sync.Mutex {
 	v, _ := s.reshareNextMu.LoadOrStore(round, &sync.Mutex{})
 	return v.(*sync.Mutex)
