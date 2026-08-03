@@ -9,6 +9,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/piplabs/story-kernel/store"
+	"github.com/piplabs/story-kernel/story"
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
 )
 
@@ -54,7 +55,7 @@ func (s *DKGServer) GetOrLoadRoundContext(
 			log.WithFields(log.Fields{
 				"round":   round,
 				"attempt": attempt + 1,
-			}).Warn("GetOrLoadRoundContext: threshold is 0, retrying (light client may lag)")
+			}).Warn("GetOrLoadRoundContext: round state not caught up (threshold 0 or network not visible), retrying (light client may lag)")
 
 			time.Sleep(thresholdRetryDelay)
 
@@ -89,6 +90,13 @@ func (s *DKGServer) fetchRoundContext(
 ) (*store.RoundContext, error) {
 	network, err := s.QueryClient.GetDKGNetwork(context.Background(), codeCommitmentsHex, round)
 	if err != nil {
+		// A not-found read for a round a caller is actively working on is the same lag
+		// shape as threshold==0: the light client has not verified up to the round's
+		// start block yet. Classify it as lag so GetOrLoadRoundContext retries it.
+		if errors.Is(err, story.ErrDKGNetworkNotFound) {
+			return nil, fmt.Errorf("%w: %v", ErrLightClientLag, err)
+		}
+
 		return nil, err
 	}
 

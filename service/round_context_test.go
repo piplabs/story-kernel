@@ -503,3 +503,31 @@ func TestFetchRoundContext_PreservesInvalidatedSlot(t *testing.T) {
 	_, err = shrunkSrv.GetOrLoadRoundContext("cc", 5)
 	require.Error(t, err, "shrinking to the VERIFIED-only set must fail the count check")
 }
+
+// A not-found network read (light client has not observed the round yet) is classified as
+// ErrLightClientLag so GetOrLoadRoundContext retries it instead of failing the caller.
+func TestFetchRoundContext_NotFoundClassifiedAsLag(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubQueryClient{netErr: notFoundErr()}
+	s := &DKGServer{QueryClient: stub}
+
+	rc, err := s.fetchRoundContext("cc", 42)
+	require.Nil(t, rc)
+	require.ErrorIs(t, err, ErrLightClientLag)
+	require.Equal(t, int32(1), stub.netCalls.Load())
+}
+
+// A non-not-found network error must stay non-lag so callers fail fast.
+func TestFetchRoundContext_OtherErrorStaysNonLag(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("rpc down")
+	stub := &stubQueryClient{netErr: wantErr}
+	s := &DKGServer{QueryClient: stub}
+
+	rc, err := s.fetchRoundContext("cc", 42)
+	require.Nil(t, rc)
+	require.ErrorIs(t, err, wantErr)
+	require.False(t, errors.Is(err, ErrLightClientLag))
+}
