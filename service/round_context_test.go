@@ -24,10 +24,15 @@ type stubQueryClient struct {
 	// (ALL statuses). If nil, that method falls back to the VERIFIED-only set so
 	// existing tests keep both sets identical.
 	allRegistrations []*pb.DKGRegistration
-	netCalls         atomic.Int32
-	regCalls         atomic.Int32
-	netErr           error
-	regErr           error
+	// netErrs, when set, scripts a per-call error for GetDKGNetwork: call i returns
+	// netErrs[i] (nil = success). Calls beyond the slice succeed. netErr takes precedence.
+	// Error calls advance the same call counter that indexes networks, so a success after
+	// k scripted errors reads networks[k] (clamped to the last element).
+	netErrs  []error
+	netCalls atomic.Int32
+	regCalls atomic.Int32
+	netErr   error
+	regErr   error
 }
 
 var _ story.QueryClient = (*stubQueryClient)(nil)
@@ -36,6 +41,9 @@ func (s *stubQueryClient) GetDKGNetwork(_ context.Context, _ string, _ uint32) (
 	i := int(s.netCalls.Add(1)) - 1
 	if s.netErr != nil {
 		return nil, s.netErr
+	}
+	if i < len(s.netErrs) && s.netErrs[i] != nil {
+		return nil, s.netErrs[i]
 	}
 	if i >= len(s.networks) {
 		i = len(s.networks) - 1
