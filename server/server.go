@@ -31,11 +31,18 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// maxConcurrentStreams bounds concurrent RPCs per client connection. The kernel serves a
+// single co-located consensus client, so legitimate load stays far below this; the cap
+// keeps a misbehaving peer from parking unbounded long-lived handlers (e.g. registration
+// lag-retry waits).
+const maxConcurrentStreams = 64
+
 func Serve(cfg *config.Config) (*grpc.Server, chan error) {
 	errCh := make(chan error)
 
 	serverOpts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(recoveryInterceptor()),
+		grpc.MaxConcurrentStreams(maxConcurrentStreams),
 	}
 
 	if cfg.GRPC.TLSEnabled() {
