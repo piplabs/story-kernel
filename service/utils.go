@@ -14,18 +14,27 @@ const (
 	uint32Size          = 4
 	uint64Size          = 8
 	blockHashSize       = 32
+	// dkgPubKey and enclaveCommKey are the trailing dynamic fields of the packed
+	// preimage. Their lengths must be pinned so the concatenation stays injective
+	// (adjacent variable-length fields are otherwise ambiguous). dkgPubKey is the
+	// ed25519 public key (32 bytes); enclaveCommKey is the secp256k1 public key
+	// with the uncompressed-form prefix stripped (64 bytes). These match the
+	// require()s in DKG.sol::register.
+	dkgPubKeySize      = 32
+	enclaveCommKeySize = 64
 )
 
 // calculateReportData computes the TEE attestation report data for DKG registration.
-// It produces keccak256(abi.encode(EnclaveInstanceData)) matching the Solidity struct:
+// It produces keccak256 over the tightly packed (abi.encodePacked, no ABI
+// offset/length words) concatenation of, in order:
 //
-//	struct EnclaveInstanceData {
-//	    uint32 round;
-//	    address validatorAddr;
-//	    bytes32 enclaveType;
-//	    bytes enclaveCommKey;
-//	    bytes dkgPubKey;
-//	}
+//	validatorAddr(20) || round(4, big-endian) || startBlockHeight(8, big-endian)
+//	  || startBlockHash(32) || dkgPubKey(32) || enclaveCommKey(64)
+//
+// The two trailing dynamic fields are length-pinned (see dkgPubKeySize /
+// enclaveCommKeySize) so the packed preimage is injective. This must match the
+// on-chain DKG.register report-data reconstruction byte-for-byte; a golden
+// vector shared with DKG.sol guards against drift.
 func calculateReportData(validatorAddr string, round uint32, startBlockHeight uint64, startBlockHash []byte, dkgPubKey, enclaveCommKey []byte) ([]byte, error) {
 	addr := strings.TrimPrefix(validatorAddr, "0x")
 
@@ -38,8 +47,16 @@ func calculateReportData(validatorAddr string, round uint32, startBlockHeight ui
 		return nil, fmt.Errorf("startBlockHash must be %d bytes, got %d", blockHashSize, len(startBlockHash))
 	}
 
-	// Pre-allocate buffer for: validatorAddr(20) + round(4) + startBlockHeight(8) + startBlockHash(32) + variable keys
-	encoded := make([]byte, 0, ethereumAddressSize+uint32Size+uint64Size+blockHashSize+len(enclaveCommKey)+len(dkgPubKey))
+	if len(dkgPubKey) != dkgPubKeySize {
+		return nil, fmt.Errorf("dkgPubKey must be %d bytes, got %d", dkgPubKeySize, len(dkgPubKey))
+	}
+
+	if len(enclaveCommKey) != enclaveCommKeySize {
+		return nil, fmt.Errorf("enclaveCommKey must be %d bytes, got %d", enclaveCommKeySize, len(enclaveCommKey))
+	}
+
+	// Pre-allocate buffer for: validatorAddr(20) + round(4) + startBlockHeight(8) + startBlockHash(32) + dkgPubKey(32) + enclaveCommKey(64)
+	encoded := make([]byte, 0, ethereumAddressSize+uint32Size+uint64Size+blockHashSize+dkgPubKeySize+enclaveCommKeySize)
 	encoded = append(encoded, addrBytes...)
 	encoded = append(encoded, uint32ToBytes(round)...)
 	encoded = append(encoded, int64ToBytes(int64(startBlockHeight))...)

@@ -1,0 +1,35 @@
+# story-kernel-lockdown-modules.service — irreversibly disable kernel module
+# loading once boot is complete.
+#
+# The keyless kernel (CONFIG_MODULE_SIG=n, no lockdown LSM — required so every
+# operator rebuilds a byte-identical, key-free kernel and gets the same
+# platform_commitment) has no in-kernel control preventing a privileged process
+# from loading an arbitrary module. A kernel module runs in kernel space and can
+# read any process's memory directly, bypassing ptrace_scope/kptr_restrict and
+# extracting the unsealed DKG share from story-kernel's RAM.
+#
+# Writing 1 to kernel.modules_disabled blocks all further module loads until the
+# next reboot. It costs nothing in reproducibility (a runtime sysctl, no signing
+# key) and closes the module-load path as a second wall behind "no root entry".
+#
+# Ordered after everything that could still need to load a module (the NIC
+# driver via network-online, the measurement chain) and before story-kernel so
+# the node only starts once module loading is sealed off.
+
+[Unit]
+Description=Disable kernel module loading after boot (keyless hardening)
+After=story-kernel-rtmr3-extend.service systemd-modules-load.service network-online.target
+Wants=network-online.target
+Before=story-kernel.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Root, no sandbox that would block /proc/sys writes (ProtectKernelTunables
+# would make this fail). This is the one late unit that intentionally touches a
+# kernel tunable.
+ExecStart=/bin/sh -c 'echo 1 > /proc/sys/kernel/modules_disabled'
+SuccessExitStatus=0
+
+[Install]
+WantedBy=multi-user.target
