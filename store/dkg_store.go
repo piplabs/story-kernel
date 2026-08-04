@@ -52,11 +52,12 @@ type DKGStore struct {
 	keyDir   string
 	stateDir string
 
-	// keyGenMu serializes the load-or-generate key paths so two concurrent
-	// requests for the same round cannot each generate a distinct keypair and
-	// race on the (now atomic) seal write, which would leave one pubkey
-	// registered on-chain with no matching sealed private key on disk.
-	keyGenMu sync.Mutex
+	// keyMu serializes LoadOrGenerate* key calls so two concurrent requests for the same
+	// round cannot both miss the file-exists check and generate different keys, where the
+	// loser's sealed file would silently replace the key the winner already returned.
+	// Store-wide by design: key generation happens once per round at registration, so
+	// cross-round contention is negligible and per-round granularity is not worth it.
+	keyMu sync.Mutex
 }
 
 // NewDKGStore creates a DKGStore that uses the real SGX enclave sealer.
