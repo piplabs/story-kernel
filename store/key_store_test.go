@@ -6,11 +6,13 @@ import (
 	"crypto/rand"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	ecrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
 
+	"go.dedis.ch/kyber/v4"
 	"go.dedis.ch/kyber/v4/group/edwards25519"
 )
 
@@ -457,4 +459,57 @@ func TestLoadSealedSecp256k1Key_WrongCurveKey(t *testing.T) {
 	// The call may or may not error depending on whether the P-256 scalar
 	// is also a valid secp256k1 scalar. We only check it doesn't panic.
 	_ = err
+}
+
+// TestLoadOrGenerateKeys_ConcurrentSameRound verifies concurrent LoadOrGenerate calls for
+// the same (code commitment, round) cannot race the exists-check and mint different keys:
+// every caller must observe the same key pair as a sequential re-load.
+func TestLoadOrGenerateKeys_ConcurrentSameRound(t *testing.T) {
+	t.Parallel()
+	store := newTestDKGStoreWithSealer(t)
+	cc := "concurrent"
+	round := uint32(7)
+
+	const callers = 8
+	edPubs := make([]kyber.Point, callers)
+	secpPubs := make([]*ecdsa.PublicKey, callers)
+	// Collect errors per goroutine; require/FailNow must only run on the test goroutine.
+	errs := make([]error, callers)
+
+	var wg sync.WaitGroup
+	for i := range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, edPub, err := store.LoadOrGenerateEd25519Key(cc, round)
+			if err != nil {
+				errs[i] = err
+
+				return
+			}
+			_, secpPub, err := store.LoadOrGenerateSecp256k1Key(cc, round)
+			if err != nil {
+				errs[i] = err
+
+				return
+			}
+			edPubs[i] = edPub
+			secpPubs[i] = secpPub
+		}()
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		require.NoError(t, err, "caller %d", i)
+	}
+
+	// All callers agree with each other and with the sealed files on disk.
+	_, edPubReload, err := store.LoadOrGenerateEd25519Key(cc, round)
+	require.NoError(t, err)
+	_, secpPubReload, err := store.LoadOrGenerateSecp256k1Key(cc, round)
+	require.NoError(t, err)
+	for i := range callers {
+		require.True(t, edPubs[i].Equal(edPubReload), "caller %d observed a different Ed25519 key", i)
+		require.True(t, secpPubs[i].Equal(secpPubReload), "caller %d observed a different Secp256k1 key", i)
+	}
 }

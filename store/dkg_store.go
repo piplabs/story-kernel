@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 
 	"github.com/piplabs/story-kernel/config"
 	"github.com/piplabs/story-kernel/enclave"
@@ -50,6 +51,13 @@ type DKGStore struct {
 
 	keyDir   string
 	stateDir string
+
+	// keyMu serializes LoadOrGenerate* key calls so two concurrent requests for the same
+	// round cannot both miss the file-exists check and generate different keys, where the
+	// loser's sealed file would silently replace the key the winner already returned.
+	// Store-wide by design: key generation happens once per round at registration, so
+	// cross-round contention is negligible and per-round granularity is not worth it.
+	keyMu sync.Mutex
 }
 
 // NewDKGStore creates a DKGStore that uses the real SGX enclave sealer.
