@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -32,7 +33,7 @@ func TestWaitForFinalizationRegistrations_WaitsForStage(t *testing.T) {
 
 	s := &DKGServer{QueryClient: stub}
 
-	regs, err := s.waitForFinalizationRegistrations("cc", 42)
+	regs, err := s.waitForFinalizationRegistrations(t.Context(), "cc", 42)
 	require.NoError(t, err)
 	require.Equal(t, filteredRegs(), regs)
 	require.Equal(t, int32(2), stub.netCalls.Load(), "polls stage until finalization (1 lag + 1 caught up)")
@@ -49,7 +50,7 @@ func TestWaitForFinalizationRegistrations_Immediate(t *testing.T) {
 
 	s := &DKGServer{QueryClient: stub}
 
-	regs, err := s.waitForFinalizationRegistrations("cc", 42)
+	regs, err := s.waitForFinalizationRegistrations(t.Context(), "cc", 42)
 	require.NoError(t, err)
 	require.Equal(t, filteredRegs(), regs)
 	require.Equal(t, int32(1), stub.netCalls.Load())
@@ -66,12 +67,31 @@ func TestWaitForFinalizationRegistrations_RetryExhausted(t *testing.T) {
 
 	s := &DKGServer{QueryClient: stub}
 
-	regs, err := s.waitForFinalizationRegistrations("cc", 42)
+	regs, err := s.waitForFinalizationRegistrations(t.Context(), "cc", 42)
 	require.Error(t, err)
 	require.Nil(t, regs)
 	require.True(t, errors.Is(err, ErrLightClientLag), "exhaustion must preserve ErrLightClientLag")
 	require.Equal(t, int32(finalizeStageRetryAttempts), stub.netCalls.Load())
 	require.Equal(t, int32(0), stub.regCalls.Load(), "must never read the participant set while lagging")
+}
+
+// TestWaitForFinalizationRegistrations_NotFoundThenStage verifies a not-found read (light
+// client has not observed the round at all) is retried like an earlier stage instead of
+// failing the call.
+func TestWaitForFinalizationRegistrations_NotFoundThenStage(t *testing.T) {
+	stub := &stubQueryClient{
+		netErrs:       []error{notFoundErr()}, // call 1: round not visible yet
+		networks:      []*pb.DKGNetwork{{Round: 42, Stage: pb.DKGStage_DKG_STAGE_FINALIZATION}},
+		registrations: [][]*pb.DKGRegistration{filteredRegs()},
+	}
+
+	s := &DKGServer{QueryClient: stub}
+
+	regs, err := s.waitForFinalizationRegistrations(t.Context(), "cc", 42)
+	require.NoError(t, err)
+	require.Equal(t, filteredRegs(), regs)
+	require.Equal(t, int32(2), stub.netCalls.Load(), "polls through the not-found read (1 lag + 1 caught up)")
+	require.Equal(t, int32(1), stub.regCalls.Load())
 }
 
 // TestWaitForFinalizationRegistrations_NetworkError verifies a network query error is returned
@@ -82,8 +102,27 @@ func TestWaitForFinalizationRegistrations_NetworkError(t *testing.T) {
 
 	s := &DKGServer{QueryClient: stub}
 
-	regs, err := s.waitForFinalizationRegistrations("cc", 42)
+	regs, err := s.waitForFinalizationRegistrations(t.Context(), "cc", 42)
 	require.ErrorIs(t, err, wantErr)
 	require.Nil(t, regs)
 	require.Equal(t, int32(1), stub.netCalls.Load(), "network error must not be retried")
+}
+
+// TestWaitForFinalizationRegistrations_ContextCanceled verifies a caller going away
+// mid-wait stops the retry loop promptly instead of burning the remaining budget.
+func TestWaitForFinalizationRegistrations_ContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	stub := &stubQueryClient{
+		networks: []*pb.DKGNetwork{{Round: 42, Stage: pb.DKGStage_DKG_STAGE_DEALING}},
+	}
+
+	s := &DKGServer{QueryClient: stub}
+
+	regs, err := s.waitForFinalizationRegistrations(ctx, "cc", 42)
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, errors.Is(err, ErrLightClientLag))
+	require.Nil(t, regs)
+	require.Equal(t, int32(1), stub.netCalls.Load(), "cancellation must stop retries promptly")
 }

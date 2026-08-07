@@ -3,19 +3,36 @@ package service
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
+	"time"
 
 	ecrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/piplabs/story-kernel/enclave"
+	"github.com/piplabs/story-kernel/story"
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-func (s *DKGServer) GenerateAndSealKey(_ context.Context, req *pb.GenerateAndSealKeyRequest) (*pb.GenerateAndSealKeyResponse, error) {
+const (
+	// registrationNetworkRetryAttempts/Delay bound how long GenerateAndSealKey waits for
+	// the light client to observe the round's DKGNetwork at a round boundary. The verified
+	// head has been observed to trail the chain tip by ~40s when a round starts, so the
+	// budget (30 x 3s = 90s) outlasts that with margin.
+	registrationNetworkRetryAttempts = 30
+	registrationNetworkRetryDelay    = 3 * time.Second
+
+	// registrationLagNormalAttempts is how many retry attempts fall within the ~40s lag
+	// documented above. Within it a not-found read is expected steady-state behavior and
+	// logs at Debug; beyond it the wait is abnormal and escalates to Warn.
+	registrationLagNormalAttempts = 15
+)
+
+func (s *DKGServer) GenerateAndSealKey(ctx context.Context, req *pb.GenerateAndSealKeyRequest) (*pb.GenerateAndSealKeyResponse, error) {
 	codeCommitmentHex := hex.EncodeToString(req.GetCodeCommitment())
 
 	// Validate the request
@@ -61,19 +78,44 @@ func (s *DKGServer) GenerateAndSealKey(_ context.Context, req *pb.GenerateAndSea
 
 	// Only fetch the DKG network (not registrations) since no registrations
 	// exist yet at key generation time.
-	network, err := s.QueryClient.GetDKGNetwork(context.Background(), codeCommitmentHex, req.Round)
+	network, err := s.waitForDKGNetworkCreation(ctx, codeCommitmentHex, req.Round,
+		registrationNetworkRetryAttempts, registrationNetworkRetryDelay)
 	if err != nil {
+		// A canceled request is the caller going away, not a server failure.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			log.WithFields(log.Fields{
+				"round":           req.Round,
+				"code_commitment": codeCommitmentHex,
+			}).Warnf("GenerateAndSealKey aborted while waiting for DKG network: %v", err)
+
+			return nil, status.FromContextError(err).Err()
+		}
+
 		log.WithFields(log.Fields{
 			"round":           req.Round,
 			"code_commitment": codeCommitmentHex,
 		}).Errorf("failed to get DKG network: %v", err)
+
+		if errors.Is(err, ErrLightClientLag) {
+			return nil, status.Errorf(codes.Unavailable, "DKG network not yet visible to the light client")
+		}
 
 		return nil, status.Errorf(codes.Internal, "failed to get DKG network")
 	}
 
 	// Verify the DKG start block is on the canonical chain.
 	// This ensures the DKG round was legitimately initiated on-chain before generating keys.
-	if err := s.verifyDKGStartBlock(context.Background(), network); err != nil {
+	if err := s.verifyDKGStartBlock(ctx, network); err != nil {
+		// A canceled request is the caller going away, not a verification failure.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			log.WithFields(log.Fields{
+				"round":           req.Round,
+				"code_commitment": codeCommitmentHex,
+			}).Warnf("GenerateAndSealKey aborted during start block verification: %v", err)
+
+			return nil, status.FromContextError(err).Err()
+		}
+
 		log.WithFields(log.Fields{
 			"round":              req.Round,
 			"code_commitment":    codeCommitmentHex,
@@ -125,6 +167,52 @@ func (s *DKGServer) GenerateAndSealKey(_ context.Context, req *pb.GenerateAndSea
 		StartBlockHeight: network.StartBlockHeight,
 		StartBlockHash:   network.StartBlockHash,
 	}, nil
+}
+
+// waitForDKGNetworkCreation blocks until the round's on-chain DKGNetwork record becomes
+// visible at the light client's verified height, then returns it. The consensus client only
+// requests key generation for a round it observed on-chain, so a not-found read here is
+// presumed to be light-client lag rather than a nonexistent round; any other error fails
+// fast. Returns ErrLightClientLag once the retry budget is exhausted, or ctx.Err() if the
+// caller goes away mid-wait.
+func (s *DKGServer) waitForDKGNetworkCreation(
+	ctx context.Context,
+	codeCommitmentHex string,
+	round uint32,
+	attempts int,
+	delay time.Duration,
+) (*pb.DKGNetwork, error) {
+	for attempt := range attempts {
+		network, err := s.QueryClient.GetDKGNetwork(ctx, codeCommitmentHex, round)
+		if err == nil {
+			return network, nil
+		}
+
+		if !errors.Is(err, story.ErrDKGNetworkNotFound) {
+			return nil, err
+		}
+
+		if attempt+1 == attempts {
+			break
+		}
+
+		fields := log.Fields{"round": round, "attempt": attempt + 1}
+		msg := "GenerateAndSealKey: DKG network not yet visible to light client, retrying"
+		if attempt+1 > registrationLagNormalAttempts {
+			log.WithFields(fields).Warn(msg)
+		} else {
+			log.WithFields(fields).Debug(msg)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+
+	return nil, fmt.Errorf("%w: round %d DKG network not visible after %d attempts",
+		ErrLightClientLag, round, attempts)
 }
 
 func validateGenerateAndSealKeyRequest(req *pb.GenerateAndSealKeyRequest) error {

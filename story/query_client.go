@@ -39,8 +39,16 @@ const (
 	refreshIntervalTime = 3 * time.Second
 )
 
+// ErrDKGNetworkNotFound signals the round's DKG network record is absent at the light
+// client's verified height. At a round boundary this usually means the light client has
+// not yet verified up to the round's start block, not that the round does not exist.
+var ErrDKGNetworkNotFound = errors.New("DKG network not found")
+
 // This can be implemented by either HTTP client or verified light client.
 type QueryClient interface {
+	// GetDKGNetwork returns the round's DKG network. Implementations must wrap
+	// ErrDKGNetworkNotFound when the record is absent at the queried height so
+	// callers can distinguish light-client lag from other failures.
 	GetDKGNetwork(ctx context.Context, codeCommitmentHex string, round uint32) (*pb.DKGNetwork, error)
 	GetAllParticipantDKGRegistrations(ctx context.Context, codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error)
 	GetAllRegisteredDKGRegistrations(ctx context.Context, codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error)
@@ -237,7 +245,7 @@ func (q *VerifiedQueryClient) GetDKGNetwork(ctx context.Context, codeCommitmentH
 	}
 
 	if len(bz) == 0 {
-		return nil, fmt.Errorf("DKG network not found for code_commitment %s, round %d", codeCommitmentHex, round)
+		return nil, fmt.Errorf("%w for code_commitment %s, round %d", ErrDKGNetworkNotFound, codeCommitmentHex, round)
 	}
 
 	// Decode DKGNetwork from protobuf

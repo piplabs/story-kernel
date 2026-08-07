@@ -24,10 +24,15 @@ type stubQueryClient struct {
 	// (ALL statuses). If nil, that method falls back to the VERIFIED-only set so
 	// existing tests keep both sets identical.
 	allRegistrations []*pb.DKGRegistration
-	netCalls         atomic.Int32
-	regCalls         atomic.Int32
-	netErr           error
-	regErr           error
+	// netErrs, when set, scripts a per-call error for GetDKGNetwork: call i returns
+	// netErrs[i] (nil = success). Calls beyond the slice succeed. netErr takes precedence.
+	// Error calls advance the same call counter that indexes networks, so a success after
+	// k scripted errors reads networks[k] (clamped to the last element).
+	netErrs  []error
+	netCalls atomic.Int32
+	regCalls atomic.Int32
+	netErr   error
+	regErr   error
 }
 
 var _ story.QueryClient = (*stubQueryClient)(nil)
@@ -36,6 +41,9 @@ func (s *stubQueryClient) GetDKGNetwork(_ context.Context, _ string, _ uint32) (
 	i := int(s.netCalls.Add(1)) - 1
 	if s.netErr != nil {
 		return nil, s.netErr
+	}
+	if i < len(s.netErrs) && s.netErrs[i] != nil {
+		return nil, s.netErrs[i]
 	}
 	if i >= len(s.networks) {
 		i = len(s.networks) - 1
@@ -494,4 +502,32 @@ func TestFetchRoundContext_PreservesInvalidatedSlot(t *testing.T) {
 	}
 	_, err = shrunkSrv.GetOrLoadRoundContext("cc", 5)
 	require.Error(t, err, "shrinking to the VERIFIED-only set must fail the count check")
+}
+
+// A not-found network read (light client has not observed the round yet) is classified as
+// ErrLightClientLag so GetOrLoadRoundContext retries it instead of failing the caller.
+func TestFetchRoundContext_NotFoundClassifiedAsLag(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubQueryClient{netErr: notFoundErr()}
+	s := &DKGServer{QueryClient: stub}
+
+	rc, err := s.fetchRoundContext("cc", 42)
+	require.Nil(t, rc)
+	require.ErrorIs(t, err, ErrLightClientLag)
+	require.Equal(t, int32(1), stub.netCalls.Load())
+}
+
+// A non-not-found network error must stay non-lag so callers fail fast.
+func TestFetchRoundContext_OtherErrorStaysNonLag(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("rpc down")
+	stub := &stubQueryClient{netErr: wantErr}
+	s := &DKGServer{QueryClient: stub}
+
+	rc, err := s.fetchRoundContext("cc", 42)
+	require.Nil(t, rc)
+	require.ErrorIs(t, err, wantErr)
+	require.False(t, errors.Is(err, ErrLightClientLag))
 }

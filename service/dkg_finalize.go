@@ -14,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/piplabs/story-kernel/enclave"
+	"github.com/piplabs/story-kernel/story"
 	pb "github.com/piplabs/story-kernel/types/pb/v0"
 
 	dkg "go.dedis.ch/kyber/v4/share/dkg/pedersen"
@@ -29,7 +30,7 @@ const (
 	finalizeStageRetryDelay    = 2 * time.Second
 )
 
-func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (*pb.FinalizeDKGResponse, error) {
+func (s *DKGServer) FinalizeDKG(ctx context.Context, req *pb.FinalizeDKGRequest) (*pb.FinalizeDKGResponse, error) {
 	codeCommitmentHex := hex.EncodeToString(req.GetCodeCommitment())
 
 	// Validate request
@@ -87,8 +88,17 @@ func (s *DKGServer) FinalizeDKG(_ context.Context, req *pb.FinalizeDKGRequest) (
 	// Snapshotting the share only after this wait also lets more of the response feed drain,
 	// so DistKeyShare() interpolates over a fuller QUAL; that same share is sealed and later
 	// used for dealing (loadFromRoundShare), keeping deals and on-chain coeffs consistent.
-	registrations, err := s.waitForFinalizationRegistrations(codeCommitmentHex, req.GetRound())
+	registrations, err := s.waitForFinalizationRegistrations(ctx, codeCommitmentHex, req.GetRound())
 	if err != nil {
+		// A canceled request is the caller going away, not a server failure.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			log.WithFields(log.Fields{
+				"round": req.GetRound(),
+			}).Warnf("FinalizeDKG aborted while waiting for the finalization stage: %v", err)
+
+			return nil, status.FromContextError(err).Err()
+		}
+
 		log.Errorf("failed to get finalization DKG registrations: %v", err)
 
 		return nil, status.Errorf(codes.Internal, "failed to get finalization DKG registrations")
@@ -228,26 +238,38 @@ func validateFinalizeDKGRequest(req *pb.FinalizeDKGRequest) error {
 // height. Because missing-dealer invalidation happens in the same block that advances the
 // stage to finalization, waiting for that stage guarantees the returned set excludes any
 // invalidated dealer, so the kernel's participants root matches the chain's. It retries
-// while the light client still reports an earlier stage, returning ErrLightClientLag once
-// the retry budget is exhausted.
-func (s *DKGServer) waitForFinalizationRegistrations(codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error) {
+// while the light client still reports an earlier stage or has not observed the round at
+// all, returning ErrLightClientLag once the retry budget is exhausted, or ctx.Err() if the
+// caller goes away mid-wait.
+func (s *DKGServer) waitForFinalizationRegistrations(ctx context.Context, codeCommitmentHex string, round uint32) ([]*pb.DKGRegistration, error) {
 	for attempt := range finalizeStageRetryAttempts {
-		network, err := s.QueryClient.GetDKGNetwork(context.Background(), codeCommitmentHex, round)
-		if err != nil {
+		network, err := s.QueryClient.GetDKGNetwork(ctx, codeCommitmentHex, round)
+		if err != nil && !errors.Is(err, story.ErrDKGNetworkNotFound) {
 			return nil, err
 		}
 
-		if network.GetStage() >= pb.DKGStage_DKG_STAGE_FINALIZATION {
-			return s.QueryClient.GetAllParticipantDKGRegistrations(context.Background(), codeCommitmentHex, round)
+		if err == nil && network.GetStage() >= pb.DKGStage_DKG_STAGE_FINALIZATION {
+			return s.QueryClient.GetAllParticipantDKGRegistrations(ctx, codeCommitmentHex, round)
+		}
+
+		// A not-found read is the same lag shape as an earlier stage: the light client
+		// has not verified up to the round's start block yet, so keep retrying.
+		stage := "not visible"
+		if err == nil {
+			stage = network.GetStage().String()
 		}
 
 		log.WithFields(log.Fields{
 			"round":   round,
-			"stage":   network.GetStage().String(),
+			"stage":   stage,
 			"attempt": attempt + 1,
 		}).Warn("FinalizeDKG: light client has not observed the finalization stage yet, retrying")
 
-		time.Sleep(finalizeStageRetryDelay)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(finalizeStageRetryDelay):
+		}
 	}
 
 	return nil, fmt.Errorf("%w: round %d did not reach finalization stage after %d retries",
