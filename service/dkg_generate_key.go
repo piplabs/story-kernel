@@ -53,29 +53,6 @@ func (s *DKGServer) GenerateAndSealKey(ctx context.Context, req *pb.GenerateAndS
 		return nil, status.Errorf(codes.InvalidArgument, "failed to validate code commitment")
 	}
 
-	_, edPub, err := s.DKGStore.LoadOrGenerateEd25519Key(codeCommitmentHex, req.GetRound())
-	if err != nil {
-		log.Errorf("failed to load or generate Ed25519 key: %v", err)
-
-		return nil, status.Errorf(codes.Internal, "failed to load or generate Ed25519 key")
-	}
-
-	edPubBz, err := edPub.MarshalBinary()
-	if err != nil {
-		log.Errorf("failed to marshal the Ed25519 public key: %v", err)
-
-		return nil, status.Errorf(codes.Internal, "failed to marshal the Ed25519 public key")
-	}
-
-	_, secpPub, err := s.DKGStore.LoadOrGenerateSecp256k1Key(codeCommitmentHex, req.GetRound())
-	if err != nil {
-		log.Errorf("failed to load or generate Secp256k1 key: %v", err)
-
-		return nil, status.Errorf(codes.Internal, "failed to load or generate Secp256k1 key")
-	}
-
-	log.Info("Key pairs are successfully generated and sealed or loaded from the existing key files")
-
 	// Only fetch the DKG network (not registrations) since no registrations
 	// exist yet at key generation time.
 	network, err := s.waitForDKGNetworkCreation(ctx, codeCommitmentHex, req.Round,
@@ -128,6 +105,31 @@ func (s *DKGServer) GenerateAndSealKey(ctx context.Context, req *pb.GenerateAndS
 			"start block verification failed at height %d: %v",
 			network.StartBlockHeight, err)
 	}
+
+	// Generate (or load) the key pairs only after the round is proven to exist on the
+	// canonical chain, so requests for bogus rounds cannot mint sealed key files.
+	_, edPub, err := s.DKGStore.LoadOrGenerateEd25519Key(codeCommitmentHex, req.GetRound())
+	if err != nil {
+		log.Errorf("failed to load or generate Ed25519 key: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to load or generate Ed25519 key")
+	}
+
+	edPubBz, err := edPub.MarshalBinary()
+	if err != nil {
+		log.Errorf("failed to marshal the Ed25519 public key: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to marshal the Ed25519 public key")
+	}
+
+	_, secpPub, err := s.DKGStore.LoadOrGenerateSecp256k1Key(codeCommitmentHex, req.GetRound())
+	if err != nil {
+		log.Errorf("failed to load or generate Secp256k1 key: %v", err)
+
+		return nil, status.Errorf(codes.Internal, "failed to load or generate Secp256k1 key")
+	}
+
+	log.Info("Key pairs are successfully generated and sealed or loaded from the existing key files")
 
 	reportData, err := calculateReportData(
 		req.Address,
