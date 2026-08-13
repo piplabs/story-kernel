@@ -16,6 +16,10 @@ import (
 	"go.dedis.ch/kyber/v4"
 )
 
+// Both backends produce a 32-byte (64 hex char) code commitment that fits
+// directly in a Linux filename, so we use the hex string verbatim as the
+// per-round-per-commitment subdirectory name.
+
 func (s *DKGStore) ed25519Path(codeCommitmentHex string, round uint32) string {
 	return filepath.Join(s.keyDir, strconv.FormatUint(uint64(round), 10), codeCommitmentHex, KeyEd25519File)
 }

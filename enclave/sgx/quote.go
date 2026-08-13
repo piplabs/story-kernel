@@ -1,4 +1,4 @@
-package enclave
+package sgx
 
 import (
 	"bytes"
@@ -8,21 +8,22 @@ import (
 	"sync"
 )
 
-// Gramine attestation pseudo-filesystem paths
+// Gramine attestation pseudo-filesystem paths.
 // See: https://gramine.readthedocs.io/en/latest/attestation.html
 const (
 	userReportDataPath = "/dev/attestation/user_report_data"
 	quotePath          = "/dev/attestation/quote"
 )
 
-// Cached self enclave info to avoid repeated quote generation.
+// Cached self enclave info to avoid repeated quote generation. EnclaveInfo
+// (MRENCLAVE + ISVPRODID) is defined in types.go.
 var (
 	selfEnclaveOnce sync.Once
 	selfEnclaveInfo *EnclaveInfo
 	errSelfEnclave  error
 )
 
-// Report Body: 384 bytes (starts at offset 48).
+// SGX Quote Report Body: 384 bytes (starts at offset 48).
 const (
 	quoteHeaderSize  = 48
 	reportBodyOffset = quoteHeaderSize
@@ -45,28 +46,23 @@ const (
 	minQuoteSize = reportDataOffset + reportDataSize // 432
 )
 
-type EnclaveInfo struct {
-	ProductID []byte
-	UniqueID  []byte
-}
-
-// GetRemoteQuote generates an SGX quote with the given user data using Gramine's
-// /dev/attestation interface. userData must be <= 64 bytes.
-func GetRemoteQuote(userData []byte) ([]byte, error) {
+// GetRemoteQuote generates an SGX quote with the given user data using
+// Gramine's /dev/attestation interface. userData must be <= 64 bytes.
+func (Backend) GetRemoteQuote(userData []byte) ([]byte, error) {
 	if len(userData) > reportDataSize {
 		return nil, fmt.Errorf("user data exceeds %d bytes", reportDataSize)
 	}
 
-	// Pad user data to 64 bytes
+	// Pad user data to 64 bytes.
 	padded := make([]byte, reportDataSize)
 	copy(padded, userData)
 
-	// Write user report data to Gramine pseudo-file
+	// Write user report data to Gramine pseudo-file.
 	if err := os.WriteFile(userReportDataPath, padded, 0); err != nil {
 		return nil, fmt.Errorf("failed to write user_report_data: %w", err)
 	}
 
-	// Read the SGX quote from Gramine pseudo-file
+	// Read the SGX quote from Gramine pseudo-file.
 	quote, err := os.ReadFile(quotePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read quote: %w", err)
@@ -75,7 +71,8 @@ func GetRemoteQuote(userData []byte) ([]byte, error) {
 	return quote, nil
 }
 
-// parseQuoteFields extracts code commitment, ProductID, and ReportData from an SGX quote.
+// parseQuoteFields extracts code commitment, ProductID, and ReportData from
+// an SGX quote.
 func parseQuoteFields(quote []byte) (codeCommitment, productID, reportData []byte, err error) {
 	if len(quote) < minQuoteSize {
 		return nil, nil, nil, fmt.Errorf("quote too short: %d < %d", len(quote), minQuoteSize)
@@ -93,10 +90,12 @@ func parseQuoteFields(quote []byte) (codeCommitment, productID, reportData []byt
 	return codeCommitment, productID, reportData, nil
 }
 
-func GetSelfEnclaveInfo() (*EnclaveInfo, error) {
+// getSelfEnclaveInfo reads the running enclave's MRENCLAVE and ISVPRODID by
+// generating a self-quote on first call and caching the result.
+func getSelfEnclaveInfo() (*EnclaveInfo, error) {
 	selfEnclaveOnce.Do(func() {
-		// Generate a quote with dummy data to get our own enclave info
-		quote, err := GetRemoteQuote([]byte{0})
+		// Generate a quote with dummy data to get our own enclave info.
+		quote, err := Backend{}.GetRemoteQuote([]byte{0})
 		if err != nil {
 			errSelfEnclave = fmt.Errorf("failed to get self quote: %w", err)
 
@@ -123,23 +122,29 @@ func GetSelfEnclaveInfo() (*EnclaveInfo, error) {
 	return selfEnclaveInfo, nil
 }
 
-func GetSelfCodeCommitment() ([]byte, error) {
-	selfEnclave, err := GetSelfEnclaveInfo()
+// GetSelfCodeCommitment returns the running enclave's MRENCLAVE. The returned
+// slice is a defensive copy of the cached UniqueID; callers may freely mutate
+// it without corrupting the cache.
+func (Backend) GetSelfCodeCommitment() ([]byte, error) {
+	info, err := getSelfEnclaveInfo()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get self enclave info: %w", err)
 	}
 
-	return selfEnclave.UniqueID, nil
+	return bytes.Clone(info.UniqueID), nil
 }
 
-func ValidateCodeCommitment(codeCommitment []byte) error {
-	selfCodeCommitment, err := GetSelfCodeCommitment()
+// ValidateCodeCommitment compares an external 32-byte code commitment against
+// the running enclave's MRENCLAVE.
+func (Backend) ValidateCodeCommitment(codeCommitment []byte) error {
+	selfCodeCommitment, err := Backend{}.GetSelfCodeCommitment()
 	if err != nil {
 		return fmt.Errorf("failed to get code commitment of enclave: %w", err)
 	}
 
 	if !bytes.Equal(codeCommitment, selfCodeCommitment) {
-		return fmt.Errorf("code commitment mismatch, expected %s, but got %s", hex.EncodeToString(selfCodeCommitment), hex.EncodeToString(codeCommitment))
+		return fmt.Errorf("code commitment mismatch, expected %s, but got %s",
+			hex.EncodeToString(selfCodeCommitment), hex.EncodeToString(codeCommitment))
 	}
 
 	return nil
